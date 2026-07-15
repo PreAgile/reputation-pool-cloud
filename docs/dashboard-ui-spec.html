@@ -83,11 +83,11 @@
 </style>
 
 <div class="wrap">
-  <div class="eyebrow">CLOUD #12 · 대시보드 UI 스펙 · V1-DASHBOARD</div>
-  <h1>대시보드는 어디까지, 어떻게 나와야 하나</h1>
+  <div class="eyebrow">CLOUD #12 · #16 · 웹 표면 전체 스펙 · V1</div>
+  <h1>웹에서 보이는 전부 — 대시보드부터<br>도메인 위의 퍼블릭 페이지까지</h1>
   <p class="subtitle">
-    실제 데이터 모델(<code>ReputationCell</code>·감사 이벤트·미터링)에서 <strong>보여줄 수 있는 것</strong>으로부터 역산한
-    화면 5 + 1개의 스펙, 디자인 참조 전략, 그리고 지금 발견한 설계 갭 하나(평판 곡선).
+    두 개의 표면을 다룬다: <strong>로그인 후 대시보드</strong>(§1–§4, 실제 데이터 모델에서 역산한 화면 5+1)와
+    <strong>로그인 전 퍼블릭 표면</strong>(§5–§7, 도메인·랜딩·프라이싱·docs — 유명 SaaS 패턴 기준으로 어디까지 보여줄지).
   </p>
 
   <!-- ============================================ -->
@@ -251,7 +251,117 @@
     </div>
   </section>
 
+  <!-- ============================================ -->
+  <section>
+    <h2><span class="num">§5</span>퍼블릭 표면 — 도메인 위에 무엇이 뜨나</h2>
+    <p class="lede">고객이 로그인 전에 만나는 전부: 도메인 → 사이트맵 → 서브도메인 구조 (#15 인프라 · #16 온보딩과 연결)</p>
+
+    <h3>도메인·서브도메인 아키텍처 (dev-tool SaaS 표준 구조)</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>서브도메인</th><th>내용</th><th>구현</th></tr></thead>
+        <tbody>
+          <tr><td><code>www.</code> (루트)</td><td>랜딩 + 프라이싱 + 법무 페이지</td><td>정적(Next.js export) — 빠르고 공격 표면 최소</td></tr>
+          <tr><td><code>app.</code></td><td>§2의 대시보드 (로그인 필요)</td><td>Next.js 앱, #12</td></tr>
+          <tr><td><code>api.</code></td><td>gRPC(데이터 플레인) + REST(컨트롤 플레인)</td><td>Spring Boot, #3·#11. TLS 종단 뒤</td></tr>
+          <tr><td><code>docs.</code></td><td>quickstart·API 레퍼런스</td><td>정적 문서 사이트, #16</td></tr>
+          <tr><td><code>status.</code></td><td>상태 페이지(최소형)</td><td>업타임 뱃지+사고 로그 수준으로 시작, #16</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="fine">도메인 후보: <code>reputationpool.io</code> / <code>reputationpool.dev</code> 계열 — OSS 이름과 일치가 신뢰 자산(구매는 직접, 이후 DNS→private 서버, Caddy로 TLS 자동화 = #15). 전부 한 도메인의 서브도메인로 묶어 인증서·쿠키 관리 단순화.</p>
+
+    <div class="callout accent">
+      <strong>이 제품 고유의 마케팅 자산 = 오픈소스 엔진.</strong> Supabase·Grafana가 증명한 open-core 판매 공식:
+      "엔진은 공개돼 있고(GitHub 링크), Lincheck으로 선형성이 <em>증명</em>돼 있으며, mutation testing으로 테스트의 이빨까지 검증했다" —
+      아직 고객 로고가 없는 신생 SaaS에서 <strong>소셜 프루프를 대신하는 신뢰 신호</strong>가 정확히 이것. 랜딩의 히어로가 이걸 팔아야 한다.
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <h2><span class="num">§6</span>랜딩 + 프라이싱 — 유명 SaaS 패턴으로 어디까지</h2>
+    <p class="lede">참조: Resend·Supabase(코드-퍼스트 히어로), Stripe(프라이싱 명료함), Tailscale(인프라 제품의 "how it works")</p>
+
+    <h3>랜딩 (1페이지) — 위에서 아래로</h3>
+    <div class="wire">
+      <div class="chrome"><span class="brand">◆ reputation-pool</span>
+        <span class="nav"><span>기능</span><span>가격</span><span>문서</span><span>GitHub ★</span></span>
+        <span class="spacer"></span><span class="btn ghost">로그인</span> <span class="btn">시작하기</span></div>
+      <div style="text-align:center; padding:1.2rem 0.5rem;">
+        <div style="font-size:1.15rem; font-weight:800; color:var(--ink); line-height:1.35;">프록시·계정 풀의 평판 관리를<br>API 하나로</div>
+        <div style="margin:0.4rem 0 0.7rem;">쿨다운·블록리스트·리스 로직을 직접 짜지 마세요.<br>검증된 오픈소스 엔진의 호스티드 API.</div>
+        <span class="btn">무료로 시작</span> <span class="btn ghost">문서 보기</span>
+      </div>
+      <div class="row2">
+        <div class="panel"><div class="pt">// 코드-퍼스트 히어로 (Resend 패턴)</div>
+          <div style="background:var(--code-bg); color:var(--code-ink); border-radius:6px; padding:0.6rem 0.8rem; font-family:ui-monospace,Menlo,monospace; font-size:0.64rem; line-height:1.7;">
+            var lease = advisor.acquire("site-a");<br>
+            // ... 리소스 사용 ...<br>
+            advisor.report(lease, Outcome.success(latency));<br>
+            <span style="opacity:0.55">// 실패하면? 엔진이 알아서 냉각·격리·회복</span>
+          </div></div>
+        <div class="panel"><div class="pt">신뢰 신호 (고객 로고 대신)</div>
+          <ul class="feed" style="font-size:0.68rem">
+            <li>⭐ 오픈소스 엔진 — GitHub에서 코드 전체 공개</li>
+            <li>🔒 Lincheck으로 동시성 <b>선형성 증명</b></li>
+            <li>🧬 mutation testing 래칫 — 테스트의 이빨까지 검증</li>
+            <li>📜 감사 추적 내장 — 모든 결정이 장부에</li>
+          </ul></div>
+      </div>
+      <div class="tiles" style="margin-top:0.8rem">
+        <div class="tile"><div class="v" style="font-size:0.8rem">자동 냉각·회복</div><div class="l">실패 패턴별 격리, 확률 재검증(PROBATION)</div></div>
+        <div class="tile"><div class="v" style="font-size:0.8rem">컨텍스트 격리</div><div class="l">사이트 A의 실패가 B를 오염 안 시킴</div></div>
+        <div class="tile"><div class="v" style="font-size:0.8rem">실시간 대시보드</div><div class="l">풀 상태·이벤트 스트림 (§2 화면 캡처 삽입)</div></div>
+      </div>
+      <div class="fine" style="text-align:center; margin-top:0.8rem">— how it works 3단계 → 프라이싱 티저 → footer(문서·GitHub·약관·개인정보 = D10) —</div>
+    </div>
+    <p class="screen-cap">v1 랜딩은 <strong>이 1페이지가 전부</strong> — 히어로(문제 한 줄+코드), 신뢰 신호(오픈소스=소셜 프루프 대체), 기능 3열, how-it-works, 프라이싱 티저, footer. 별도 기능 상세 페이지·블로그·고객 사례는 v1 제외.</p>
+
+    <h3>프라이싱 (Stripe식 명료함: 3티어, 숨김 없음)</h3>
+    <div class="wire">
+      <div class="tiles" style="grid-template-columns:repeat(3,1fr)">
+        <div class="tile" style="text-align:center"><div class="l">Free</div><div class="v">₩0</div><div class="d">풀 25개 · 리스 5만/월<br>평가·사이드프로젝트</div></div>
+        <div class="tile" style="text-align:center; outline:2px solid var(--accent)"><div class="l">Pro</div><div class="v">₩49,000<span class="d">/월</span></div><div class="d">풀 500개 · 리스 100만/월<br>대시보드·감사 90일</div></div>
+        <div class="tile" style="text-align:center"><div class="l">Scale</div><div class="v">문의</div><div class="d">무제한 · SLA · 전용 지원</div></div>
+      </div>
+      <div class="fine" style="margin-top:0.5rem">숫자는 전부 <b>가설</b> — 가격 모델 결정(D6a 선행, 결정 대기 표)에 따라 확정. FAQ 4~6개 하단 배치.</div>
+    </div>
+
+    <h3>docs. — quickstart가 왕</h3>
+    <p class="prose" style="font-size:0.92rem">v1 문서는 <strong>①5분 quickstart</strong>(키 발급→Register→Acquire/Report 왕복, 언어별 gRPC 스텁 생성 안내), <strong>②API 레퍼런스</strong>(advisor.proto 6 RPC + REST 컨트롤 플레인 — proto에서 자동 생성 가능), <strong>③개념 가이드 1편</strong>(평판·냉각·컨텍스트 모델 — OSS README 재활용). 그 이상(튜토리얼 시리즈, 레시피)은 v1 제외.</p>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <h2><span class="num">§7</span>퍼블릭 표면 v1 경계 + 이슈 매핑</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>✅ v1 포함</th><th>❌ v1 제외</th></tr></thead>
+        <tbody>
+          <tr><td>도메인 구매 + 서브도메인 5개(www/app/api/docs/status) + TLS</td><td>블로그·changelog 페이지·뉴스레터</td></tr>
+          <tr><td>랜딩 1페이지(코드-퍼스트 히어로 + 오픈소스 신뢰 신호)</td><td>기능별 상세 페이지, 고객 사례(고객이 생기면)</td></tr>
+          <tr><td>프라이싱 3티어 + FAQ</td><td>셀프서브 연간결제·쿠폰 등 정교화</td></tr>
+          <tr><td>docs: quickstart + API 레퍼런스 + 개념 1편</td><td>튜토리얼 시리즈·다국어 문서</td></tr>
+          <tr><td>약관·개인정보(D10) footer 연결, status 최소형</td><td>본격 status 인프라(사고 이력 자동화)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>산출물</th><th>담당 이슈</th></tr></thead>
+        <tbody>
+          <tr><td>도메인·DNS·TLS·서브도메인 배선</td><td class="num-col">#15 (D8 인프라)</td></tr>
+          <tr><td>랜딩·프라이싱·docs·status·가입 흐름</td><td class="num-col">#16 (D9)</td></tr>
+          <tr><td>약관·개인정보 페이지 내용</td><td class="num-col">#16 (D10)</td></tr>
+          <tr><td>로그인/가입 화면(app. 진입)</td><td class="num-col">#11(관리자 인증)·#16(가입 흐름)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="fine">디자인은 §1 전략 그대로(shadcn/ui + oh-my-design 레퍼런스) — 랜딩과 대시보드가 한 브랜드로 읽히게 같은 토큰을 공유한다.</p>
+  </section>
+
   <footer style="margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--line);font-size:0.8rem;color:var(--muted)">
-    reputation-pool-cloud · #12 대시보드 UI 스펙 · 2026-07-15 · 근거: ReputationCell/ResourceState 필드, V1·V2 스키마(score 히스토리 부재 확인), advisor.proto SubscribeEvents, oh-my-design.kr 실사(AI 에이전트용 MIT 디자인 레퍼런스)
+    reputation-pool-cloud · 웹 표면 전체 스펙(#12 대시보드 + #15/#16 퍼블릭) · 2026-07-15 · 근거: ReputationCell/ResourceState 필드, V1·V2 스키마(score 히스토리 부재 확인), advisor.proto SubscribeEvents, oh-my-design.kr 실사, Resend/Supabase/Stripe/Tailscale 랜딩 패턴
   </footer>
 </div>
