@@ -1,0 +1,257 @@
+<title>대시보드 UI 스펙 — 어디까지, 어떻게 (#12)</title>
+<style>
+  :root {
+    --paper: #f6f7f9; --surface: #ffffff; --surface-2: #eceef2;
+    --ink: #1a1e29; --ink-soft: #4a5568; --muted: #7a8598; --line: #d9dde5;
+    --accent: #3b4fb0; --accent-soft: #e4e7f7;
+    --ok: #2e7d5b; --ok-soft: #dceee5; --bad: #b3372e; --bad-soft: #f4e0dd;
+    --warn: #9a6a10; --warn-soft: #f6ecd6; --cool: #2f6f8f; --cool-soft: #ddedf5;
+    --code-bg: #1c2030; --code-ink: #e2e6f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper:#12141c; --surface:#1a1d28; --surface-2:#222634; --ink:#e7eaf2; --ink-soft:#b6bdcc; --muted:#808a9d; --line:#2f3444;
+      --accent:#93a3ef; --accent-soft:#23283c; --ok:#5cae86; --ok-soft:#17301f; --bad:#e0655b; --bad-soft:#3b2320;
+      --warn:#d4ac5a; --warn-soft:#352c17; --cool:#7bb6d4; --cool-soft:#1b2c36; --code-bg:#0e1017; --code-ink:#e2e6f0; }
+  }
+  :root[data-theme="light"] { --paper:#f6f7f9; --surface:#ffffff; --surface-2:#eceef2; --ink:#1a1e29; --ink-soft:#4a5568; --muted:#7a8598; --line:#d9dde5; --accent:#3b4fb0; --accent-soft:#e4e7f7; --ok:#2e7d5b; --ok-soft:#dceee5; --bad:#b3372e; --bad-soft:#f4e0dd; --warn:#9a6a10; --warn-soft:#f6ecd6; --cool:#2f6f8f; --cool-soft:#ddedf5; --code-bg:#1c2030; --code-ink:#e2e6f0; }
+  :root[data-theme="dark"] { --paper:#12141c; --surface:#1a1d28; --surface-2:#222634; --ink:#e7eaf2; --ink-soft:#b6bdcc; --muted:#808a9d; --line:#2f3444; --accent:#93a3ef; --accent-soft:#23283c; --ok:#5cae86; --ok-soft:#17301f; --bad:#e0655b; --bad-soft:#3b2320; --warn:#d4ac5a; --warn-soft:#352c17; --cool:#7bb6d4; --cool-soft:#1b2c36; --code-bg:#0e1017; --code-ink:#e2e6f0; }
+
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",sans-serif; line-height:1.72; font-size:16px; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:62rem; margin:0 auto; padding:3.5rem 1.5rem 5rem; }
+  .prose { max-width:46rem; }
+  .eyebrow { font-family:ui-monospace,Menlo,monospace; font-size:0.72rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent); display:flex; align-items:center; gap:0.75rem; margin-bottom:1rem; }
+  .eyebrow::after { content:""; flex:1; height:1px; background:var(--line); }
+  h1 { font-size:clamp(1.7rem,4vw,2.3rem); line-height:1.3; font-weight:800; letter-spacing:-0.01em; margin:0 0 0.75rem; text-wrap:balance; }
+  .subtitle { color:var(--ink-soft); font-size:1.03rem; margin:0 0 2.5rem; max-width:47rem; }
+  section { margin-bottom:4rem; }
+  h2 { font-size:1.3rem; font-weight:800; margin:0 0 0.4rem; display:flex; align-items:baseline; gap:0.7rem; }
+  h2 .num { font-family:ui-monospace,Menlo,monospace; font-size:0.85rem; font-weight:500; color:var(--accent); }
+  .lede { color:var(--muted); margin:0 0 1.4rem; font-size:0.95rem; }
+  h3 { font-size:1rem; font-weight:700; margin:1.8rem 0 0.5rem; }
+  p { margin:0 0 1rem; }
+  .fine { color:var(--muted); font-size:0.85rem; }
+  code { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:0.86em; background:var(--surface-2); padding:0.1em 0.35em; border-radius:4px; }
+  .callout { background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:1rem 1.3rem; font-size:0.9rem; color:var(--ink-soft); margin:1.4rem 0; }
+  .callout strong { color:var(--ink); }
+  .callout.accent { border-left:3px solid var(--accent); }
+  .callout.warn { border-left:3px solid var(--warn); }
+  .table-scroll { overflow-x:auto; margin:1.2rem 0 0.5rem; border:1px solid var(--line); border-radius:8px; }
+  table { border-collapse:collapse; width:100%; font-size:0.87rem; background:var(--surface); }
+  th,td { padding:0.6rem 0.85rem; text-align:left; vertical-align:top; border-bottom:1px solid var(--line); }
+  thead th { font-family:ui-monospace,Menlo,monospace; font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); background:var(--surface-2); font-weight:600; white-space:nowrap; }
+  tbody tr:last-child td { border-bottom:none; }
+  ul.tight { margin:0 0 1rem; padding-left:1.2rem; } ul.tight li { margin-bottom:0.3rem; font-size:0.92rem; }
+
+  /* ---------- wireframe primitives ---------- */
+  .wire {
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:1rem; margin:1rem 0 2rem; font-size:0.72rem; color:var(--ink-soft);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 6%, transparent);
+  }
+  .wire .chrome { display:flex; align-items:center; gap:0.5rem; padding-bottom:0.7rem; border-bottom:1px solid var(--line); margin-bottom:0.8rem; }
+  .wire .chrome .brand { font-weight:800; color:var(--ink); font-size:0.78rem; }
+  .wire .chrome .nav { display:flex; gap:0.7rem; margin-left:1rem; color:var(--muted); }
+  .wire .chrome .nav .on { color:var(--accent); font-weight:700; border-bottom:2px solid var(--accent); }
+  .wire .chrome .spacer { flex:1; }
+  .wire .chrome .tenant { background:var(--surface-2); border-radius:6px; padding:0.15rem 0.55rem; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:0.6rem; margin-bottom:0.8rem; }
+  .tile { background:var(--surface-2); border-radius:8px; padding:0.6rem 0.7rem; }
+  .tile .v { font-size:1.05rem; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; }
+  .tile .l { color:var(--muted); }
+  .tile .d { font-size:0.66rem; }
+  .tile .up { color:var(--ok); } .tile .down { color:var(--bad); }
+  .wtable { width:100%; border-collapse:collapse; background:transparent; font-size:0.7rem; }
+  .wtable th { text-align:left; color:var(--muted); font-weight:600; padding:0.3rem 0.5rem; border-bottom:1px solid var(--line); background:transparent; font-family:inherit; text-transform:none; letter-spacing:0; }
+  .wtable td { padding:0.35rem 0.5rem; border-bottom:1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+  .pill { display:inline-block; font-size:0.62rem; font-weight:700; padding:0.08em 0.5em; border-radius:99px; }
+  .pill.ok { background:var(--ok-soft); color:var(--ok); }
+  .pill.cool { background:var(--cool-soft); color:var(--cool); }
+  .pill.warn { background:var(--warn-soft); color:var(--warn); }
+  .pill.bad { background:var(--bad-soft); color:var(--bad); }
+  .spark { display:inline-block; vertical-align:middle; }
+  .row2 { display:grid; grid-template-columns: 1.4fr 1fr; gap:0.8rem; }
+  @media (max-width:640px){ .row2{grid-template-columns:1fr;} }
+  .panel { background:var(--surface-2); border-radius:8px; padding:0.6rem 0.7rem; }
+  .panel .pt { font-weight:700; color:var(--ink); margin-bottom:0.4rem; font-size:0.72rem; }
+  .feed { list-style:none; margin:0; padding:0; }
+  .feed li { padding:0.28rem 0; border-bottom:1px dashed color-mix(in srgb,var(--line) 60%, transparent); display:flex; gap:0.5rem; align-items:baseline; }
+  .feed .t { color:var(--muted); font-family:ui-monospace,Menlo,monospace; font-size:0.62rem; white-space:nowrap; }
+  .btn { display:inline-block; background:var(--accent); color:#fff; border-radius:6px; padding:0.2rem 0.6rem; font-weight:700; font-size:0.66rem; }
+  .btn.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  .screen-cap { font-size:0.82rem; color:var(--muted); margin:-1.4rem 0 2rem; }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">CLOUD #12 · 대시보드 UI 스펙 · V1-DASHBOARD</div>
+  <h1>대시보드는 어디까지, 어떻게 나와야 하나</h1>
+  <p class="subtitle">
+    실제 데이터 모델(<code>ReputationCell</code>·감사 이벤트·미터링)에서 <strong>보여줄 수 있는 것</strong>으로부터 역산한
+    화면 5 + 1개의 스펙, 디자인 참조 전략, 그리고 지금 발견한 설계 갭 하나(평판 곡선).
+  </p>
+
+  <!-- ============================================ -->
+  <section>
+    <h2><span class="num">§1</span>디자인 전략 — 무엇을 본따고, 무엇으로 짓나</h2>
+    <p class="lede">"잘 디자인된 B2B"는 참조(패턴) × 컴포넌트 시스템 × 브랜드 레퍼런스의 곱</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>레이어</th><th>선택</th><th>이유</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>패턴 참조</strong><br><span class="fine">(무엇을 본따나)</span></td>
+            <td><strong>Stripe</strong>(정보 구조·설정/키 관리 UX의 정석) + <strong>Linear</strong>(테이블 밀도·키보드) + <strong>Grafana</strong>(모니터링 패널 문법) + <strong>Cloudflare</strong>(인프라 도메인 유사 — 리소스 목록·상태 배지)</td>
+            <td>픽셀 클론이 아니라 <strong>패턴 차용</strong>: 화면 구조·내비게이션·상태 표현 방식. 브랜드 자산(로고·고유 일러스트) 모방은 금지</td>
+          </tr>
+          <tr>
+            <td><strong>컴포넌트 시스템</strong><br><span class="fine">(무엇으로 짓나)</span></td>
+            <td><strong>Next.js + Tailwind + shadcn/ui</strong>, 차트는 <strong>Tremor</strong>(또는 Recharts)</td>
+            <td>shadcn/ui가 현대 B2B 대시보드 룩의 사실상 표준 — 에이전시 없이 "잘 디자인된" 기본기를 확보. Tremor는 KPI 타일·차트가 대시보드 전용으로 나옴</td>
+          </tr>
+          <tr>
+            <td><strong>브랜드 레퍼런스</strong><br><span class="fine">(에이전트에게 어떻게 시키나)</span></td>
+            <td><strong>oh-my-design</strong> 채택 — <code>npx oh-my-design-cli install-skills</code></td>
+            <td>확인 결과 에이전시가 아니라 <strong>AI 코딩 에이전트용 무료(MIT) 디자인 시스템 레퍼런스</strong>(440개 실기업 DESIGN.md). UI 코드를 에이전트가 생성하는 이 워크플로에 정확히 맞음 — #12 착수 시 설치하고 참조 브랜드(Stripe류 B2B 톤) 지정</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout accent">
+      <strong>요약</strong>: 외주·템플릿 구매 없이 갑니다 — shadcn/ui + Tremor가 기본기를, Stripe/Linear/Grafana 패턴이 구조를,
+      oh-my-design DESIGN.md가 에이전트 생성 일관성을 담당. 에이전시급 투자가 정당한 곳은 대시보드가 아니라 <strong>랜딩(D9, #16)</strong> 쪽입니다.
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <h2><span class="num">§2</span>화면 맵 — 5 + 1</h2>
+    <p class="lede">고객(테넌트) 대면 5개 + 관리자(운영자) 1개. 각 와이어프레임은 실제 데이터 필드에서 역산</p>
+
+    <h3>화면 1 · 풀 오버뷰 (홈) — "지금 내 풀이 건강한가"를 5초 안에</h3>
+    <div class="wire">
+      <div class="chrome"><span class="brand">◆ reputation-pool</span>
+        <span class="nav"><span class="on">풀</span><span>이벤트</span><span>API 키</span><span>사용량</span></span>
+        <span class="spacer"></span><span class="tenant">tenant: lemong ▾</span></div>
+      <div class="tiles">
+        <div class="tile"><div class="v">128</div><div class="l">등록 리소스</div></div>
+        <div class="tile"><div class="v">37</div><div class="l">리스 중</div></div>
+        <div class="tile"><div class="v" style="color:var(--cool)">9</div><div class="l">냉각 중</div></div>
+        <div class="tile"><div class="v" style="color:var(--bad)">3</div><div class="l">블록</div></div>
+        <div class="tile"><div class="v">96.2% <span class="d up">▲1.1</span></div><div class="l">승인율 (1h)</div></div>
+      </div>
+      <table class="wtable">
+        <tr><th>리소스</th><th>kind</th><th>상태</th><th>score</th><th>최근 결과 (window)</th><th>냉각 해제</th></tr>
+        <tr><td>kr-proxy-041</td><td>PROXY</td><td><span class="pill ok">HEALTHY</span></td><td>+72.4</td><td><svg class="spark" width="64" height="14"><polyline points="0,10 8,8 16,9 24,5 32,6 40,3 48,4 56,2 64,3" fill="none" stroke="var(--ok)" stroke-width="1.5"/></svg></td><td>—</td></tr>
+        <tr><td>kr-proxy-017</td><td>PROXY</td><td><span class="pill cool">COOLING</span></td><td>−18.0</td><td><svg class="spark" width="64" height="14"><polyline points="0,4 8,5 16,3 24,8 32,10 40,9 48,12 56,11 64,12" fill="none" stroke="var(--bad)" stroke-width="1.5"/></svg></td><td>14:32 (in 8m)</td></tr>
+        <tr><td>acct-scraper-03</td><td>ACCOUNT</td><td><span class="pill warn">PROBATION</span></td><td>+5.2</td><td><svg class="spark" width="64" height="14"><polyline points="0,11 8,12 16,9 24,10 32,7 40,8 48,5 56,6 64,4" fill="none" stroke="var(--warn)" stroke-width="1.5"/></svg></td><td>재검증 중</td></tr>
+        <tr><td>kr-proxy-088</td><td>PROXY</td><td><span class="pill bad">BLOCKED</span></td><td>−100</td><td></td><td>영구</td></tr>
+      </table>
+    </div>
+    <p class="screen-cap">데이터: 스냅샷 읽기 모델(#11). 상태 배지 = <code>ResourceState</code>(HEALTHY/COOLING/PROBATION) + 블록리스트. 스파크라인 = <code>window</code>(최근 outcome 10개)의 성공/실패. 필터(kind·상태·context)와 정렬, 리소스 클릭 → 화면 2.</p>
+
+    <h3>화면 2 · 리소스 상세 — "얘가 왜 이 상태가 됐나"</h3>
+    <div class="wire">
+      <div class="chrome"><span class="brand">◆</span><span style="font-weight:700;color:var(--ink)">kr-proxy-017</span> <span class="pill cool">COOLING</span><span class="spacer"></span><span class="btn ghost">수동 unblock</span></div>
+      <div class="row2">
+        <div class="panel"><div class="pt">평판 곡선 (score, 24h) — §3 설계 갭 참조</div>
+          <svg width="100%" height="60" viewBox="0 0 260 60" preserveAspectRatio="none"><polyline points="0,18 30,15 60,20 90,14 120,22 150,40 180,48 210,44 240,50 260,46" fill="none" stroke="var(--cool)" stroke-width="2"/><line x1="0" y1="30" x2="260" y2="30" stroke="var(--line)" stroke-dasharray="3"/></svg>
+          <div class="fine">14:07 CONNECTION_RESET ×4 → 냉각 진입점 마커</div></div>
+        <div class="panel"><div class="pt">컨텍스트별 셀</div>
+          <table class="wtable"><tr><th>context</th><th>score</th><th>연속실패</th></tr>
+          <tr><td>site-a</td><td>−18.0</td><td>4</td></tr><tr><td>site-b</td><td>+41.2</td><td>0</td></tr><tr><td class="fine">(context 오염 없음이 한눈에)</td><td></td><td></td></tr></table></div>
+      </div>
+      <div class="panel" style="margin-top:0.8rem"><div class="pt">이벤트 타임라인</div>
+        <ul class="feed">
+          <li><span class="t">14:07:31</span><span class="pill cool">COOLED</span> site-a · cause CONNECTION_RESET · until 14:32</li>
+          <li><span class="t">14:03:12</span><span class="pill ok">LEASED</span> site-a · ttl 5m</li>
+          <li><span class="t">13:58:02</span><span class="pill ok">RECOVERED</span> site-a</li>
+        </ul></div>
+    </div>
+    <p class="screen-cap">데이터: 셀 필드 전부(<code>score·consecutiveFailures/Successes·window·cooldownUntil</code>) + 감사 테이블 조회(리소스 필터). 타임라인이 곧 "왜"의 답 — 감사 추적이 UI의 주인공이 되는 화면.</p>
+
+    <h3>화면 3 · 라이브 이벤트 피드</h3>
+    <div class="wire">
+      <div class="chrome"><span class="brand">◆</span><span class="nav"><span>풀</span><span class="on">이벤트</span></span><span class="spacer"></span><span class="pill ok">● live</span></div>
+      <ul class="feed">
+        <li><span class="t">14:12:09</span><span class="pill ok">LEASED</span> kr-proxy-041 · site-b</li>
+        <li><span class="t">14:12:07</span><span class="pill bad">BLOCKLISTED</span> kr-proxy-088 · 영구</li>
+        <li><span class="t">14:11:58</span><span class="pill ok">RELEASED</span> acct-scraper-01 · site-a</li>
+        <li><span class="t">14:11:31</span><span class="pill cool">COOLED</span> kr-proxy-017 · site-a · TIMEOUT</li>
+      </ul>
+      <div class="fine" style="margin-top:0.5rem">필터: 이벤트 타입 · 리소스 · context | 일시정지/재개</div>
+    </div>
+    <p class="screen-cap">데이터: <code>SubscribeEvents</code> gRPC 스트림 → SSE/WebSocket 브리지(#11). 과거分은 감사 테이블 페이지네이션.</p>
+
+    <h3>화면 4 · API 키 관리 (Stripe 패턴 그대로)</h3>
+    <div class="wire">
+      <table class="wtable"><tr><th>이름</th><th>키</th><th>마지막 사용</th><th></th></tr>
+      <tr><td>prod-scraper</td><td><code>rp_live_••••8f2a</code></td><td>2분 전</td><td><span class="btn ghost">회전</span> <span class="btn ghost" style="color:var(--bad);border-color:var(--bad)">폐기</span></td></tr>
+      <tr><td>staging</td><td><code>rp_test_••••11c0</code></td><td>3일 전</td><td><span class="btn ghost">회전</span></td></tr></table>
+      <div style="margin-top:0.6rem"><span class="btn">+ 새 키 발급</span> <span class="fine">발급 직후 1회만 전체 노출</span></div>
+    </div>
+    <p class="screen-cap">데이터: D4 키 관리(#4 확장). 생성 직후 1회 노출·prefix 마스킹·마지막 사용 시각 — 검증된 Stripe UX 관례.</p>
+
+    <h3>화면 5 · 사용량 &amp; 청구</h3>
+    <div class="wire">
+      <div class="tiles">
+        <div class="tile"><div class="v">412,309</div><div class="l">리스 (이번 달)</div></div>
+        <div class="tile"><div class="v">128 / 500</div><div class="l">풀 크기 / 플랜 한도</div></div>
+        <div class="tile"><div class="v">₩49,000</div><div class="l">이번 달 예상</div></div>
+      </div>
+      <div class="panel"><div class="pt">일별 리스 (30d)</div>
+        <svg width="100%" height="44" viewBox="0 0 300 44" preserveAspectRatio="none">
+          <g fill="var(--accent)" opacity="0.75"><rect x="2" y="22" width="7" height="22"/><rect x="12" y="18" width="7" height="26"/><rect x="22" y="25" width="7" height="19"/><rect x="32" y="12" width="7" height="32"/><rect x="42" y="16" width="7" height="28"/><rect x="52" y="20" width="7" height="24"/><rect x="62" y="9" width="7" height="35"/><rect x="72" y="14" width="7" height="30"/><rect x="82" y="19" width="7" height="25"/><rect x="92" y="11" width="7" height="33"/></g></svg>
+        <div class="fine">인보이스 내역 → Stripe customer portal 링크 (자체 결제 화면 안 만듦)</div></div>
+    </div>
+    <p class="screen-cap">데이터: D6a 미터링 롤업(#10). 결제 상세는 Stripe portal에 위임 — v1에서 자체 구현 안 함.</p>
+
+    <h3>화면 6 · 관리자(운영자) — 최소</h3>
+    <p class="prose" style="font-size:0.92rem">테넌트 목록·생성, 테넌트별 사용량 합계, 시스템 헬스(actuator). 나 혼자 쓰는 화면이라 <strong>v1은 테이블 3개 수준의 최소 구현</strong> — 고객 대면 5개 화면에 완성도를 몰아준다.</p>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <h2><span class="num">§3</span>설계 갭 — "평판 곡선"은 지금 어디에도 없다</h2>
+    <p class="lede">이 스펙을 데이터에서 역산하다 발견한 유일한 공급 불가 항목</p>
+    <div class="callout warn">
+      <strong>score 히스토리는 현재 아무 데도 저장되지 않습니다.</strong> 스냅샷(V1)은 <em>현재</em> score만 갱신하고,
+      감사 이벤트(V2)에는 score 컬럼 자체가 없습니다(방금 스키마로 확인). 즉 화면 2의 "평판 곡선(시간에 따른 score)"은
+      지금 데이터로는 <strong>그릴 수 없습니다</strong> — 상태 변화 마커(냉각/회복 시점)까지만 가능.
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>해결 옵션</th><th>내용</th><th>판정</th></tr></thead>
+        <tbody>
+          <tr><td><strong>cloud 쪽 주기 샘플링</strong></td><td>체크포인트 루프에 편승해 테넌트별 score 시계열 테이블에 주기 기록(예: 1분). core·공개 스키마 무변경</td><td><strong>채택</strong> — #10(미터링) 또는 #11(읽기 모델)에 편입, open-core 경계 유지</td></tr>
+          <tr><td>감사 이벤트에 score 추가</td><td>공개 레포 V2 스키마·이벤트 확장</td><td>기각 — 감사는 "무슨 일이"의 장부지 시계열 저장소가 아님, 공개 계약 변경</td></tr>
+          <tr><td>observability 포트(#60) 경유</td><td>메트릭 백엔드(Prometheus류)에 score 게이지 → 대시보드가 그걸 조회</td><td>보완 — 모니터링(#14)엔 이 경로가 맞지만, 고객 화면이 메트릭 스토어에 의존하는 건 결합 과다. v1은 샘플링 테이블</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <section>
+    <h2><span class="num">§4</span>v1 경계 — 포함 / 제외</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>✅ v1 포함</th><th>❌ v1 제외 (이후)</th></tr></thead>
+        <tbody>
+          <tr><td>화면 1~5 완성도 + 화면 6 최소</td><td>테넌트 내 멀티유저/RBAC — v1은 테넌트당 로그인 1개</td></tr>
+          <tr><td>라이트/다크 테마 (shadcn 기본)</td><td>i18n — 한국어 단일로 시작(고객층 확인 후)</td></tr>
+          <tr><td>데스크톱 우선 + 태블릿 대응(responsive)</td><td>모바일 전용 최적화·네이티브 앱</td></tr>
+          <tr><td>실시간(이벤트 피드·오버뷰 타일 갱신)</td><td>알림 설정(이메일/슬랙 웹훅) — 모니터링(#14)과 함께 후속</td></tr>
+          <tr><td>Stripe portal 위임(청구 상세)</td><td>자체 결제/인보이스 화면</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout accent">
+      <strong>완성도의 기준선</strong> (검증 종료 기준과 연결): "대시보드만으로 일상 운영 가능" — 즉 화면 1~4만으로
+      <em>SQL 콘솔을 한 번도 열지 않고</em> 풀 상태 파악·문제 리소스 진단·키 관리가 되어야 v1 완성입니다.
+    </div>
+  </section>
+
+  <footer style="margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--line);font-size:0.8rem;color:var(--muted)">
+    reputation-pool-cloud · #12 대시보드 UI 스펙 · 2026-07-15 · 근거: ReputationCell/ResourceState 필드, V1·V2 스키마(score 히스토리 부재 확인), advisor.proto SubscribeEvents, oh-my-design.kr 실사(AI 에이전트용 MIT 디자인 레퍼런스)
+  </footer>
+</div>
