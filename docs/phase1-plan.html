@@ -1,0 +1,366 @@
+<title>SaaS Phase 1 — 무엇이 남았고 어떻게 시작할까</title>
+<style>
+  :root {
+    --paper: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eceef2;
+    --ink: #1a1e29;
+    --ink-soft: #47506180;
+    --ink-soft2: #4a5568;
+    --muted: #7a8598;
+    --line: #d9dde5;
+    --accent: #3b4fb0;          /* indigo — the product/platform layer */
+    --accent-soft: #e4e7f7;
+    --ok: #2e7d5b;
+    --ok-soft: #dceee5;
+    --bad: #b3372e;
+    --bad-soft: #f4e0dd;
+    --warn: #9a6a10;
+    --warn-soft: #f6ecd6;
+    --code-bg: #1c2030;
+    --code-ink: #e2e6f0;
+    --code-accent: #93a3ef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #12141c; --surface: #1a1d28; --surface-2: #222634;
+      --ink: #e7eaf2; --ink-soft: #b6bdcc; --ink-soft2: #b6bdcc; --muted: #808a9d; --line: #2f3444;
+      --accent: #93a3ef; --accent-soft: #23283c;
+      --ok: #5cae86; --ok-soft: #17301f; --bad: #e0655b; --bad-soft: #3b2320;
+      --warn: #d4ac5a; --warn-soft: #352c17;
+      --code-bg: #0e1017; --code-ink: #e2e6f0; --code-accent: #93a3ef;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #f6f7f9; --surface: #ffffff; --surface-2: #eceef2;
+    --ink: #1a1e29; --ink-soft: #4a5568; --ink-soft2: #4a5568; --muted: #7a8598; --line: #d9dde5;
+    --accent: #3b4fb0; --accent-soft: #e4e7f7;
+    --ok: #2e7d5b; --ok-soft: #dceee5; --bad: #b3372e; --bad-soft: #f4e0dd;
+    --warn: #9a6a10; --warn-soft: #f6ecd6;
+    --code-bg: #1c2030; --code-ink: #e2e6f0; --code-accent: #93a3ef;
+  }
+  :root[data-theme="dark"] {
+    --paper: #12141c; --surface: #1a1d28; --surface-2: #222634;
+    --ink: #e7eaf2; --ink-soft: #b6bdcc; --ink-soft2: #b6bdcc; --muted: #808a9d; --line: #2f3444;
+    --accent: #93a3ef; --accent-soft: #23283c;
+    --ok: #5cae86; --ok-soft: #17301f; --bad: #e0655b; --bad-soft: #3b2320;
+    --warn: #d4ac5a; --warn-soft: #352c17;
+    --code-bg: #0e1017; --code-ink: #e2e6f0; --code-accent: #93a3ef;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    line-height: 1.75; font-size: 16px; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; padding: 3.5rem 1.5rem 5rem; }
+  .prose { max-width: 46rem; }
+
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;
+  }
+  .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  h1 {
+    font-size: clamp(1.7rem, 4vw, 2.4rem); line-height: 1.28; font-weight: 800;
+    letter-spacing: -0.015em; margin: 0 0 0.75rem; text-wrap: balance;
+  }
+  .subtitle { color: var(--ink-soft2); font-size: 1.05rem; margin: 0 0 2.5rem; max-width: 47rem; }
+
+  .verdict {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 4px solid var(--accent); border-radius: 6px;
+    padding: 1.4rem 1.6rem; margin-bottom: 3.5rem;
+  }
+  .verdict .label {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 0.5rem;
+  }
+  .verdict p { margin: 0; font-size: 1.02rem; }
+  .verdict strong { color: var(--accent); }
+
+  section { margin-bottom: 4rem; }
+  h2 {
+    font-size: 1.35rem; font-weight: 800; letter-spacing: -0.01em;
+    margin: 0 0 0.4rem; display: flex; align-items: baseline; gap: 0.7rem; text-wrap: balance;
+  }
+  h2 .num { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85rem; font-weight: 500; color: var(--accent); }
+  .lede { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+  h3 { font-size: 1.02rem; font-weight: 700; margin: 2rem 0 0.6rem; }
+  p { margin: 0 0 1rem; }
+  .fine { color: var(--muted); font-size: 0.85rem; }
+  code {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.86em; background: var(--surface-2); padding: 0.1em 0.35em; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    border-radius: 8px; padding: 1.1rem 1.3rem; overflow-x: auto;
+    font-size: 0.82rem; line-height: 1.7; margin: 1rem 0 1.5rem;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
+  pre .c { color: #808a9d; }
+  pre .k { color: var(--code-accent); }
+  pre .dim { color: #808a9d; }
+
+  /* inventory */
+  .inv { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin: 1.4rem 0; }
+  .inv-card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 1.1rem 1.2rem;
+  }
+  .inv-card.have { border-top: 3px solid var(--ok); }
+  .inv-card.build { border-top: 3px solid var(--accent); }
+  .inv-card .tag {
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.7rem; letter-spacing: 0.08em;
+    text-transform: uppercase; margin-bottom: 0.4rem;
+  }
+  .inv-card.have .tag { color: var(--ok); }
+  .inv-card.build .tag { color: var(--accent); }
+  .inv-card ul { margin: 0; padding-left: 1.1rem; font-size: 0.88rem; color: var(--ink-soft2); }
+  .inv-card li { margin-bottom: 0.25rem; }
+
+  .table-scroll { overflow-x: auto; margin: 1.2rem 0 0.5rem; border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; background: var(--surface); }
+  th, td { padding: 0.65rem 0.9rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  thead th {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); background: var(--surface-2); font-weight: 600; white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.center, th.center { text-align: center; }
+  .mark-ok { color: var(--ok); font-weight: 700; }
+  .mark-bad { color: var(--bad); font-weight: 700; }
+  tr.winner td { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+  tr.winner td:first-child { border-left: 3px solid var(--accent); }
+
+  .decision {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1.2rem 1.4rem; margin-bottom: 1rem;
+  }
+  .decision .q { font-weight: 700; margin-bottom: 0.6rem; display: flex; gap: 0.6rem; align-items: baseline; }
+  .decision .q .tag {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.68rem; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; flex-shrink: 0;
+  }
+  .decision ul { margin: 0; padding-left: 1.2rem; font-size: 0.9rem; color: var(--ink-soft2); }
+  .decision li { margin-bottom: 0.35rem; }
+  .decision li strong { color: var(--ink); }
+  .decision .pick { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px dashed var(--line); font-size: 0.9rem; }
+  .decision .pick strong { color: var(--accent); }
+
+  /* task checklist */
+  .tasks { counter-reset: t; margin: 1.2rem 0 0; padding: 0; list-style: none; }
+  .tasks > li {
+    counter-increment: t; position: relative; padding: 0.7rem 0 0.7rem 2.6rem;
+    border-bottom: 1px solid var(--line); font-size: 0.94rem;
+  }
+  .tasks > li:last-child { border-bottom: none; }
+  .tasks > li::before {
+    content: counter(t); position: absolute; left: 0; top: 0.7rem;
+    width: 1.7rem; height: 1.7rem; border-radius: 6px;
+    background: var(--accent-soft); color: var(--accent);
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.78rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tasks .tt { font-weight: 700; }
+  .tasks .td { color: var(--ink-soft2); font-size: 0.88rem; }
+  .tag-pill {
+    display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 0.1em 0.5em;
+    border-radius: 99px; margin-left: 0.4rem; vertical-align: 0.1em;
+    background: var(--surface-2); color: var(--muted);
+  }
+
+  .callout {
+    background: var(--surface-2); border-radius: 8px; padding: 1rem 1.3rem;
+    font-size: 0.9rem; color: var(--ink-soft2); margin: 1.5rem 0; border: 1px solid var(--line);
+  }
+  .callout strong { color: var(--ink); }
+  .callout.accent { border-left: 3px solid var(--accent); }
+  .callout.warn { border-left: 3px solid var(--warn); }
+
+  footer {
+    margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+    font-size: 0.8rem; color: var(--muted);
+  }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">REPUTATION-POOL-CLOUD · PHASE 1 (DOGFOOD MVP) · 설계 결정</div>
+  <h1>엔진은 이미 있다 —<br>SaaS Phase 1은 "껍데기·테넌시·판매"만 짓는다</h1>
+  <p class="subtitle">
+    공개 레포가 무엇을 완성해 뒀는지 재고 조사한 뒤, cloud가 시작하기 전에 못 박아야 할 근본 결정 3개와
+    Phase 1에 남은 실제 작업 목록. "SaaS에 뭐가 남았지?"에 대한 답.
+  </p>
+
+  <div class="verdict">
+    <div class="label">결론 먼저</div>
+    <p>
+      Phase 1의 엔진은 <strong>core + persistence를 Maven Central에서 라이브러리로 소비</strong>(→ 0.2.0에 persistence도 배포하는 결정이 선행),
+      <strong>gRPC 서버(AdvisorServer)는 통째로 임베드하지 않고 그 composition-root 레시피를 Spring Boot 구성으로 이식</strong>,
+      고객 노출은 <strong>Phase 1은 gRPC 그대로</strong>(dogfood는 내가 클라이언트 — REST 게이트웨이는 외부 고객이 생기는 Phase 3),
+      테넌시는 <strong>싱글테넌트로 시작하되 "테넌트 = 풀 네임스페이스" 공유 프로세스 방향으로 설계</strong>.
+      남은 실제 작업은 §3의 7개 — 전부 "호스팅/운영/판매" 층이고 엔진 로직은 한 줄도 새로 안 짠다.
+    </p>
+  </div>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2><span class="num">§1</span>재고 조사 — 공개 레포가 이미 준 것 vs cloud가 지어야 할 것</h2>
+    <p class="lede">코드로 확인: Maven Central엔 core만, 하지만 server 모듈에 완성된 참조 배선이 있다</p>
+    <div class="inv">
+      <div class="inv-card have">
+        <div class="tag">✓ 이미 있음 (재사용)</div>
+        <ul>
+          <li><strong>엔진</strong>: <code>ResourcePool</code>·<code>ReputationEngine</code> — Lincheck으로 선형성 증명됨</li>
+          <li><strong>영속</strong>: <code>PostgresResourceStore</code>(스냅샷)·<code>PostgresAuditTrail</code>(감사+보존정책)</li>
+          <li><strong>gRPC 계약</strong>: <code>advisor.proto</code> — 6개 RPC, buf로 하위호환 가드됨</li>
+          <li><strong>참조 배선</strong>: <code>AdvisorServer</code>가 복원·주기 체크포인트·감사 fan-out·셧다운 저장을 이미 조립 — <em>레시피로 그대로 참고</em></li>
+        </ul>
+      </div>
+      <div class="inv-card build">
+        <div class="tag">◆ cloud가 지어야 함 (Phase 1)</div>
+        <ul>
+          <li>Spring Boot 셸 (라이프사이클·설정·헬스체크)</li>
+          <li>API key 인증 (싱글 키)</li>
+          <li>테넌트 개념 (Phase 1은 1개)</li>
+          <li>Docker Compose 배포 (앱 + PostgreSQL)</li>
+          <li>미터링·과금 훅 자리 (Phase 3 전까지 비움)</li>
+          <li>대시보드 (Phase 2)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout accent">
+      <strong>핵심 통찰</strong>: cloud는 엔진을 새로 만들 필요가 전혀 없다. <code>AdvisorServer</code>가 "core+persistence를
+      어떻게 배선하는가"의 완성된 답을 이미 갖고 있어서, cloud의 일은 <strong>그 배선을 Spring Boot 방식으로 옮기고
+      그 위에 테넌시·인증·과금을 두르는 것</strong>뿐. 위험한 로직(동시성·복원·보존)은 전부 검증된 라이브러리 안에 있다.
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2><span class="num">§2</span>못 박아야 할 근본 결정 3개</h2>
+    <p class="lede">Phase 1 코드 첫 줄 전에 정해야 하는 것 — 뒤집으면 비싼 것들</p>
+
+    <div class="decision">
+      <div class="q"><span class="tag">결정 1</span>엔진을 어떻게 손에 넣나 — persistence 배포가 열쇠</div>
+      <ul>
+        <li><strong>core만 + cloud 자체 스토어 구현</strong>: Maven Central 현재 그대로. 단, 잘 만들어 검증된 <code>PostgresResourceStore</code>를 버리고 <code>ResourceStore</code>·<code>EventSink</code> 포트를 cloud가 다시 구현 — 낭비 + open-core 경계 위반(엔진 주변부를 cloud에 복제)</li>
+        <li><strong>core + persistence 둘 다 Maven Central 배포</strong>: persistence에 publish 설정 추가(0.2.0 범위). cloud는 둘 다 의존만 하면 됨. persistence가 공개 라이브러리가 되지만, 애초에 "데모 어댑터"로 공개돼 있던 코드라 손해 없음 — 오히려 "쓸 수 있는 Postgres 어댑터"가 OSS 가치를 더함</li>
+        <li><strong>소스 의존/멀티레포 서브모듈</strong>: 빌드 복잡, open-core 경계 흐림</li>
+      </ul>
+      <div class="pick">→ <strong>persistence도 0.2.0에 배포.</strong> #55 릴리스 범위를 "core만"에서 "core + persistence"로 넓히는 작은 결정이 Phase 1을 크게 단순화한다. server 모듈은 배포 불필요(참조 코드로만).</div>
+    </div>
+
+    <div class="decision">
+      <div class="q"><span class="tag">결정 2</span>AdvisorServer를 임베드하나, 레시피만 베끼나</div>
+      <ul>
+        <li><strong>통째로 임베드</strong>: server 모듈도 배포하고 <code>AdvisorServer.create(...)</code>를 Spring 빈으로 감쌈. 빠르지만 — AdvisorServer는 순수 Java 라이프사이클(수동 <code>ScheduledExecutorService</code>·<code>main()</code>)이라 Spring Boot의 빈/스케줄링/설정과 <strong>두 개의 라이프사이클이 충돌</strong>. 멀티테넌시(풀 N개)를 넣는 순간 싱글 풀 전제와도 안 맞음</li>
+        <li><strong>레시피 이식</strong>: server 모듈은 배포 안 하고, AdvisorServer가 보여준 배선 순서(복원→체크포인트 <code>@Scheduled</code>→셧다운 저장→감사 fan-out)를 Spring 구성으로 옮김. core+persistence만 의존</li>
+      </ul>
+      <div class="pick">→ <strong>레시피 이식.</strong> AdvisorServer는 "어떻게 배선하는지"의 문서로 완벽하지만, Spring 위에선 Spring의 라이프사이클로 다시 표현하는 게 자연스럽고 멀티테넌시로 가는 길도 열어둔다. gRPC 노출도 grpc-spring-boot-starter로 <code>advisor.proto</code>를 재사용.</div>
+    </div>
+
+    <div class="decision">
+      <div class="q"><span class="tag">결정 3</span>고객 API 표면 — gRPC vs REST</div>
+      <ul>
+        <li><strong>Phase 1 = gRPC 그대로</strong>: <code>advisor.proto</code>가 이미 있고 buf로 가드됨. dogfood는 내가 클라이언트라 gRPC stub으로 충분. 새로 설계할 계약 0</li>
+        <li>REST 게이트웨이: 외부 고객 온보딩 마찰을 줄이지만(대부분 REST 기대), 계약을 새로 설계·유지해야 함 → 외부 고객이 실제로 생기는 <strong>Phase 3로 연기</strong></li>
+        <li>대시보드(Phase 2)는 웹이라 별도 — gRPC-web 또는 얇은 REST read 엔드포인트, 그때 결정</li>
+      </ul>
+      <div class="pick">→ <strong>Phase 1은 gRPC, REST는 Phase 3.</strong> 지금 REST를 짓는 건 아직 없는 고객을 위한 투자. dogfood 검증이 먼저.</div>
+    </div>
+
+    <div class="callout warn">
+      <strong>테넌시는 Phase 1에서 "결정 유보"가 정답</strong>: dogfood는 테넌트 1개(나)라 멀티테넌시 코드를 지금 짓지 않는다.
+      다만 방향은 "테넌트 = 풀 네임스페이스, 공유 프로세스"로 열어둔다(테넌트당 컨테이너는 운영이 무거움). 실제 격리 구현은 Phase 3.
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2><span class="num">§3</span>Phase 1에 남은 실제 작업 — "뭐가 남았지"의 답</h2>
+    <p class="lede">전부 호스팅/운영/판매 층. 엔진 로직은 0줄. 위에서 아래로 대략의 순서</p>
+    <ol class="tasks">
+      <li>
+        <div class="tt">Spring Boot 프로젝트 스캐폴드 <span class="tag-pill">build</span></div>
+        <div class="td">Gradle(JDK 25), <code>reputation-pool-core</code> + <code>reputation-pool-persistence</code> 0.2.0 의존, grpc-spring-boot-starter. cloud 레포 루트에.</div>
+      </li>
+      <li>
+        <div class="tt">ReputationPool을 Spring 빈으로 배선 (레시피 이식) <span class="tag-pill">core</span></div>
+        <div class="td">AdvisorServer 순서 그대로: 시작 시 <code>PostgresResourceStore</code>에서 복원 → <code>@Scheduled</code> 체크포인트 → <code>PostgresAuditTrail</code> 감사 fan-out(+보존 정책) → <code>@PreDestroy</code> 최종 저장. <code>Clock</code> 빈 주입.</div>
+      </li>
+      <li>
+        <div class="tt">gRPC 서비스 구현 <span class="tag-pill">api</span></div>
+        <div class="td"><code>advisor.proto</code>의 6개 RPC를 Spring gRPC 서비스로 — 엔진 호출은 얇은 위임. (server 모듈의 <code>ReputationAdvisorService</code>가 참조 구현.)</div>
+      </li>
+      <li>
+        <div class="tt">API key 인증 인터셉터 <span class="tag-pill">auth</span></div>
+        <div class="td">gRPC ServerInterceptor로 단일 키 검증(설정/env). 없거나 틀리면 UNAUTHENTICATED. 테넌트 식별의 자리(Phase 1은 상수 테넌트).</div>
+      </li>
+      <li>
+        <div class="tt">Docker Compose 배포 <span class="tag-pill">ops</span></div>
+        <div class="td">앱 컨테이너 + PostgreSQL + Flyway 마이그레이션(persistence의 V1/V2 재사용). private 서버에 올릴 <code>compose.yaml</code> + 헬스체크.</div>
+      </li>
+      <li>
+        <div class="tt">운영 문서 + 시크릿/설정 <span class="tag-pill">ops</span></div>
+        <div class="td">API key·DB 자격증명·보존 기간(<code>REPUTATION_POOL_AUDIT_RETENTION</code>) 설정법, private 서버 배포 절차.</div>
+      </li>
+      <li>
+        <div class="tt">Dogfood — 내 풀 실운영 <span class="tag-pill">검증</span></div>
+        <div class="td">실제 프록시/계정 풀을 <code>Register</code>로 등록하고 <code>Acquire/Report</code> 루프를 물림. 여기서 나오는 엔진 개선 요구는 <strong>공개 레포 이슈</strong>로.</div>
+      </li>
+    </ol>
+    <div class="callout">
+      과금·미터링·멀티테넌시·대시보드는 <strong>Phase 1에 없다</strong>. Phase 1의 목적은 매출이 아니라 "이 엔진이 실제 풀을 물고 몇 주 돌 때 무엇이 아픈가"를 몸으로 아는 것. 그 학습이 Phase 2·3의 우선순위를 정한다.
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section>
+    <h2><span class="num">§4</span>순서와 지금 할 일</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>순서</th><th>무엇</th><th>선행 조건</th><th class="center">누가</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>지금</td>
+            <td>이 결정 3개 확정 + cloud 레포에 Phase 1 이슈로 등록</td>
+            <td>—</td>
+            <td class="center">승인 후 나</td>
+          </tr>
+          <tr class="winner">
+            <td>선행</td>
+            <td><strong>0.2.0 릴리스에 persistence 배포 추가</strong>(결정 1의 귀결)</td>
+            <td>#55 (릴리스 준비 PR 진행 중)</td>
+            <td class="center">배포는 자격증명 머신</td>
+          </tr>
+          <tr>
+            <td>착수</td>
+            <td>§3 작업 1~2 (스캐폴드 + 엔진 배선)</td>
+            <td>core+persistence 0.2.0 배포됨</td>
+            <td class="center">에이전트</td>
+          </tr>
+          <tr>
+            <td>이어서</td>
+            <td>§3 작업 3~7</td>
+            <td>배선 동작</td>
+            <td class="center">에이전트</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout accent">
+      <strong>결정 1이 릴리스에 주는 영향</strong>: persistence를 Phase 1에서 라이브러리로 쓰려면 0.2.0에 함께 배포하는 게 깔끔하다.
+      지금 진행 중인 #55 릴리스 준비 PR은 "core만" 전제로 쓰이고 있으므로, 이 결정을 승인하면 <strong>persistence publish 설정 추가</strong>를
+      릴리스 범위에 넣어야 한다(작은 build.gradle.kts 변경 + 좌표). 승인 여부를 알려주면 릴리스 PR에 반영하도록 지시하겠다.
+    </div>
+  </section>
+
+  <footer>
+    reputation-pool-cloud · Phase 1 설계 메모 · 2026-07-15 · 근거: 공개 레포 AdvisorServer(create 오버로드·composition root), advisor.proto(6 RPC), persistence 미배포 확인, PRODUCT.md 로드맵
+  </footer>
+</div>

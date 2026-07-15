@@ -45,6 +45,7 @@
 - **Phase 0 — 지금**: 이 문서. 코드 없음. 공개 레포의 core 0.2.0 릴리스(#55)가 선행 조건.
 - **Phase 1 — dogfood MVP** (0.2.0 릴리스 후): Spring Boot 셸, 싱글테넌트, API key 1개,
   Docker Compose 배포, 내 프록시 풀을 실제로 물려서 운영. 판매 없음 — 내가 첫 고객.
+  세부 작업은 [milestone `MVP (dogfood)`](../../milestones/1)의 이슈 #1–#7로 관리. 설계 근거는 [docs/phase1-plan.html](docs/phase1-plan.html).
 - **Phase 2 — 대시보드**: 읽기 전용 프론트부터(풀 상태, 평판 곡선, 이벤트 타임라인 —
   `SubscribeEvents` 스트림이 재료). 온보딩 문서.
 - **Phase 3 — 판매 장치**: 멀티테넌시 격리, 과금(Stripe), rate limit, SLO. Phase 1~2에서
