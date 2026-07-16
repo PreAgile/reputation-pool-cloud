@@ -1,13 +1,13 @@
 package io.github.preagile.reputationpool.cloud.engine;
 
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
-import io.github.preagile.reputationpool.cloud.grpc.CompositeEventSink;
-import io.github.preagile.reputationpool.cloud.grpc.EventBroadcaster;
 import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
 import io.github.preagile.reputationpool.core.engine.ReputationEngine;
 import io.github.preagile.reputationpool.core.pool.ResourcePool;
 import io.github.preagile.reputationpool.core.pool.WeightedRandomSelectionStrategy;
 import io.github.preagile.reputationpool.core.port.EventSink;
+import io.github.preagile.reputationpool.grpc.CompositeEventSink;
+import io.github.preagile.reputationpool.grpc.EventBroadcaster;
 import io.github.preagile.reputationpool.persistence.PostgresAuditTrail;
 import io.github.preagile.reputationpool.persistence.PostgresResourceStore;
 import java.time.Clock;
@@ -65,6 +65,16 @@ public class EngineConfiguration {
     @Bean
     AuditPurger auditPurger(PostgresAuditTrail auditTrail) {
         return auditTrail::purgeOlderThan;
+    }
+
+    /**
+     * The gRPC event broadcaster from the shared grpc module — both a pool {@code EventSink} and the
+     * {@code ReputationAdvisorService}'s subscription registry. It is a plain (framework-agnostic) class
+     * there, so cloud registers it as a bean; {@code close()} completes open streams on shutdown.
+     */
+    @Bean(destroyMethod = "close")
+    EventBroadcaster eventBroadcaster() {
+        return new EventBroadcaster();
     }
 
     /**

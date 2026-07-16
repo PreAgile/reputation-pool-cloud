@@ -2,10 +2,12 @@ package io.github.preagile.reputationpool.cloud;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.preagile.reputationpool.cloud.grpc.ReputationAdvisorService;
 import io.github.preagile.reputationpool.core.domain.PoolSnapshot;
 import io.github.preagile.reputationpool.core.domain.ResourceId;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
 import io.github.preagile.reputationpool.core.pool.ResourcePool;
+import io.github.preagile.reputationpool.grpc.EventBroadcaster;
 import io.github.preagile.reputationpool.persistence.PostgresResourceStore;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -48,6 +50,12 @@ class EngineWiringIT {
     @Autowired
     private PostgresResourceStore store;
 
+    @Autowired
+    private ReputationAdvisorService advisorService;
+
+    @Autowired
+    private EventBroadcaster broadcaster;
+
     @Test
     void contextBoots_andSnapshotSurvivesRoundTripThroughRealStore() {
         ResourceId proxy = new ResourceId(ResourceKind.PROXY, "p1");
@@ -58,5 +66,13 @@ class EngineWiringIT {
 
         assertThat(loaded).isPresent();
         assertThat(loaded.get().registered()).contains(proxy);
+    }
+
+    @Test
+    void grpcSurfaceIsWiredFromTheSharedModule() {
+        // cloud's thin @GrpcService subclass and the shared broadcaster bean are both present, so the
+        // engine is reachable over gRPC without cloud owning any of the contract/adapter code.
+        assertThat(advisorService).isNotNull();
+        assertThat(broadcaster).isNotNull();
     }
 }
