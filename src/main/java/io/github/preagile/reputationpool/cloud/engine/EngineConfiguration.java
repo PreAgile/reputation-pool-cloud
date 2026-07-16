@@ -1,18 +1,16 @@
 package io.github.preagile.reputationpool.cloud.engine;
 
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
-import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
-import io.github.preagile.reputationpool.core.engine.ReputationEngine;
-import io.github.preagile.reputationpool.core.pool.ResourcePool;
-import io.github.preagile.reputationpool.core.pool.WeightedRandomSelectionStrategy;
+import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import io.github.preagile.reputationpool.core.port.EventSink;
+import io.github.preagile.reputationpool.core.port.ResourceStore;
 import io.github.preagile.reputationpool.grpc.CompositeEventSink;
 import io.github.preagile.reputationpool.grpc.EventBroadcaster;
 import io.github.preagile.reputationpool.persistence.PostgresAuditTrail;
 import io.github.preagile.reputationpool.persistence.PostgresResourceStore;
 import java.time.Clock;
 import java.util.List;
-import java.util.random.RandomGenerator;
+import java.util.function.Function;
 import javax.sql.DataSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -28,11 +26,17 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * {@link PoolLifecycle}.
  *
  * <p>The {@link DataSource} is Spring Boot's auto-configured one (Flyway migrates the persistence
- * jar's {@code V1__snapshot}/{@code V2__audit} schema against it before these beans are used).
+ * jar's {@code V1__snapshot}/{@code V2__audit}/{@code V3__pool_id} schema against it before these beans
+ * are used).
  *
- * <p>Scope note: this module depends only on core + persistence, so the gRPC broadcaster and the
+ * <p>Scope note: this module depends only on core + persistence + grpc, so the gRPC broadcaster and the
  * {@code CompositeEventSink} are cloud-side ports of the (unconsumed) server module's classes. Pool
  * events fan out to both the live gRPC stream and the durable audit trail.
+ *
+ * <p><b>Per-tenant isolation (#9b).</b> There is no single pool or single store bean any more: the
+ * {@link PerTenantPoolRegistry} owns one pool + one tenant-scoped store per tenant, created lazily. The
+ * {@code clock}, the fan-out event sink, and the audit trail are shared across tenants; pool state and
+ * its persisted rows are not.
  */
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
@@ -43,12 +47,6 @@ public class EngineConfiguration {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
-    }
-
-    /** The durable snapshot store the pool is restored from at startup and checkpointed to. */
-    @Bean
-    PostgresResourceStore resourceStore(DataSource dataSource) {
-        return new PostgresResourceStore(dataSource);
     }
 
     /**
@@ -78,37 +76,40 @@ public class EngineConfiguration {
     }
 
     /**
-     * The assembled pool: the same graph as {@code AdvisorServer.assemble}. Pool events fan out through
-     * a {@link CompositeEventSink} to both the live gRPC {@link EventBroadcaster} and the durable audit
-     * trail — the pool still holds exactly one sink, so the core stays untouched. The pool is not
-     * restored here — {@link PoolLifecycle#start()} does that after Flyway has migrated and before any
-     * traffic.
+     * The sink every tenant's pool emits through: the same {@code AdvisorServer.assemble} fan-out to
+     * both the live gRPC {@link EventBroadcaster} and the durable audit trail. Shared across tenants
+     * (event-stream and audit isolation are a deferred follow-up), so each per-tenant pool is handed
+     * this one sink.
      */
     @Bean
-    ResourcePool reputationPool(
-            Clock clock, EventBroadcaster broadcaster, PostgresAuditTrail auditTrail, ReputationPoolProperties props) {
-        ReputationEngine engine = new ReputationEngine(
-                new AdaptiveCooldownPolicy(),
-                props.engine().windowSize(),
-                props.engine().coolAfter(),
-                props.engine().recoverAfter());
-        EventSink sink = new CompositeEventSink(List.of(broadcaster, auditTrail));
-        return new ResourcePool(
-                engine,
-                new WeightedRandomSelectionStrategy(),
-                sink,
-                clock,
-                RandomGenerator.getDefault(),
-                props.leaseTtl());
+    EventSink poolEventSink(EventBroadcaster broadcaster, PostgresAuditTrail auditTrail) {
+        return new CompositeEventSink(List.of(broadcaster, auditTrail));
     }
 
     /**
-     * The seam that maps an authenticated tenant to its pool. Interim single-pool routing (#9b
-     * replaces it with real per-tenant pools); it lets the control plane (#11) build against the
-     * registry contract now.
+     * Makes a tenant's snapshot store: a {@link PostgresResourceStore} confined to the tenant's
+     * {@code pool_id} namespace (V3). This is the one place the concrete persistence type and the
+     * {@link DataSource} meet the registry, so the registry itself stays persistence-agnostic.
      */
     @Bean
-    TenantPoolRegistry tenantPoolRegistry(ResourcePool reputationPool) {
-        return new SinglePoolTenantRegistry(reputationPool);
+    Function<String, ResourceStore> resourceStoreFactory(DataSource dataSource, Clock clock) {
+        return tenantId -> new PostgresResourceStore(dataSource, clock, tenantId);
+    }
+
+    /**
+     * The real per-tenant registry: one pool + one tenant-scoped store per tenant, created lazily.
+     * Replaces the interim {@link SinglePoolTenantRegistry}, so an authenticated call is routed to its
+     * own tenant's isolated pool. {@link PoolLifecycle} restores/checkpoints each tenant's pool through
+     * this registry; the control plane (#11) creates tenants via
+     * {@link TenantPoolRegistry#onboard(String)}.
+     */
+    @Bean
+    PerTenantPoolRegistry tenantPoolRegistry(
+            Clock clock,
+            EventSink poolEventSink,
+            ReputationPoolProperties props,
+            TenantRepository tenantRepository,
+            Function<String, ResourceStore> resourceStoreFactory) {
+        return new PerTenantPoolRegistry(clock, poolEventSink, props, tenantRepository, resourceStoreFactory);
     }
 }

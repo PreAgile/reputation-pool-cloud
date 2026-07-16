@@ -2,6 +2,8 @@ package io.github.preagile.reputationpool.cloud.grpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
+import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
 import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
 import io.github.preagile.reputationpool.core.engine.ReputationEngine;
 import io.github.preagile.reputationpool.core.pool.ResourcePool;
@@ -10,52 +12,93 @@ import io.github.preagile.reputationpool.grpc.EventBroadcaster;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.AcquireRequest;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.AcquireResponse;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.Context;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.LeaseHandle;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.RegisterRequest;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.RenewRequest;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.RenewResponse;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ResourceId;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ResourceKind;
 import io.github.preagile.reputationpool.grpc.v1.ReputationAdvisorGrpc;
+import io.grpc.Contexts;
 import io.grpc.ManagedChannel;
+import io.grpc.Metadata;
 import io.grpc.Server;
+import io.grpc.ServerCall;
+import io.grpc.ServerCallHandler;
+import io.grpc.ServerInterceptor;
+import io.grpc.ServerInterceptors;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
+import io.grpc.stub.MetadataUtils;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Verifies cloud's thin {@code @GrpcService} subclass delegates correctly to the shared
- * reputation-pool-grpc handler. The RPC semantics themselves are covered by the grpc module's own
- * contract test; this only proves cloud's registration + constructor wiring is sound. Docker-free
- * (in-process transport, in-memory pool), so it runs in the {@code build} gate.
+ * The isolation penetration test: two tenants share one in-process gRPC server, and each call is routed
+ * to the caller's tenant pool by cloud's {@code pool()} override reading {@link TenantContext#TENANT_ID}.
+ * It proves the core #9b guarantee at the gRPC surface — a resource registered by tenant A is invisible
+ * to tenant B: B cannot acquire it, and B cannot renew A's lease. Docker-free (in-process transport,
+ * in-memory per-tenant pools), so it runs in the {@code build} gate.
  */
 class CloudAdvisorServiceTest {
 
+    private static final Metadata.Key<String> TENANT_HEADER =
+            Metadata.Key.of("x-tenant", Metadata.ASCII_STRING_MARSHALLER);
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-07-16T00:00:00Z"), ZoneOffset.UTC);
+
+    /** One in-memory pool per tenant — the same lazy-per-tenant shape as PerTenantPoolRegistry. */
+    private final TenantPoolRegistry registry = new TenantPoolRegistry() {
+        private final ConcurrentHashMap<String, ResourcePool> pools = new ConcurrentHashMap<>();
+
+        @Override
+        public ResourcePool poolFor(String tenantId) {
+            return pools.computeIfAbsent(
+                    tenantId,
+                    id -> new ResourcePool(
+                            new ReputationEngine(new AdaptiveCooldownPolicy(), 10, 2, 2),
+                            new WeightedRandomSelectionStrategy(),
+                            new EventBroadcaster(),
+                            clock,
+                            new Random(42),
+                            Duration.ofSeconds(30)));
+        }
+
+        @Override
+        public void onboard(String tenantId) {
+            poolFor(tenantId);
+        }
+    };
 
     private Server server;
     private ManagedChannel channel;
     private ReputationAdvisorGrpc.ReputationAdvisorBlockingStub stub;
 
+    /** Sets the gRPC context's tenant from the {@code x-tenant} header, standing in for the auth interceptor. */
+    private static final ServerInterceptor TENANT_FROM_HEADER = new ServerInterceptor() {
+        @Override
+        public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
+                ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
+            io.grpc.Context context =
+                    io.grpc.Context.current().withValue(TenantContext.TENANT_ID, headers.get(TENANT_HEADER));
+            return Contexts.interceptCall(context, call, headers, next);
+        }
+    };
+
     @BeforeEach
     void startServer() throws Exception {
-        ResourcePool pool = new ResourcePool(
-                new ReputationEngine(new AdaptiveCooldownPolicy(), 10, 2, 2),
-                new WeightedRandomSelectionStrategy(),
-                new EventBroadcaster(),
-                clock,
-                new Random(42),
-                Duration.ofSeconds(30));
-        // The class under test: cloud's @GrpcService subclass, exercised over real gRPC wiring.
-        ReputationAdvisorService service = new ReputationAdvisorService(pool, new EventBroadcaster());
+        ReputationAdvisorService service = new ReputationAdvisorService(registry, new EventBroadcaster());
         String name = InProcessServerBuilder.generateName();
         server = InProcessServerBuilder.forName(name)
                 .directExecutor()
-                .addService(service)
+                .addService(ServerInterceptors.intercept(service, TENANT_FROM_HEADER))
                 .build()
                 .start();
         channel = InProcessChannelBuilder.forName(name).directExecutor().build();
@@ -68,28 +111,51 @@ class CloudAdvisorServiceTest {
         server.shutdownNow();
     }
 
+    private ReputationAdvisorGrpc.ReputationAdvisorBlockingStub asTenant(String tenantId) {
+        Metadata md = new Metadata();
+        md.put(TENANT_HEADER, tenantId);
+        return stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(md));
+    }
+
+    private static AcquireRequest acquireScrape() {
+        return AcquireRequest.newBuilder()
+                .setContext(Context.newBuilder().setValue("scrape"))
+                .build();
+    }
+
     @Test
-    void register_thenAcquire_grantsALease() {
+    void resourceRegisteredByOneTenantIsInvisibleToAnother() {
         ResourceId proxy = ResourceId.newBuilder()
                 .setKind(ResourceKind.PROXY)
                 .setValue("p1")
                 .build();
-        stub.register(RegisterRequest.newBuilder().setResource(proxy).build());
+        asTenant("tenant-a")
+                .register(RegisterRequest.newBuilder().setResource(proxy).build());
 
-        AcquireResponse response = stub.acquire(AcquireRequest.newBuilder()
-                .setContext(Context.newBuilder().setValue("scrape"))
-                .build());
+        // Tenant A sees and can lease its own resource.
+        AcquireResponse aAcquired = asTenant("tenant-a").acquire(acquireScrape());
+        assertThat(aAcquired.getGranted()).isTrue();
+        assertThat(aAcquired.getLease().getResource()).isEqualTo(proxy);
 
-        assertThat(response.getGranted()).isTrue();
-        assertThat(response.getLease().getResource()).isEqualTo(proxy);
+        // Tenant B's pool is empty — A's resource does not leak across the tenant boundary.
+        AcquireResponse bAcquired = asTenant("tenant-b").acquire(acquireScrape());
+        assertThat(bAcquired.getGranted()).isFalse();
     }
 
     @Test
-    void acquire_onEmptyPool_isNotGranted() {
-        AcquireResponse response = stub.acquire(AcquireRequest.newBuilder()
-                .setContext(Context.newBuilder().setValue("scrape"))
-                .build());
+    void oneTenantCannotRenewAnothersLease() {
+        ResourceId proxy = ResourceId.newBuilder()
+                .setKind(ResourceKind.PROXY)
+                .setValue("p1")
+                .build();
+        asTenant("tenant-a")
+                .register(RegisterRequest.newBuilder().setResource(proxy).build());
+        LeaseHandle aLease = asTenant("tenant-a").acquire(acquireScrape()).getLease();
 
-        assertThat(response.getGranted()).isFalse();
+        // Tenant B does not hold this lease in its own lease registry, so the renew is refused.
+        RenewResponse bRenew = asTenant("tenant-b")
+                .renew(RenewRequest.newBuilder().setLease(aLease).build());
+
+        assertThat(bRenew.getRenewed()).isFalse();
     }
 }
