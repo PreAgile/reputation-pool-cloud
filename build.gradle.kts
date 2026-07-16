@@ -63,6 +63,12 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
+// cloud is an application, not a library: keep only the executable boot jar so the Docker image copies
+// one unambiguous artifact (no `-plain.jar` alongside it).
+tasks.named<Jar>("jar") {
+    enabled = false
+}
+
 // On-demand only: `./gradlew integrationTest`. Needs a Docker daemon (Testcontainers PostgreSQL).
 val integrationTestTask =
     tasks.register<Test>("integrationTest") {
