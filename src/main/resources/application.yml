@@ -33,8 +33,9 @@ grpc:
 # Engine wiring knobs. Defaults mirror the public reputation-pool AdvisorServer composition root.
 reputation-pool:
   auth:
-    # Single API key (Phase 1). No baked default: unset → the interceptor rejects all gRPC calls
-    # (fail closed). Supply via REPUTATION_POOL_API_KEY; #9 replaces this with per-tenant keys.
+    # Single API key seeded for the default tenant on startup (issue #9a). No baked default: unset →
+    # nothing is seeded, so the api_key table stays empty and the interceptor rejects all gRPC calls
+    # (fail closed). Supply via REPUTATION_POOL_API_KEY; #11 replaces this with per-tenant key mgmt.
     api-key: ${REPUTATION_POOL_API_KEY:}
   lease-ttl: PT30S
   checkpoint-interval: PT30S
