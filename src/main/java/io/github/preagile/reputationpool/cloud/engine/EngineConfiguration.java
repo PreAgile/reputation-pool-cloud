@@ -101,4 +101,14 @@ public class EngineConfiguration {
                 RandomGenerator.getDefault(),
                 props.leaseTtl());
     }
+
+    /**
+     * The seam that maps an authenticated tenant to its pool. Interim single-pool routing (#9b
+     * replaces it with real per-tenant pools); it lets the control plane (#11) build against the
+     * registry contract now.
+     */
+    @Bean
+    TenantPoolRegistry tenantPoolRegistry(ResourcePool reputationPool) {
+        return new SinglePoolTenantRegistry(reputationPool);
+    }
 }
