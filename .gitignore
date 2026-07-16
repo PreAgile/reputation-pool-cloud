@@ -6,3 +6,6 @@ out/
 *.iml
 
 *.log
+
+# Local environment (secrets for docker compose) — never commit; use .env.example as the template.
+.env
