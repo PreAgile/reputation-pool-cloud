@@ -42,14 +42,20 @@
 
 ## 로드맵
 
-- **Phase 0 — 지금**: 이 문서. 코드 없음. 공개 레포의 core 0.2.0 릴리스(#55)가 선행 조건.
-- **Phase 1 — dogfood MVP** (0.2.0 릴리스 후): Spring Boot 셸, 싱글테넌트, API key 1개,
-  Docker Compose 배포, 내 프록시 풀을 실제로 물려서 운영. 판매 없음 — 내가 첫 고객.
-  세부 작업은 [milestone `MVP (dogfood)`](../../milestones/1)의 이슈 #1–#7로 관리. 설계 근거는 [docs/phase1-plan.html](docs/phase1-plan.html).
-- **Phase 2 — 대시보드**: 읽기 전용 프론트부터(풀 상태, 평판 곡선, 이벤트 타임라인 —
-  `SubscribeEvents` 스트림이 재료). 온보딩 문서.
-- **Phase 3 — 판매 장치**: 멀티테넌시 격리, 과금(Stripe), rate limit, SLO. Phase 1~2에서
-  수요가 확인된 경우에만.
+**전략 (2026-07-15 확정): 프로덕션 레벨로 한 번에 완성 후 검증.** 단계적 dogfood MVP가 아니라,
+판매 가능한 멀티테넌트 SaaS(10개 도메인: 백엔드·테넌시·API·인증·대시보드·과금·관측·인프라·온보딩·법무)를
+완성하고 종료 기준 5개를 통과한 뒤 core 1.0.0을 선언한다.
+마스터 플랜: [docs/production-roadmap.html](docs/production-roadmap.html) (빌드 순서·결정 대기·검증 기준의 원본).
+
+빌드 단계 = 마일스톤 4개 (각 단계의 세부 작업은 해당 마일스톤의 이슈로 관리):
+
+1. [`v1-backend`](../../milestones/1) — 엔진이 gRPC 뒤에서 실제로 뜨는 토대 (#1–#3, #5)
+2. [`v1-tenancy`](../../milestones/2) — 멀티테넌시 + 인증/키 + 미터링 수집 (#4, #9, #10)
+3. [`v1-dashboard`](../../milestones/3) — REST 컨트롤 플레인 + 대시보드 UI (#11, #12)
+4. [`v1-launch`](../../milestones/4) — 청구·모니터링·인프라·온보딩·법무·검증 (#6, #7, #13–#16)
+
+선행 게이트(불변): 공개 레포 core+persistence **0.2.0 Maven Central 배포** — 그 전엔 백엔드가 컴파일 불가.
+(초기 Phase 1 dogfood 설계는 [docs/phase1-plan.html](docs/phase1-plan.html)에 기록으로 보존 — D1 백엔드 토대 부분은 그대로 유효.)
 
 ## 결정 대기 목록
 
