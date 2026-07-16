@@ -42,6 +42,9 @@ services:
       REPUTATION_POOL_DB_URL: jdbc:postgresql://db:5432/reputation_pool
       REPUTATION_POOL_DB_USERNAME: reputation_pool
       REPUTATION_POOL_DB_PASSWORD: ${REPUTATION_POOL_DB_PASSWORD:-reputation_pool}
+      # gRPC API key — interpolated from the host env (inject the real key in production), with a
+      # local-dev throwaway default. Clients send it in the x-api-key metadata header.
+      REPUTATION_POOL_API_KEY: ${REPUTATION_POOL_API_KEY:-local-dev-key}
     ports:
       - "8083:8083"
       - "9093:9093"
