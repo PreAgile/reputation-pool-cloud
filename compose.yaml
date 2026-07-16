@@ -1,9 +1,12 @@
 # The deployment unit for reputation-pool-cloud (issue #5): the app + PostgreSQL together. Flyway (in
 # the app) migrates the persistence jar's V1/V2 schema on startup.
 #
-#   docker compose up --build -d      # local: DB password falls back to a throwaway default
-#   REPUTATION_POOL_DB_PASSWORD=<secret> docker compose up -d   # production: inject the real secret
-#   grpcurl -plaintext localhost:9093 list   # once healthy, the engine is reachable over gRPC
+#   cp .env.example .env              # one-time: provides REPUTATION_POOL_API_KEY (required)
+#   docker compose up --build -d      # start app + db
+#   grpcurl -H "x-api-key: $KEY" -plaintext localhost:9093 list   # engine reachable over gRPC
+#
+# Production injects REPUTATION_POOL_API_KEY (and optionally REPUTATION_POOL_DB_PASSWORD) from a secret
+# store; there is no committed default for the API key on purpose.
 #
 # The app connects to the db over the compose network (db:5432); host ports 8083 (HTTP), 9093 (gRPC),
 # and 5435 (Postgres, for local psql) are published for convenience.
@@ -42,9 +45,10 @@ services:
       REPUTATION_POOL_DB_URL: jdbc:postgresql://db:5432/reputation_pool
       REPUTATION_POOL_DB_USERNAME: reputation_pool
       REPUTATION_POOL_DB_PASSWORD: ${REPUTATION_POOL_DB_PASSWORD:-reputation_pool}
-      # gRPC API key — interpolated from the host env (inject the real key in production), with a
-      # local-dev throwaway default. Clients send it in the x-api-key metadata header.
-      REPUTATION_POOL_API_KEY: ${REPUTATION_POOL_API_KEY:-local-dev-key}
+      # gRPC API key — REQUIRED, no default. A fallback would put a known key on the public API
+      # (auth bypass), so compose fails if it is unset: copy .env.example to .env for local dev, or
+      # inject the secret in production. Clients send it in the x-api-key metadata header.
+      REPUTATION_POOL_API_KEY: ${REPUTATION_POOL_API_KEY:?set REPUTATION_POOL_API_KEY (copy .env.example to .env for local dev)}
     ports:
       - "8083:8083"
       - "9093:9093"
