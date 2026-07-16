@@ -1,6 +1,14 @@
 spring:
   application:
     name: reputation-pool-cloud
+  datasource:
+    url: ${REPUTATION_POOL_DB_URL:jdbc:postgresql://localhost:5435/reputation_pool}
+    username: ${REPUTATION_POOL_DB_USERNAME:reputation_pool}
+    password: ${REPUTATION_POOL_DB_PASSWORD:reputation_pool}
+  flyway:
+    enabled: true
+    # locations default to classpath:db/migration — the reputation-pool-persistence jar ships
+    # V1__snapshot.sql and V2__audit.sql there, so the schema is migrated before the store is used.
 
 management:
   endpoints:
@@ -19,8 +27,16 @@ grpc:
   server:
     port: ${GRPC_PORT:9093}
 
+# Engine wiring knobs. Defaults mirror the public reputation-pool AdvisorServer composition root.
 reputation-pool:
-  database:
-    url: ${REPUTATION_POOL_DB_URL:jdbc:postgresql://localhost:5435/reputation_pool}
-    username: ${REPUTATION_POOL_DB_USERNAME:reputation_pool}
-    password: ${REPUTATION_POOL_DB_PASSWORD:}
+  lease-ttl: PT30S
+  checkpoint-interval: PT30S
+  engine:
+    window-size: 10
+    cool-after: 2
+    recover-after: 2
+  audit:
+    purge-interval: PT1H
+    # Opt-in audit retention (ISO-8601, e.g. P30D). P0D (the default) means never purge — the trail
+    # grows unbounded, exactly as the reference does when the knob is unset.
+    retention: ${REPUTATION_POOL_AUDIT_RETENTION:P0D}
