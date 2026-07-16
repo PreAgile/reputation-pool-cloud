@@ -38,7 +38,9 @@ public record ReputationPoolProperties(
      * @param purgeInterval how often the retention purge runs
      * @param retention how much history to keep; {@code <= 0} disables purging
      */
-    public record Audit(@DefaultValue("PT1H") Duration purgeInterval, @DefaultValue("P0D") Duration retention) {
+    public record Audit(
+            @DefaultValue("PT1H") Duration purgeInterval,
+            @DefaultValue("P0D") Duration retention) {
 
         /** Whether age-based purging is turned on (a positive retention was configured). */
         public boolean purgeEnabled() {
