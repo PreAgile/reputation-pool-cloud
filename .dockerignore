@@ -1,0 +1,10 @@
+# Keep the build context small and reproducible: never ship host build output, caches, or IDE/agent
+# state into the image build.
+build/
+.gradle/
+.git/
+.idea/
+*.iml
+*.log
+.claude/
+out/

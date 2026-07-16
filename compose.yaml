@@ -1,11 +1,12 @@
-# Local PostgreSQL for the reputation-pool-cloud engine (issue #2). Brings up just the database the
-# app connects to; the app itself runs via `./gradlew bootRun`. The full app+DB deployment unit is
-# issue #5.
+# The deployment unit for reputation-pool-cloud (issue #5): the app + PostgreSQL together. Flyway (in
+# the app) migrates the persistence jar's V1/V2 schema on startup.
 #
-#   docker compose up -d
-#   REPUTATION_POOL_DB_PASSWORD=reputation_pool ./gradlew bootRun
+#   docker compose up --build -d      # local: DB password falls back to a throwaway default
+#   REPUTATION_POOL_DB_PASSWORD=<secret> docker compose up -d   # production: inject the real secret
+#   grpcurl -plaintext localhost:9093 list   # once healthy, the engine is reachable over gRPC
 #
-# Matches the application.yml defaults: localhost:5435, db/user/password = reputation_pool.
+# The app connects to the db over the compose network (db:5432); host ports 8083 (HTTP), 9093 (gRPC),
+# and 5435 (Postgres, for local psql) are published for convenience.
 services:
   db:
     image: postgres:17
@@ -13,8 +14,9 @@ services:
     environment:
       POSTGRES_DB: reputation_pool
       POSTGRES_USER: reputation_pool
-      # Local-dev throwaway credential only — production supplies REPUTATION_POOL_DB_PASSWORD via env.
-      POSTGRES_PASSWORD: reputation_pool
+      # Interpolated from the host env so a real secret can be injected; falls back to a local-dev
+      # throwaway when unset. app and db share the one variable so they always agree.
+      POSTGRES_PASSWORD: ${REPUTATION_POOL_DB_PASSWORD:-reputation_pool}
     ports:
       - "5435:5432"
     volumes:
@@ -24,6 +26,32 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+    container_name: reputation-pool-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Connects over the compose network. The password is interpolated from the host env — set
+      # REPUTATION_POOL_DB_PASSWORD (from a secret) to inject it in production; unset falls back to the
+      # local-dev throwaway. A literal value here would shadow the host env and break secret injection.
+      REPUTATION_POOL_DB_URL: jdbc:postgresql://db:5432/reputation_pool
+      REPUTATION_POOL_DB_USERNAME: reputation_pool
+      REPUTATION_POOL_DB_PASSWORD: ${REPUTATION_POOL_DB_PASSWORD:-reputation_pool}
+    ports:
+      - "8083:8083"
+      - "9093:9093"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # Give the JVM + Flyway room to come up before health failures count against the container.
+      start_period: 40s
     restart: unless-stopped
 
 volumes:
