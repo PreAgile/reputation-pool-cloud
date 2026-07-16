@@ -86,7 +86,7 @@ spotless {
         endWithNewline()
     }
     java {
-        palantirJavaFormat()
+        palantirJavaFormat("2.96.0")
         removeUnusedImports()
         trimTrailingWhitespace()
         endWithNewline()
