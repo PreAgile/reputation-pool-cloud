@@ -23,8 +23,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("net.devh:grpc-spring-boot-starter:3.1.0.RELEASE")
-    implementation("io.github.preagile:reputation-pool-core:0.2.0")
-    implementation("io.github.preagile:reputation-pool-persistence:0.2.0")
+    implementation("io.github.preagile:reputation-pool-core:0.2.1")
+    implementation("io.github.preagile:reputation-pool-persistence:0.2.1")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
