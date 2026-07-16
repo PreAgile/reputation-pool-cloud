@@ -1,0 +1,30 @@
+# Local PostgreSQL for the reputation-pool-cloud engine (issue #2). Brings up just the database the
+# app connects to; the app itself runs via `./gradlew bootRun`. The full app+DB deployment unit is
+# issue #5.
+#
+#   docker compose up -d
+#   REPUTATION_POOL_DB_PASSWORD=reputation_pool ./gradlew bootRun
+#
+# Matches the application.yml defaults: localhost:5435, db/user/password = reputation_pool.
+services:
+  db:
+    image: postgres:17
+    container_name: reputation-pool-db
+    environment:
+      POSTGRES_DB: reputation_pool
+      POSTGRES_USER: reputation_pool
+      # Local-dev throwaway credential only — production supplies REPUTATION_POOL_DB_PASSWORD via env.
+      POSTGRES_PASSWORD: reputation_pool
+    ports:
+      - "5435:5432"
+    volumes:
+      - reputation-pool-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reputation_pool -d reputation_pool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  reputation-pool-db-data:
