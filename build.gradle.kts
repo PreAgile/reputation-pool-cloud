@@ -20,7 +20,7 @@ repositories {
 }
 
 dependencies {
-    implementation("org.springframework.boot:spring-boot-starter")
+    implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("net.devh:grpc-spring-boot-starter:3.1.0.RELEASE")
     implementation("io.github.preagile:reputation-pool-core:0.2.1")
