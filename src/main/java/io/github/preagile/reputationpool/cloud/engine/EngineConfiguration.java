@@ -5,9 +5,13 @@ import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
 import io.github.preagile.reputationpool.core.engine.ReputationEngine;
 import io.github.preagile.reputationpool.core.pool.ResourcePool;
 import io.github.preagile.reputationpool.core.pool.WeightedRandomSelectionStrategy;
+import io.github.preagile.reputationpool.core.port.EventSink;
+import io.github.preagile.reputationpool.grpc.CompositeEventSink;
+import io.github.preagile.reputationpool.grpc.EventBroadcaster;
 import io.github.preagile.reputationpool.persistence.PostgresAuditTrail;
 import io.github.preagile.reputationpool.persistence.PostgresResourceStore;
 import java.time.Clock;
+import java.util.List;
 import java.util.random.RandomGenerator;
 import javax.sql.DataSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -26,9 +30,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * <p>The {@link DataSource} is Spring Boot's auto-configured one (Flyway migrates the persistence
  * jar's {@code V1__snapshot}/{@code V2__audit} schema against it before these beans are used).
  *
- * <p>Scope note: this module depends only on core + persistence. The gRPC broadcaster and its
- * {@code CompositeEventSink} live in the (unconsumed) server module, so for now the pool's only sink
- * is the audit trail; issue #3 introduces a cloud-side broadcaster and fans out to both.
+ * <p>Scope note: this module depends only on core + persistence, so the gRPC broadcaster and the
+ * {@code CompositeEventSink} are cloud-side ports of the (unconsumed) server module's classes. Pool
+ * events fan out to both the live gRPC stream and the durable audit trail.
  */
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
@@ -64,21 +68,35 @@ public class EngineConfiguration {
     }
 
     /**
-     * The assembled pool: the same graph as {@code AdvisorServer.assemble}, minus the gRPC parts. The
-     * pool is not restored here — {@link PoolLifecycle#start()} does that after Flyway has migrated and
-     * before any traffic.
+     * The gRPC event broadcaster from the shared grpc module — both a pool {@code EventSink} and the
+     * {@code ReputationAdvisorService}'s subscription registry. It is a plain (framework-agnostic) class
+     * there, so cloud registers it as a bean; {@code close()} completes open streams on shutdown.
+     */
+    @Bean(destroyMethod = "close")
+    EventBroadcaster eventBroadcaster() {
+        return new EventBroadcaster();
+    }
+
+    /**
+     * The assembled pool: the same graph as {@code AdvisorServer.assemble}. Pool events fan out through
+     * a {@link CompositeEventSink} to both the live gRPC {@link EventBroadcaster} and the durable audit
+     * trail — the pool still holds exactly one sink, so the core stays untouched. The pool is not
+     * restored here — {@link PoolLifecycle#start()} does that after Flyway has migrated and before any
+     * traffic.
      */
     @Bean
-    ResourcePool reputationPool(Clock clock, PostgresAuditTrail auditTrail, ReputationPoolProperties props) {
+    ResourcePool reputationPool(
+            Clock clock, EventBroadcaster broadcaster, PostgresAuditTrail auditTrail, ReputationPoolProperties props) {
         ReputationEngine engine = new ReputationEngine(
                 new AdaptiveCooldownPolicy(),
                 props.engine().windowSize(),
                 props.engine().coolAfter(),
                 props.engine().recoverAfter());
+        EventSink sink = new CompositeEventSink(List.of(broadcaster, auditTrail));
         return new ResourcePool(
                 engine,
                 new WeightedRandomSelectionStrategy(),
-                auditTrail,
+                sink,
                 clock,
                 RandomGenerator.getDefault(),
                 props.leaseTtl());

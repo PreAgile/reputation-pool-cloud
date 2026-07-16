@@ -4,7 +4,10 @@ spring:
   datasource:
     url: ${REPUTATION_POOL_DB_URL:jdbc:postgresql://localhost:5435/reputation_pool}
     username: ${REPUTATION_POOL_DB_USERNAME:reputation_pool}
-    password: ${REPUTATION_POOL_DB_PASSWORD:reputation_pool}
+    # No baked-in default: the password must be supplied via REPUTATION_POOL_DB_PASSWORD (empty here
+    # so a missing value fails to connect rather than silently using a known password). Local dev sets
+    # it to the compose.yaml value; production supplies it from a secret.
+    password: ${REPUTATION_POOL_DB_PASSWORD:}
   flyway:
     enabled: true
     # locations default to classpath:db/migration — the reputation-pool-persistence jar ships
