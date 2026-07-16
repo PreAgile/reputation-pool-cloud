@@ -29,13 +29,13 @@ dependencies {
     // DataSource (HikariCP) + Flyway auto-configuration for the persistence adapter's store/trail.
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("net.devh:grpc-spring-boot-starter:3.1.0.RELEASE")
-    // 0.4.0 introduces per-pool namespacing: the PostgresResourceStore(dataSource, clock, poolId)
+    // 0.3.1 introduces per-pool namespacing: the PostgresResourceStore(dataSource, clock, poolId)
     // constructor and the gRPC service's protected pool() routing hook that per-tenant isolation needs.
-    implementation("io.github.preagile:reputation-pool-core:0.4.0")
-    implementation("io.github.preagile:reputation-pool-persistence:0.4.0")
+    implementation("io.github.preagile:reputation-pool-core:0.3.1")
+    implementation("io.github.preagile:reputation-pool-persistence:0.3.1")
     // The gRPC contract + adapter (proto stubs, mapping, broadcaster, advisor service base). Brings
     // grpc-protobuf/grpc-stub/protobuf-java transitively, so cloud adds no codegen of its own.
-    implementation("io.github.preagile:reputation-pool-grpc:0.4.0")
+    implementation("io.github.preagile:reputation-pool-grpc:0.3.1")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     // In-process transport: cloud's gRPC service test rides the real wiring without sockets or ports.
