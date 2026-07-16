@@ -3,7 +3,6 @@ package io.github.preagile.reputationpool.cloud.security;
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Clock;
@@ -15,20 +14,32 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 
 /**
- * Bridges the single-key env UX (issue #4) onto the table-backed model (issue #9): when
- * {@code REPUTATION_POOL_API_KEY} is set and {@code api_key} is still empty, it seeds the
- * {@link TenantContext#DEFAULT_TENANT default} tenant plus that one key on startup. Idempotent — a
- * non-empty table is left untouched — so restarts and later key management (#11) are safe. When no key
- * is configured it seeds nothing, leaving the table empty so the interceptor rejects every call (fail
- * closed), exactly as before.
+ * Bridges the single-key env UX (issue #4) onto the table-backed model (issue #9): on startup it
+ * reconciles the {@link TenantContext#DEFAULT_TENANT default} tenant's seed key to match
+ * {@code REPUTATION_POOL_API_KEY}. Reconcile, not seed-once, so it does three jobs at once:
  *
- * <p>Runs as an {@link ApplicationRunner}, i.e. after Flyway has migrated the schema and the context is
- * built. A request arriving in the brief window before it completes is rejected (empty table), never
- * wrongly admitted — the failure mode stays closed.
+ * <ul>
+ *   <li><b>Idempotent + concurrency-safe.</b> Both writes use {@code ON CONFLICT}, so two instances
+ *       cold-starting together (or any restart) converge instead of one failing on a duplicate key —
+ *       there is no check-then-act race.
+ *   <li><b>Rotation.</b> Changing the env key activates the new key ({@code ON CONFLICT DO UPDATE}
+ *       clears any stale {@code revoked_at}) and revokes the previously seeded key, so the env var is
+ *       the single source of truth for the default tenant's bootstrap key — both A&rarr;B and B&rarr;A.
+ *   <li><b>Fail closed.</b> When no key is configured it writes nothing and leaves existing rows
+ *       alone (an accidental unset must not lock the service out), so an unseeded table rejects every
+ *       call.
+ * </ul>
+ *
+ * <p>Scope: it only ever touches {@code label LIKE 'seed:%'} rows, so per-tenant keys minted by the
+ * control plane (#11) are never revoked here. Full multi-tenant key management is #11; this is just
+ * the bootstrap key. Runs as an {@link ApplicationRunner}, i.e. after Flyway has migrated; a request
+ * in the brief window before it completes is rejected (empty/stale), never wrongly admitted.
  */
 public final class ApiKeySeeder implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ApiKeySeeder.class);
+
+    private static final String SEED_LABEL = "seed:REPUTATION_POOL_API_KEY";
 
     private final DataSource dataSource;
     private final SecurityProperties properties;
@@ -46,25 +57,19 @@ public final class ApiKeySeeder implements ApplicationRunner {
             log.warn("no reputation-pool.auth.api-key configured — seeded no key; all gRPC calls rejected (fail closed)");
             return;
         }
+        byte[] keyHash = ApiKeyHashing.sha256(properties.apiKey());
+        Timestamp now = Timestamp.from(clock.instant());
         try (Connection connection = dataSource.getConnection()) {
-            if (hasAnyKey(connection)) {
-                return; // already seeded or managed elsewhere — leave it alone
+            upsertDefaultTenant(connection, now);
+            activateKey(connection, keyHash, now);
+            int revoked = revokeOtherSeedKeys(connection, keyHash, now);
+            if (revoked > 0) {
+                log.info("rotated default tenant API key from REPUTATION_POOL_API_KEY (revoked {} prior seed key(s))", revoked);
             }
-            Timestamp now = Timestamp.from(clock.instant());
-            insertDefaultTenant(connection, now);
-            insertKey(connection, ApiKeyHashing.sha256(properties.apiKey()), now);
-            log.info("seeded default tenant + API key from REPUTATION_POOL_API_KEY");
         }
     }
 
-    private static boolean hasAnyKey(Connection connection) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("SELECT 1 FROM api_key LIMIT 1");
-                ResultSet rows = statement.executeQuery()) {
-            return rows.next();
-        }
-    }
-
-    private static void insertDefaultTenant(Connection connection, Timestamp now) throws SQLException {
+    private static void upsertDefaultTenant(Connection connection, Timestamp now) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO tenant (id, name, status, created_at) VALUES (?, ?, 'active', ?)"
                         + " ON CONFLICT (id) DO NOTHING")) {
@@ -75,14 +80,29 @@ public final class ApiKeySeeder implements ApplicationRunner {
         }
     }
 
-    private static void insertKey(Connection connection, byte[] keyHash, Timestamp now) throws SQLException {
+    /** Inserts the key, or re-activates it if a (possibly revoked) row already exists for this hash. */
+    private static void activateKey(Connection connection, byte[] keyHash, Timestamp now) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO api_key (key_hash, tenant_id, label, created_at) VALUES (?, ?, ?, ?)")) {
+                "INSERT INTO api_key (key_hash, tenant_id, label, created_at) VALUES (?, ?, ?, ?)"
+                        + " ON CONFLICT (key_hash) DO UPDATE SET revoked_at = NULL")) {
             statement.setBytes(1, keyHash);
             statement.setString(2, TenantContext.DEFAULT_TENANT);
-            statement.setString(3, "seed:REPUTATION_POOL_API_KEY");
+            statement.setString(3, SEED_LABEL);
             statement.setTimestamp(4, now);
             statement.executeUpdate();
+        }
+    }
+
+    /** Revokes every other seed key of the default tenant, so the env var is the one active seed key. */
+    private static int revokeOtherSeedKeys(Connection connection, byte[] keyHash, Timestamp now) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE api_key SET revoked_at = ? WHERE tenant_id = ? AND label = ?"
+                        + " AND key_hash <> ? AND revoked_at IS NULL")) {
+            statement.setTimestamp(1, now);
+            statement.setString(2, TenantContext.DEFAULT_TENANT);
+            statement.setString(3, SEED_LABEL);
+            statement.setBytes(4, keyHash);
+            return statement.executeUpdate();
         }
     }
 }
