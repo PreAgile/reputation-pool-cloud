@@ -50,20 +50,26 @@ class ApiKeySeederIT {
     @Test
     void reconcilesIdempotentlyAndRotatesBothWays() throws Exception {
         // The app's own startup seeder already activated "bootstrap-key" for the default tenant.
-        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key"))).contains("default");
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key")))
+                .contains("default");
 
         // Idempotent: re-running with the same key must not fail (ON CONFLICT) and leaves it active.
         reconcile("bootstrap-key");
-        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key"))).contains("default");
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key")))
+                .contains("default");
 
         // Rotate: the new key becomes active, the previous seed key is revoked.
         reconcile("rotated-key");
-        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("rotated-key"))).contains("default");
-        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key"))).isEmpty();
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("rotated-key")))
+                .contains("default");
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key")))
+                .isEmpty();
 
         // Rotate back: a previously revoked key is re-activated (ON CONFLICT DO UPDATE clears revoked_at).
         reconcile("bootstrap-key");
-        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key"))).contains("default");
-        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("rotated-key"))).isEmpty();
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key")))
+                .contains("default");
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("rotated-key")))
+                .isEmpty();
     }
 }

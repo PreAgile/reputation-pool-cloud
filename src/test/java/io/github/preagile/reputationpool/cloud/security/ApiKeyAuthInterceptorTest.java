@@ -49,8 +49,8 @@ class ApiKeyAuthInterceptorTest {
     private static final Metadata.Key<String> API_KEY = Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER);
 
     /** Resolves only VALID_KEY, to TENANT — the "one seeded key" case. */
-    private static final TenantResolver ONE_KEY = keyHash ->
-            Arrays.equals(keyHash, ApiKeyHashing.sha256(VALID_KEY)) ? Optional.of(TENANT) : Optional.empty();
+    private static final TenantResolver ONE_KEY =
+            keyHash -> Arrays.equals(keyHash, ApiKeyHashing.sha256(VALID_KEY)) ? Optional.of(TENANT) : Optional.empty();
 
     /** Resolves nothing — the fail-closed case (no key seeded / empty api_key table). */
     private static final TenantResolver NONE = keyHash -> Optional.empty();

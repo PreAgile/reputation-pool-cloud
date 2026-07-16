@@ -45,7 +45,8 @@ class TenantResolutionIT {
 
     @Test
     void seededEnvKeyResolvesToDefaultTenant() {
-        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("integration-key"))).contains("default");
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("integration-key")))
+                .contains("default");
     }
 
     @Test

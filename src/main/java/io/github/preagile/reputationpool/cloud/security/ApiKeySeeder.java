@@ -54,7 +54,8 @@ public final class ApiKeySeeder implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws SQLException {
         if (!properties.configured()) {
-            log.warn("no reputation-pool.auth.api-key configured — seeded no key; all gRPC calls rejected (fail closed)");
+            log.warn(
+                    "no reputation-pool.auth.api-key configured — seeded no key; all gRPC calls rejected (fail closed)");
             return;
         }
         byte[] keyHash = ApiKeyHashing.sha256(properties.apiKey());
@@ -64,7 +65,9 @@ public final class ApiKeySeeder implements ApplicationRunner {
             activateKey(connection, keyHash, now);
             int revoked = revokeOtherSeedKeys(connection, keyHash, now);
             if (revoked > 0) {
-                log.info("rotated default tenant API key from REPUTATION_POOL_API_KEY (revoked {} prior seed key(s))", revoked);
+                log.info(
+                        "rotated default tenant API key from REPUTATION_POOL_API_KEY (revoked {} prior seed key(s))",
+                        revoked);
             }
         }
     }
@@ -95,8 +98,8 @@ public final class ApiKeySeeder implements ApplicationRunner {
 
     /** Revokes every other seed key of the default tenant, so the env var is the one active seed key. */
     private static int revokeOtherSeedKeys(Connection connection, byte[] keyHash, Timestamp now) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "UPDATE api_key SET revoked_at = ? WHERE tenant_id = ? AND label = ?"
+        try (PreparedStatement statement =
+                connection.prepareStatement("UPDATE api_key SET revoked_at = ? WHERE tenant_id = ? AND label = ?"
                         + " AND key_hash <> ? AND revoked_at IS NULL")) {
             statement.setTimestamp(1, now);
             statement.setString(2, TenantContext.DEFAULT_TENANT);
