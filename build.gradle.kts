@@ -36,11 +36,13 @@ dependencies {
     // security filter chain here only covers the HTTP control plane (port 8083).
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
-    implementation("io.github.preagile:reputation-pool-core:0.3.0")
-    implementation("io.github.preagile:reputation-pool-persistence:0.3.0")
+    // 0.3.1 introduces per-pool namespacing: the PostgresResourceStore(dataSource, clock, poolId)
+    // constructor and the gRPC service's protected pool() routing hook that per-tenant isolation needs.
+    implementation("io.github.preagile:reputation-pool-core:0.3.1")
+    implementation("io.github.preagile:reputation-pool-persistence:0.3.1")
     // The gRPC contract + adapter (proto stubs, mapping, broadcaster, advisor service base). Brings
     // grpc-protobuf/grpc-stub/protobuf-java transitively, so cloud adds no codegen of its own.
-    implementation("io.github.preagile:reputation-pool-grpc:0.3.0")
+    implementation("io.github.preagile:reputation-pool-grpc:0.3.1")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     // MockMvc security helpers (SecurityMockMvcRequestPostProcessors, etc.) for the control-plane slice test.

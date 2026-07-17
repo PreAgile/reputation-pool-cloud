@@ -1,8 +1,7 @@
 package io.github.preagile.reputationpool.cloud.engine;
 
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
-import io.github.preagile.reputationpool.core.pool.ResourcePool;
-import io.github.preagile.reputationpool.core.port.ResourceStore;
+import io.github.preagile.reputationpool.cloud.engine.PerTenantPoolRegistry.ManagedPool;
 import java.time.Clock;
 import java.time.Duration;
 import org.slf4j.Logger;
@@ -12,32 +11,34 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Owns the pool's durable lifecycle, ported from the public {@code AdvisorServer}: restore-on-start
- * (before any traffic), a periodic checkpoint, an opt-in retention purge, and a final checkpoint on
- * orderly shutdown.
+ * Owns the durable lifecycle of every tenant's pool, ported from the public {@code AdvisorServer}:
+ * restore-on-start (before any traffic), a periodic checkpoint, an opt-in retention purge, and a final
+ * checkpoint on orderly shutdown. Where the reference drives one pool, this fans each chore out across
+ * the {@link PerTenantPoolRegistry}'s per-tenant pools.
  *
  * <p>Implemented as a {@link SmartLifecycle} at a low phase so it starts before the web/gRPC servers
- * (the pool is rehydrated before it can serve a request) and stops after them (the final checkpoint
+ * (pools are rehydrated before they can serve a request) and stops after them (the final checkpoint
  * captures a state no longer changing). The audit trail's own bean is closed after this bean during
  * shutdown, so the trail's tail is flushed only after the final save.
  *
- * <p>Both scheduled chores are exception-isolated on purpose: {@code @Scheduled} with a fixed delay
- * keeps running after a failed execution, but swallowing the error here means one bad save or purge is
- * skipped and retried next interval, matching the reference's {@code scheduleAtFixedRate} discipline.
+ * <p><b>Per-tenant exception isolation.</b> Both the restore fan-out and the checkpoint fan-out isolate
+ * failures per tenant: one tenant's DB error is logged and skipped so it never blocks another tenant's
+ * restore or checkpoint. That is on top of the whole-chore isolation the reference already has —
+ * {@code @Scheduled} with a fixed delay keeps running after a failed execution, and swallowing here
+ * means a bad interval is skipped and retried next time.
  */
 @Component
 public class PoolLifecycle implements SmartLifecycle {
 
     /**
-     * Low phase: start before, stop after, the servers. #3's gRPC server will sit at a higher phase so
-     * restore precedes traffic and the final checkpoint follows a drained server.
+     * Low phase: start before, stop after, the servers, so restore precedes traffic and the final
+     * checkpoint follows a drained server.
      */
     static final int PHASE = 0;
 
     private static final Logger log = LoggerFactory.getLogger(PoolLifecycle.class);
 
-    private final ResourcePool pool;
-    private final ResourceStore store;
+    private final PerTenantPoolRegistry registry;
     private final AuditPurger auditPurger;
     private final Clock clock;
     private final ReputationPoolProperties properties;
@@ -45,24 +46,30 @@ public class PoolLifecycle implements SmartLifecycle {
     private volatile boolean running = false;
 
     public PoolLifecycle(
-            ResourcePool pool,
-            ResourceStore store,
-            AuditPurger auditPurger,
-            Clock clock,
-            ReputationPoolProperties properties) {
-        this.pool = pool;
-        this.store = store;
+            PerTenantPoolRegistry registry, AuditPurger auditPurger, Clock clock, ReputationPoolProperties properties) {
+        this.registry = registry;
         this.auditPurger = auditPurger;
         this.clock = clock;
         this.properties = properties;
     }
 
-    /** Rehydrates the pool from the last checkpoint. Empty store means first run — nothing to restore. */
+    /**
+     * Rehydrates every known tenant's pool from its last checkpoint, before any traffic. Each tenant is
+     * built (materializing its pool + store) and restored independently, so one tenant's failed load
+     * never blocks the rest. A tenant with no saved snapshot is a first run — nothing to restore.
+     */
     @Override
     public void start() {
-        store.load().ifPresent(pool::restore);
+        for (String tenantId : registry.knownTenantIds()) {
+            try {
+                ManagedPool managed = registry.manage(tenantId);
+                managed.store().load().ifPresent(managed.pool()::restore);
+            } catch (RuntimeException e) {
+                log.warn("restore failed for tenant {}; continuing with the other tenants", tenantId, e);
+            }
+        }
         running = true;
-        log.info("reputation pool restored and running");
+        log.info("reputation pools restored and running");
     }
 
     /** Orderly shutdown: one final checkpoint of the now-stable state so a planned restart loses nothing. */
@@ -83,17 +90,21 @@ public class PoolLifecycle implements SmartLifecycle {
     }
 
     /**
-     * Writes the pool's current snapshot to the store. Exception-isolated: a failed save is logged and
-     * swallowed so the periodic schedule survives a transient DB error.
+     * Writes each tenant's current snapshot to its own store. Isolated per tenant and as a whole: a
+     * failed save is logged and swallowed so one tenant's transient DB error neither aborts the other
+     * tenants' checkpoints nor cancels the periodic schedule.
      */
     @Scheduled(
             initialDelayString = "${reputation-pool.checkpoint-interval:PT30S}",
             fixedDelayString = "${reputation-pool.checkpoint-interval:PT30S}")
     void checkpoint() {
-        try {
-            store.save(pool.snapshot());
-        } catch (RuntimeException e) {
-            log.warn("checkpoint save failed; will retry on the next interval", e);
+        for (ManagedPool managed : registry.managedPools()) {
+            try {
+                managed.store().save(managed.pool().snapshot());
+            } catch (RuntimeException e) {
+                log.warn(
+                        "checkpoint save failed for tenant {}; will retry on the next interval", managed.tenantId(), e);
+            }
         }
     }
 
