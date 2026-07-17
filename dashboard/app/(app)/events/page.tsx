@@ -23,7 +23,7 @@ const EVENT_META: Record<string, { label: string; cls: string }> = {
   RESOURCE_BLOCKLISTED: { label: "차단", cls: "text-block-ink bg-block/12" },
   RESOURCE_UNBLOCKED: { label: "차단 해제", cls: "text-ok-ink bg-ok/12" },
   RESOURCE_LEASED: { label: "임대", cls: "text-accent bg-accent-soft" },
-  LEASE_RELEASED: { label: "반납", cls: "text-muted bg-muted/12" },
+  LEASE_RELEASED: { label: "반납", cls: "text-muted-ink bg-muted/12" },
 };
 
 /** 필터 드롭다운/정렬에 쓰는 알려진 유형 순서. */
@@ -52,7 +52,7 @@ const CAUSE_LABEL: Record<string, string> = {
 };
 
 function eventMeta(type: string): { label: string; cls: string } {
-  return EVENT_META[type] ?? { label: type, cls: "text-muted bg-muted/12" };
+  return EVENT_META[type] ?? { label: type, cls: "text-muted-ink bg-muted/12" };
 }
 
 /** ISO-8601 → 월/일 시:분:초(로컬). 파싱 실패 시 원문. */

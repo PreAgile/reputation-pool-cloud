@@ -2,7 +2,15 @@
  * 결정론적 테스트 픽스처 — component/integration(MSW)과 visual(Playwright route stub)이 공유한다.
  * 라이브 생성기와 달리 값이 고정돼 있어야 스크린샷·단언이 흔들리지 않는다.
  */
-import type { PoolOverview, ResourceDetail, ScoreHistory, AuditEventPage, UsageSummary } from "../lib/types";
+import type {
+  PoolOverview,
+  ResourceDetail,
+  ScoreHistory,
+  AuditEventPage,
+  UsageSummary,
+  Tenant,
+  ApiKeySummary,
+} from "../lib/types";
 
 export const overviewFixture: PoolOverview = {
   summary: {
@@ -128,3 +136,50 @@ export const usageFixture: UsageSummary = {
     { date: "2026-07-18", count: 360 },
   ],
 };
+
+/** 관리자 화면 — 테넌트 목록(최신 생성순 정렬 검증용으로 생성일 섞음). */
+export const tenantsFixture: Tenant[] = [
+  {
+    id: "default",
+    name: "기본 테넌트",
+    status: "ACTIVE",
+    createdAt: "2026-07-10T09:00:00Z",
+  },
+  {
+    id: "acme",
+    name: "Acme Corp",
+    status: "ACTIVE",
+    createdAt: "2026-07-17T12:00:00Z",
+  },
+  {
+    id: "old-co",
+    name: "Old Co",
+    status: "SUSPENDED",
+    createdAt: "2026-07-01T00:00:00Z",
+  },
+];
+
+/** API 키 화면 — 활성 2 + 폐기 1(활성 먼저·최신순 정렬 검증용). */
+export const apiKeysFixture: ApiKeySummary[] = [
+  {
+    id: "key-active-new",
+    label: "프로덕션 수집기",
+    prefix: "rp_live_ab",
+    createdAt: "2026-07-17T10:00:00Z",
+    revokedAt: null,
+  },
+  {
+    id: "key-active-old",
+    label: null,
+    prefix: "rp_live_cd",
+    createdAt: "2026-07-12T10:00:00Z",
+    revokedAt: null,
+  },
+  {
+    id: "key-revoked",
+    label: "구 스테이징",
+    prefix: "rp_live_ef",
+    createdAt: "2026-07-15T10:00:00Z",
+    revokedAt: "2026-07-16T10:00:00Z",
+  },
+];

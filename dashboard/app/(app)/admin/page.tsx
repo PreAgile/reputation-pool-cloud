@@ -26,7 +26,7 @@ function TenantStatusBadge({ status }: { status: string }) {
       ? "text-ok-ink bg-ok/12"
       : s === "SUSPENDED" || s === "BLOCKED" || s === "DISABLED"
         ? "text-block-ink bg-block/12"
-        : "text-muted bg-muted/12";
+        : "text-muted-ink bg-muted/12";
   return (
     <span
       className={cn(
