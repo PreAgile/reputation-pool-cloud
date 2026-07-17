@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import type { AuditEventPage, AuditEventRecord, ResourceKind } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { usePoll } from "@/lib/use-poll";
 
 /** 첫 페이지(최근 50건)를 다시 불러오는 폴링 주기. */
 const POLL_MS = 5000;
@@ -149,12 +150,8 @@ export default function EventsPage() {
     void load();
   }, [load]);
 
-  // 폴링: 일시정지가 아니면 주기적으로 첫 페이지 갱신. 언마운트/일시정지 시 정지.
-  useEffect(() => {
-    if (paused) return;
-    const id = setInterval(() => void load(), POLL_MS);
-    return () => clearInterval(id);
-  }, [paused, load]);
+  // 폴링: 일시정지가 아니고 탭이 보일 때만 첫 페이지를 주기 갱신(usePoll이 백그라운드 탭을 건너뛴다).
+  usePoll(() => void load(), POLL_MS, !paused);
 
   const rows = useMemo(() => {
     if (!events) return [];

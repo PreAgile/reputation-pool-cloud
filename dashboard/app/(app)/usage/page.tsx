@@ -43,7 +43,7 @@ function ChartTooltip({ active, payload, label }: TooltipProps<number, string>) 
       <div className="mb-1 font-semibold text-muted tnum">{fmtDay(label as number)}</div>
       <div className="flex items-center gap-2">
         <span className="size-2 rounded-full" style={{ background: "var(--accent)" }} />
-        <span className="text-ink">리스</span>
+        <span className="text-ink">임대</span>
         <span className="ml-auto font-mono tnum text-ink">{fmtNum(value)}</span>
       </div>
     </div>
@@ -97,14 +97,14 @@ export default function UsagePage() {
 
       {/* 미터 타일 */}
       <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatTile label="이번 달 리스 총계" value={fmtNum(data.monthLeaseTotal)} accent />
-        <StatTile label="현재 풀 크기" value={fmtNum(data.poolSize)} />
-        <StatTile label="최근 30일 리스 합계" value={fmtNum(windowTotal)} />
+        <StatTile label="이번 달 임대 건수" value={fmtNum(data.monthLeaseTotal)} accent />
+        <StatTile label="등록 리소스 수" value={fmtNum(data.poolSize)} />
+        <StatTile label="최근 30일 임대 건수" value={fmtNum(windowTotal)} />
       </section>
 
       {/* 일별 리스 차트 */}
       <section className="mb-6">
-        <h2 className="mb-3 text-sm font-bold text-ink">일별 리스 · 최근 30일</h2>
+        <h2 className="mb-3 text-sm font-bold text-ink">일별 임대 · 최근 30일</h2>
         <Card className="p-4">
           {hasBars ? (
             <div className="h-72 w-full">
@@ -130,7 +130,7 @@ export default function UsagePage() {
                   <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--surface-2)" }} />
                   <Bar
                     dataKey="count"
-                    name="리스"
+                    name="임대"
                     fill="var(--accent)"
                     radius={[3, 3, 0, 0]}
                     isAnimationActive={false}
@@ -140,7 +140,7 @@ export default function UsagePage() {
             </div>
           ) : (
             <div className="flex h-40 items-center justify-center text-sm text-muted">
-              아직 리스 기록이 없습니다.
+              아직 임대 기록이 없습니다.
             </div>
           )}
         </Card>
@@ -169,7 +169,7 @@ function PageHeader() {
   return (
     <div className="mb-6">
       <h1 className="mb-2 text-xl font-extrabold tracking-tight text-ink">사용량</h1>
-      <p className="text-sm text-muted">테넌트의 리스 사용량과 풀 규모를 한눈에 확인합니다.</p>
+      <p className="text-sm text-muted">리소스가 이번 달 얼마나 임대됐는지와 풀 현황을 한눈에 봅니다.</p>
     </div>
   );
 }

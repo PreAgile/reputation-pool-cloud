@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { PoolOverview, ResourceKind, ResourceOverview, ResourceState } from "@/lib/types";
@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/status-badge";
 import { Sparkline } from "@/components/sparkline";
 import { cn } from "@/lib/cn";
+import { usePoll } from "@/lib/use-poll";
 
 /** 심각도 정렬용 가중치: 높을수록 위로. BLOCKLISTED > COOLING > RECOVERING > HEALTHY. */
 const SEVERITY: Record<ResourceState, number> = {
@@ -54,11 +55,18 @@ export default function OverviewPage() {
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<ResourceKind | "ALL">("ALL");
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api<PoolOverview>("/pools/resources")
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : "불러오지 못했습니다"));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // 보이는 동안 15초마다 갱신(백그라운드 탭이면 자동 정지). 상태·score가 알아서 최신으로.
+  usePoll(load, 15000);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -141,11 +149,23 @@ export default function OverviewPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {rows.map((r) => {
+                    const go = () =>
+                      router.push(`/resources/${r.kind.toLowerCase()}/${encodeURIComponent(r.value)}`);
+                    return (
                     <tr
                       key={`${r.kind}:${r.value}`}
-                      onClick={() => router.push(`/resources/${r.kind.toLowerCase()}/${encodeURIComponent(r.value)}`)}
-                      className="cursor-pointer border-t border-line transition hover:bg-surface-2"
+                      onClick={go}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          go();
+                        }
+                      }}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`${r.value} 상세 보기`}
+                      className="cursor-pointer border-t border-line transition hover:bg-surface-2 focus:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >
                       <td className="px-4 py-2.5">
                         <KindBadge kind={r.kind} />
@@ -165,7 +185,8 @@ export default function OverviewPage() {
                       <td className="tnum px-4 py-2.5 text-right text-muted">{r.contexts}</td>
                       <td className="px-4 py-2.5 text-muted">{formatBlock(r)}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {rows.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-4 py-8 text-center text-muted">
