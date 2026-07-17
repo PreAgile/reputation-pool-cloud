@@ -22,7 +22,7 @@ function KeyStatusBadge({ revoked }: { revoked: boolean }) {
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-bold",
-        revoked ? "text-muted bg-muted/12" : "text-ok bg-ok/12",
+        revoked ? "text-muted bg-muted/12" : "text-ok-ink bg-ok/12",
       )}
     >
       <span className="size-1.5 rounded-full bg-current" />
