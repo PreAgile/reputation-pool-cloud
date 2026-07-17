@@ -23,9 +23,9 @@ function TenantStatusBadge({ status }: { status: string }) {
   const s = status.toUpperCase();
   const tone =
     s === "ACTIVE"
-      ? "text-ok bg-ok/12"
+      ? "text-ok-ink bg-ok/12"
       : s === "SUSPENDED" || s === "BLOCKED" || s === "DISABLED"
-        ? "text-block bg-block/12"
+        ? "text-block-ink bg-block/12"
         : "text-muted bg-muted/12";
   return (
     <span
@@ -133,7 +133,7 @@ export default function AdminPage() {
         {health === null ? (
           <span className="text-sm text-muted">확인 중…</span>
         ) : health === "error" ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-block/12 px-2 py-0.5 text-xs font-bold text-block">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-block/12 px-2 py-0.5 text-xs font-bold text-block-ink">
             <span className="size-1.5 rounded-full bg-current" />
             확인 불가
           </span>
@@ -141,7 +141,7 @@ export default function AdminPage() {
           <span
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-bold",
-              health.status === "UP" ? "text-ok bg-ok/12" : "text-block bg-block/12",
+              health.status === "UP" ? "text-ok-ink bg-ok/12" : "text-block-ink bg-block/12",
             )}
           >
             <span className="size-1.5 rounded-full bg-current" />

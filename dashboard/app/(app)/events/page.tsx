@@ -18,10 +18,10 @@ const PAGE_SIZE = 50;
  * dot + 텍스트로 유형을 구분한다. 백엔드 PoolEvent 6종과 1:1.
  */
 const EVENT_META: Record<string, { label: string; cls: string }> = {
-  RESOURCE_COOLED: { label: "냉각 진입", cls: "text-cool bg-cool/12" },
-  RESOURCE_RECOVERED: { label: "회복", cls: "text-recover bg-recover/12" },
-  RESOURCE_BLOCKLISTED: { label: "차단", cls: "text-block bg-block/12" },
-  RESOURCE_UNBLOCKED: { label: "차단 해제", cls: "text-ok bg-ok/12" },
+  RESOURCE_COOLED: { label: "냉각 진입", cls: "text-cool-ink bg-cool/12" },
+  RESOURCE_RECOVERED: { label: "회복", cls: "text-recover-ink bg-recover/12" },
+  RESOURCE_BLOCKLISTED: { label: "차단", cls: "text-block-ink bg-block/12" },
+  RESOURCE_UNBLOCKED: { label: "차단 해제", cls: "text-ok-ink bg-ok/12" },
   RESOURCE_LEASED: { label: "임대", cls: "text-accent bg-accent-soft" },
   LEASE_RELEASED: { label: "반납", cls: "text-muted bg-muted/12" },
 };
@@ -204,7 +204,7 @@ export default function EventsPage() {
 
       {/* 폴링 실패 경고(직전 데이터 유지 중) */}
       {pollWarning && !firstError && (
-        <Card className="mb-4 border-cool/40 bg-cool/8 px-4 py-2.5 text-xs font-semibold text-cool">
+        <Card className="mb-4 border-cool/40 bg-cool/8 px-4 py-2.5 text-xs font-semibold text-cool-ink">
           최신 갱신 실패 · {pollWarning} — 직전 데이터를 표시 중입니다.
         </Card>
       )}

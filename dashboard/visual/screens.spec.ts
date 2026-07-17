@@ -34,35 +34,34 @@ test.describe("visual regression + a11y (결정론적 fixture)", () => {
     });
   }
 
-  test("로그인 화면 — a11y 심각/치명 위반 없음", async ({ page }) => {
-    await page.goto("/login");
-    await expect(page.getByRole("button", { name: "로그인" })).toBeVisible();
-    // 대비 예외(둘 다 색 토큰의 후속 디자인 결정 사항이라 게이트에서 제외 — muted·label·구조 등 나머지는 계속 검사):
-    //  1) 토스 블루 브랜드색: 흰 글자/accent 버튼 ≈3.7, accent/accent-soft ≈3.3.
-    //  2) 기능색 상태 배지: text-{색} on bg-{색}/12(냉각 amber ≈2.0, 차단 red ≈3.2). tint 위 어두운 변형 필요.
-    const { violations } = await new AxeBuilder({ page })
-      .exclude(".bg-accent")
-      .exclude(".bg-accent-soft")
-      .exclude('[class*="/12"]')
-      .analyze();
+  // a11y는 라이트·다크 둘 다 검사(색 토큰이 테마별로 달라 대비도 테마별로 확인해야 함).
+  // 예외 없이 전 표면을 검사 — 브랜드/기능색을 AA(≥4.5)로 맞췄으므로 color-contrast도 통과해야 한다.
+  async function assertNoSeriousA11y(page: Page) {
+    const { violations } = await new AxeBuilder({ page }).analyze();
     const serious = violations.filter((v) => v.impact === "critical" || v.impact === "serious");
-    expect(serious, JSON.stringify(serious.map((v) => v.id))).toEqual([]);
-  });
+    expect(serious, JSON.stringify(serious.map((v) => ({ id: v.id, nodes: v.nodes.length })))).toEqual([]);
+  }
 
-  test("오버뷰 — a11y 심각/치명 위반 없음", async ({ page }) => {
-    await page.addInitScript((t) => localStorage.setItem("rp_admin_token", t), TOKEN);
-    await stubOverview(page);
-    await page.goto("/");
-    await expect(page.getByText("proxy-bad")).toBeVisible();
-    // 대비 예외(둘 다 색 토큰의 후속 디자인 결정 사항이라 게이트에서 제외 — muted·label·구조 등 나머지는 계속 검사):
-    //  1) 토스 블루 브랜드색: 흰 글자/accent 버튼 ≈3.7, accent/accent-soft ≈3.3.
-    //  2) 기능색 상태 배지: text-{색} on bg-{색}/12(냉각 amber ≈2.0, 차단 red ≈3.2). tint 위 어두운 변형 필요.
-    const { violations } = await new AxeBuilder({ page })
-      .exclude(".bg-accent")
-      .exclude(".bg-accent-soft")
-      .exclude('[class*="/12"]')
-      .analyze();
-    const serious = violations.filter((v) => v.impact === "critical" || v.impact === "serious");
-    expect(serious, JSON.stringify(serious.map((v) => v.id))).toEqual([]);
-  });
+  for (const theme of ["light", "dark"] as const) {
+    test(`로그인 화면 — a11y 심각/치명 위반 없음 — ${theme}`, async ({ page }) => {
+      await page.addInitScript((th) => localStorage.setItem("theme", th), theme);
+      await page.goto("/login");
+      await expect(page.getByRole("button", { name: "로그인" })).toBeVisible();
+      await assertNoSeriousA11y(page);
+    });
+
+    test(`오버뷰 — a11y 심각/치명 위반 없음 — ${theme}`, async ({ page }) => {
+      await page.addInitScript(
+        ([t, th]) => {
+          localStorage.setItem("rp_admin_token", t);
+          localStorage.setItem("theme", th);
+        },
+        [TOKEN, theme],
+      );
+      await stubOverview(page);
+      await page.goto("/");
+      await expect(page.getByText("proxy-bad")).toBeVisible();
+      await assertNoSeriousA11y(page);
+    });
+  }
 });

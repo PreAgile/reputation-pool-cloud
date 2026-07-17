@@ -13,13 +13,24 @@
   /* muted: 흰 배경에서 WCAG AA(4.5:1)를 넘도록 진하게. 예전 #8b95a1은 3.03:1로 미달(a11y 회귀에서 검출). */
   --muted: #5f6b7a;
   --line: #e8ebee;
-  --accent: #3182f6;
+  /* accent: 흰 글자 버튼(≈5.4)·accent-soft 위 텍스트(≈4.8)가 WCAG AA를 넘도록 살짝 어둡게.
+     예전 #3182f6은 흰 글자 3.71·soft 위 3.31로 미달(a11y 게이트에서 검출). */
+  --accent: #1a66d6;
   --accent-soft: #e8f3ff;
-  /* 상태 = 기능색 (accent와 분리) */
+  /* accent-ink: accent 배경 위 글자색(라이트는 흰색). 다크에서 짙은 잉크로 오버라이드. */
+  --accent-ink: #ffffff;
+  /* 상태 = 기능색 (accent와 분리). dots/차트용 밝은 값. */
   --ok: #15b877;       /* HEALTHY */
   --cool: #e6a323;     /* COOLING */
   --recover: #12b5a5;  /* RECOVERING */
   --block: #f04452;    /* BLOCKLISTED */
+  /* -ink: 배지 텍스트 전용 어두운 변형. text-{state}-ink on bg-{state}/12 틴트가 AA(≥4.5)를 넘도록.
+     밝은 기능색 자체는 dots/차트에 그대로 유지하고, 틴트 위 텍스트만 이 잉크를 쓴다.
+     (예전 text-{state} on /12: ok 2.29·cool 2.00·recover 2.29·block 3.19로 모두 미달) */
+  --ok-ink: #0a7347;       /* on ok/12 ≈5.3 */
+  --cool-ink: #8a5a00;     /* on cool/12 ≈5.4 (amber가 가장 어려워 충분히 어둡게) */
+  --recover-ink: #0a726a;  /* on recover/12 ≈5.2 */
+  --block-ink: #bd2130;    /* on block/12 ≈5.3 */
 }
 .dark {
   --bg: #17191d;
@@ -28,12 +39,21 @@
   --ink: #eaecef;
   --muted: #8b95a1;
   --line: #2a2e35;
+  /* 다크 accent는 어두운 배경 위 텍스트(accent-soft·surface)에서 밝아야 해 그대로 둔다.
+     밝은 accent 위 흰 글자는 3.07로 미달 → 버튼 글자는 accent-ink(짙은 네이비)로 전환. */
   --accent: #4593fc;
   --accent-soft: #1b2a3f;
+  --accent-ink: #0a2540; /* on accent(#4593fc) ≈5.1 */
   --ok: #2bc07f;
   --cool: #efb23e;
   --recover: #25c2b0;
   --block: #f4606c;
+  /* -ink(다크): 밝은 배경 위가 아니라 자기 /12 틴트(짙은 카드 위) 위 텍스트. ok/cool/recover는
+     밝은 값 그대로도 ≥5.4로 통과, block만 #f4606c가 4.35로 미달이라 살짝 밝게 올린다. */
+  --ok-ink: #2bc07f;       /* on ok/12 ≈5.5 */
+  --cool-ink: #efb23e;     /* on cool/12 ≈6.5 */
+  --recover-ink: #25c2b0;  /* on recover/12 ≈5.7 */
+  --block-ink: #f47983;    /* on block/12 ≈5.1 */
 }
 
 /* 토큰 → Tailwind 유틸(bg-surface, text-ink, text-accent, border-line …). 테마 전환은 CSS 변수로. */
@@ -46,10 +66,15 @@
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
   --color-ok: var(--ok);
   --color-cool: var(--cool);
   --color-recover: var(--recover);
   --color-block: var(--block);
+  --color-ok-ink: var(--ok-ink);
+  --color-cool-ink: var(--cool-ink);
+  --color-recover-ink: var(--recover-ink);
+  --color-block-ink: var(--block-ink);
   --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
     "Apple SD Gothic Neo", "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
