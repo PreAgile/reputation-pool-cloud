@@ -18,6 +18,7 @@ import type { AuditEventPage, AuditEventRecord, ResourceDetail, ScoreHistory } f
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
+import { usePoll } from "@/lib/use-poll";
 
 /** score-history 컨텍스트별 시계열을 recharts LineChart 한 판이 먹는 wide 포맷으로 병합. */
 type ChartRow = { t: number } & Record<string, number>;
@@ -73,35 +74,45 @@ export default function ResourceDetailPage() {
 
   const base = `/pools/resources/${encodeURIComponent(kind)}/${encodeURIComponent(value)}`;
 
-  // 상세는 차단/해제 후 다시 불러와야 하므로 콜백으로 분리.
+  // 상세는 차단/해제·주기 갱신 때 다시 불러와야 하므로 콜백으로 분리.
   const reloadDetail = useCallback(() => {
     return api<ResourceDetail>(base)
       .then(setDetail)
       .catch((e) => setError(e instanceof Error ? e.message : "불러오지 못했습니다"));
   }, [base]);
 
-  useEffect(() => {
-    if (!kind || !value) return;
-    void reloadDetail();
-
-    // 곡선/타임라인은 보조 데이터 — 실패해도 상세 자체는 보이도록 조용히 빈 상태 처리.
+  // 곡선/타임라인은 보조 데이터 — 실패해도 상세 자체는 보이도록 조용히 빈 상태 처리.
+  const reloadAux = useCallback(() => {
     api<ScoreHistory>(`${base}/score-history?hours=24`)
       .then(setHistory)
       .catch(() => setHistory({ contexts: [] }));
-
     api<AuditEventPage>("/events?page=0&size=100")
       .then((p) => setEvents(p.events))
       .catch(() => setEvents([]));
-  }, [kind, value, base, reloadDetail]);
+  }, [base]);
 
-  // 수동 차단/해제 (운영자 개입). 성공 후 상세를 다시 불러와 배지·상태를 갱신한다.
-  async function mutate(action: "block" | "unblock", permanent = false) {
+  useEffect(() => {
+    if (!kind || !value) return;
+    void reloadDetail();
+    reloadAux();
+  }, [kind, value, reloadDetail, reloadAux]);
+
+  // 보이는 동안 30초마다 갱신(곡선은 원천이 분당 1점이라 이 주기면 충분). 백그라운드 탭이면 정지.
+  usePoll(() => {
+    void reloadDetail();
+    reloadAux();
+  }, 30000);
+
+  // 수동 차단/해제 (운영자 개입). block은 영구 또는 seconds(임시) 중 하나. 성공 후 상세를 다시 불러와 갱신.
+  async function mutate(action: "unblock" | "blockPermanent" | "blockTemp") {
     if (acting) return;
     setActing(true);
     setActionError(null);
     try {
-      if (action === "block") {
-        await api<void>(`${base}/block${permanent ? "?permanent=true" : ""}`, { method: "POST" });
+      if (action === "blockPermanent") {
+        await api<void>(`${base}/block?permanent=true`, { method: "POST" });
+      } else if (action === "blockTemp") {
+        await api<void>(`${base}/block?seconds=3600`, { method: "POST" });
       } else {
         await api<void>(`${base}/block`, { method: "DELETE" });
       }
@@ -184,9 +195,14 @@ export default function ResourceDetailPage() {
               {acting ? "처리 중…" : "차단 해제"}
             </Button>
           ) : (
-            <Button variant="ghost" disabled={acting} onClick={() => mutate("block", true)}>
-              {acting ? "처리 중…" : "차단"}
-            </Button>
+            <>
+              <Button variant="ghost" disabled={acting} onClick={() => mutate("blockTemp")}>
+                {acting ? "처리 중…" : "1시간 차단"}
+              </Button>
+              <Button variant="ghost" disabled={acting} onClick={() => mutate("blockPermanent")}>
+                영구 차단
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -268,10 +284,12 @@ export default function ResourceDetailPage() {
                   <th className="px-4 py-2.5 font-bold">컨텍스트</th>
                   <th className="px-4 py-2.5 text-right font-bold">score</th>
                   <th className="px-4 py-2.5 font-bold">상태</th>
-                  <th className="px-4 py-2.5 text-right font-bold">연속실패</th>
-                  <th className="px-4 py-2.5 text-right font-bold">연속성공</th>
-                  <th className="px-4 py-2.5 text-right font-bold">윈도우</th>
-                  <th className="px-4 py-2.5 font-bold">냉각해제</th>
+                  <th className="px-4 py-2.5 text-right font-bold">연속 실패</th>
+                  <th className="px-4 py-2.5 text-right font-bold">연속 성공</th>
+                  <th className="px-4 py-2.5 text-right font-bold" title="점수 계산에 쓰는 최근 판정 개수">
+                    평가 표본
+                  </th>
+                  <th className="px-4 py-2.5 font-bold" title="냉각(COOLING)이 풀리는 시각">냉각 해제 시각</th>
                 </tr>
               </thead>
               <tbody>
