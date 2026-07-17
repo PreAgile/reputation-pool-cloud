@@ -48,3 +48,29 @@ export function useAuth(): AuthContextValue {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
+
+/**
+ * 현재 토큰(JWT)에서 테넌트 ID를 추출한다.
+ * LoginResponse에는 tenant가 없으므로 JWT payload(두 번째 세그먼트)를 base64url 디코드해
+ * `tenant` 클레임을 읽는다(`sub`는 admin username). 실패하면 null.
+ */
+export function getTenantId(): string | null {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    // base64url → base64 변환 후 UTF-8 안전 디코드.
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
+        .join(""),
+    );
+    const claims = JSON.parse(json) as { tenant?: unknown };
+    return typeof claims.tenant === "string" ? claims.tenant : null;
+  } catch {
+    return null;
+  }
+}
