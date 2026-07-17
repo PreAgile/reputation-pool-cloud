@@ -109,7 +109,9 @@ public class EngineConfiguration {
             EventSink poolEventSink,
             ReputationPoolProperties props,
             TenantRepository tenantRepository,
-            Function<String, ResourceStore> resourceStoreFactory) {
-        return new PerTenantPoolRegistry(clock, poolEventSink, props, tenantRepository, resourceStoreFactory);
+            Function<String, ResourceStore> resourceStoreFactory,
+            io.github.preagile.reputationpool.cloud.metering.MeterRecorder meterRecorder) {
+        return new PerTenantPoolRegistry(
+                clock, poolEventSink, props, tenantRepository, resourceStoreFactory, meterRecorder);
     }
 }

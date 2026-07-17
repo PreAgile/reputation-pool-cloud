@@ -1,6 +1,8 @@
 package io.github.preagile.reputationpool.cloud.engine;
 
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
+import io.github.preagile.reputationpool.cloud.metering.MeterRecorder;
+import io.github.preagile.reputationpool.cloud.metering.TenantMeteringSink;
 import io.github.preagile.reputationpool.cloud.tenant.Tenant;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
@@ -9,6 +11,7 @@ import io.github.preagile.reputationpool.core.pool.ResourcePool;
 import io.github.preagile.reputationpool.core.pool.WeightedRandomSelectionStrategy;
 import io.github.preagile.reputationpool.core.port.EventSink;
 import io.github.preagile.reputationpool.core.port.ResourceStore;
+import io.github.preagile.reputationpool.grpc.CompositeEventSink;
 import java.time.Clock;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -58,18 +61,21 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
     private final ReputationPoolProperties properties;
     private final TenantRepository tenantRepository;
     private final Function<String, ResourceStore> storeFactory;
+    private final MeterRecorder meterRecorder;
 
     public PerTenantPoolRegistry(
             Clock clock,
             EventSink sharedSink,
             ReputationPoolProperties properties,
             TenantRepository tenantRepository,
-            Function<String, ResourceStore> storeFactory) {
+            Function<String, ResourceStore> storeFactory,
+            MeterRecorder meterRecorder) {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.sharedSink = Objects.requireNonNull(sharedSink, "sharedSink must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.tenantRepository = Objects.requireNonNull(tenantRepository, "tenantRepository must not be null");
         this.storeFactory = Objects.requireNonNull(storeFactory, "storeFactory must not be null");
+        this.meterRecorder = Objects.requireNonNull(meterRecorder, "meterRecorder must not be null");
     }
 
     @Override
@@ -116,10 +122,15 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
                 properties.engine().windowSize(),
                 properties.engine().coolAfter(),
                 properties.engine().recoverAfter());
+        // Fan out to the shared sink (gRPC stream + audit) plus a tenant-bound metering sink, so this
+        // tenant's granted leases are counted against this tenant (issue #10) without a tenant field on
+        // the event — the tenant is fixed by which pool emitted it.
+        EventSink tenantSink =
+                new CompositeEventSink(List.of(sharedSink, new TenantMeteringSink(tenantId, meterRecorder)));
         ResourcePool pool = new ResourcePool(
                 engine,
                 new WeightedRandomSelectionStrategy(),
-                sharedSink,
+                tenantSink,
                 clock,
                 RandomGenerator.getDefault(),
                 properties.leaseTtl());

@@ -48,12 +48,18 @@ class PoolLifecycleTest {
                 Duration.ofSeconds(30),
                 Duration.ofSeconds(30),
                 new ReputationPoolProperties.Engine(10, 2, 2),
-                new ReputationPoolProperties.Audit(Duration.ofHours(1), retention));
+                new ReputationPoolProperties.Audit(Duration.ofHours(1), retention),
+                new ReputationPoolProperties.Metering(Duration.ofMinutes(1)));
     }
 
     private PerTenantPoolRegistry registry(TenantRepository repository) {
         return new PerTenantPoolRegistry(
-                clock, event -> {}, propsWithRetention(Duration.ZERO), repository, storeFactory);
+                clock,
+                event -> {},
+                propsWithRetention(Duration.ZERO),
+                repository,
+                storeFactory,
+                new io.github.preagile.reputationpool.cloud.metering.MeterRecorder());
     }
 
     private PoolLifecycle lifecycle(PerTenantPoolRegistry registry, Duration retention, AuditPurger purger) {

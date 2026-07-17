@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
+import io.github.preagile.reputationpool.cloud.readmodel.UsageMeterReader;
 import io.github.preagile.reputationpool.cloud.security.AdminTokenService;
 import io.github.preagile.reputationpool.cloud.security.SecurityConfiguration;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
@@ -30,7 +31,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * a garbage token → 401, and a token minted by the real login → 200. It also proves login rejects bad
  * credentials with a bare 401.
  */
-@WebMvcTest(controllers = {TenantController.class, AuthController.class})
+@WebMvcTest(controllers = {TenantController.class, AuthController.class, UsageController.class})
 @Import(SecurityConfiguration.class)
 @TestPropertySource(
         properties = {
@@ -70,9 +71,18 @@ class ControlPlaneSecurityTest {
     @MockitoBean
     private DataSource dataSource;
 
+    // Required so UsageController can be constructed in the slice.
+    @MockitoBean
+    private UsageMeterReader usageMeterReader;
+
     @Test
     void protectedEndpoint_withoutToken_is401() throws Exception {
         mvc.perform(get("/api/tenants")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void usageEndpoint_withoutToken_is401() throws Exception {
+        mvc.perform(get("/api/usage")).andExpect(status().isUnauthorized());
     }
 
     @Test

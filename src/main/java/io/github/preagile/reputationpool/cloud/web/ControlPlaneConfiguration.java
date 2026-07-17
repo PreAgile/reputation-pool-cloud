@@ -1,6 +1,7 @@
 package io.github.preagile.reputationpool.cloud.web;
 
 import io.github.preagile.reputationpool.cloud.readmodel.AuditEventReader;
+import io.github.preagile.reputationpool.cloud.readmodel.UsageMeterReader;
 import javax.sql.DataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,5 +19,10 @@ public class ControlPlaneConfiguration {
     @Bean
     AuditEventReader auditEventReader(DataSource dataSource) {
         return new AuditEventReader(dataSource);
+    }
+
+    @Bean
+    UsageMeterReader usageMeterReader(DataSource dataSource) {
+        return new UsageMeterReader(dataSource);
     }
 }
