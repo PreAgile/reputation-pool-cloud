@@ -14,6 +14,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param engine reputation-engine tuning (window and cool/recover thresholds)
  * @param audit audit-trail retention configuration
  * @param metering usage-metering rollup configuration
+ * @param score reputation-score time-series sampling configuration
  */
 @ConfigurationProperties("reputation-pool")
 public record ReputationPoolProperties(
@@ -21,7 +22,8 @@ public record ReputationPoolProperties(
         @DefaultValue("PT30S") Duration checkpointInterval,
         @DefaultValue Engine engine,
         @DefaultValue Audit audit,
-        @DefaultValue Metering metering) {
+        @DefaultValue Metering metering,
+        @DefaultValue Score score) {
 
     /**
      * Reputation-engine tuning. Defaults mirror the L1 adapter demos and the reference server: window
@@ -58,4 +60,28 @@ public record ReputationPoolProperties(
      * @param flushInterval how often the metering rollup runs
      */
     public record Metering(@DefaultValue("PT1M") Duration flushInterval) {}
+
+    /**
+     * Reputation-score time-series sampling (issue #12). The {@code ScoreSampler} snapshots every live
+     * cell's score into {@code score_sample} every {@code sampleInterval} — the raw points behind the
+     * dashboard's 24h curve. Because that table grows per (tenant × resource × context) per tick, a
+     * retention purge runs every {@code purgeInterval} and drops samples older than {@code retention}.
+     * Unlike audit retention, score retention is <em>on by default</em> (a bounded time series is only
+     * useful for a recent window, and the table would otherwise grow without limit); a zero or negative
+     * {@code retention} disables it for callers who want to keep everything.
+     *
+     * @param sampleInterval how often every cell's score is sampled into {@code score_sample}
+     * @param retention how much score history to keep; {@code <= 0} disables purging
+     * @param purgeInterval how often the retention purge runs
+     */
+    public record Score(
+            @DefaultValue("PT1M") Duration sampleInterval,
+            @DefaultValue("P7D") Duration retention,
+            @DefaultValue("PT1H") Duration purgeInterval) {
+
+        /** Whether age-based purging is turned on (a positive retention was configured). */
+        public boolean purgeEnabled() {
+            return retention != null && !retention.isZero() && !retention.isNegative();
+        }
+    }
 }

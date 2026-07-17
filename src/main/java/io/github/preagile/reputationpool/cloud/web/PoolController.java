@@ -4,10 +4,14 @@ import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
 import io.github.preagile.reputationpool.cloud.readmodel.PoolViewAssembler;
 import io.github.preagile.reputationpool.cloud.readmodel.PoolViewAssembler.PoolOverview;
 import io.github.preagile.reputationpool.cloud.readmodel.PoolViewAssembler.ResourceDetail;
+import io.github.preagile.reputationpool.cloud.readmodel.ScoreHistoryReader;
+import io.github.preagile.reputationpool.cloud.readmodel.ScoreHistoryReader.ScoreHistory;
 import io.github.preagile.reputationpool.core.domain.PoolSnapshot;
 import io.github.preagile.reputationpool.core.domain.ResourceId;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 import org.springframework.http.HttpStatus;
@@ -16,6 +20,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -33,11 +38,16 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/pools")
 public class PoolController {
 
+    /** Upper bound on the score-history window: 30 days, so an abusive {@code hours} cannot scan the table. */
+    private static final int MAX_HISTORY_HOURS = 24 * 30;
+
     private final TenantPoolRegistry registry;
+    private final ScoreHistoryReader scoreHistory;
     private final Clock clock;
 
-    public PoolController(TenantPoolRegistry registry, Clock clock) {
+    public PoolController(TenantPoolRegistry registry, ScoreHistoryReader scoreHistory, Clock clock) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
+        this.scoreHistory = Objects.requireNonNull(scoreHistory, "scoreHistory must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -54,6 +64,23 @@ public class PoolController {
         PoolSnapshot snapshot = registry.poolFor(AdminTenant.of(jwt)).snapshot();
         return PoolViewAssembler.detail(snapshot, resource, clock.instant())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "resource not found"));
+    }
+
+    /**
+     * The resource's per-context reputation-score series over the last {@code hours} (default 24), for the
+     * dashboard's 24h curve. The tenant is the server-decided one on the JWT; {@code hours} is clamped to
+     * {@code [1, 720]} so a caller cannot request an unbounded scan.
+     */
+    @GetMapping("/resources/{kind}/{value}/score-history")
+    public ScoreHistory scoreHistory(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String kind,
+            @PathVariable String value,
+            @RequestParam(defaultValue = "24") int hours) {
+        ResourceId resource = parseResource(kind, value);
+        int safeHours = Math.max(1, Math.min(hours, MAX_HISTORY_HOURS));
+        Instant since = clock.instant().minus(Duration.ofHours(safeHours));
+        return scoreHistory.read(AdminTenant.of(jwt), resource, since);
     }
 
     private static ResourceId parseResource(String kind, String value) {
