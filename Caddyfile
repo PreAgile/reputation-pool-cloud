@@ -1,0 +1,25 @@
+# reputation-pool-cloud 한 오리진 서빙 (#15 / D8 슬라이스).
+# 브라우저는 Caddy 하나만 보면 된다: /api·/actuator는 백엔드(app:8083)로, 나머지는 대시보드(Next
+# standalone, dashboard:3000)로 라우팅한다. 대시보드와 API가 same-origin이 되므로 CORS가 필요 없다
+# (dev의 next rewrite를 prod에서 대체). TLS·도메인·인증서는 #15의 후속(여기선 :80 평문 한 오리진만).
+{
+	admin off
+	# 로컬/사내 평문. 실제 도메인 붙일 때 이 블록을 지우고 site address를 도메인으로 바꾸면 Caddy가
+	# 자동 HTTPS를 켠다(#15 후속).
+	auto_https off
+}
+
+:80 {
+	# REST 컨트롤 플레인 (#11).
+	handle /api/* {
+		reverse_proxy app:8083
+	}
+	# actuator health/info (public) — 화면6 헬스 카드가 same-origin으로 조회.
+	handle /actuator/* {
+		reverse_proxy app:8083
+	}
+	# 그 외 전부 대시보드.
+	handle {
+		reverse_proxy dashboard:3000
+	}
+}

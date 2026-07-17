@@ -67,5 +67,33 @@ services:
       start_period: 40s
     restart: unless-stopped
 
+  # 대시보드(#12) — Next.js standalone. 호스트에 포트를 열지 않고 Caddy를 통해서만 노출된다.
+  # BACKEND_ORIGIN은 standalone 서버의 /api·/actuator rewrite가 쓰는 백엔드 주소(compose 네트워크).
+  dashboard:
+    build:
+      context: ./dashboard
+    container_name: reputation-pool-dashboard
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      BACKEND_ORIGIN: http://app:8083
+    restart: unless-stopped
+
+  # 한 오리진 서빙(#15 / D8): /api·/actuator → app, 나머지 → dashboard. 브라우저는 여기(8080)만 본다.
+  caddy:
+    image: caddy:2
+    container_name: reputation-pool-caddy
+    depends_on:
+      - app
+      - dashboard
+    ports:
+      - "8080:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    restart: unless-stopped
+
 volumes:
   reputation-pool-db-data:
+  caddy-data:
