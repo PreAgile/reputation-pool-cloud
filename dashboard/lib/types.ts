@@ -23,7 +23,10 @@ export interface PoolSummary {
   cellsByState: Record<ResourceState, number>;
 }
 
-/** 리소스 오버뷰 행. state/score/window 는 Phase0에서 추가되는 대표값(없을 수 있어 옵셔널). */
+/**
+ * 리소스 오버뷰 행. 백엔드 PoolViewAssembler.ResourceOverview(#35) 직렬화와 1:1 매핑한다.
+ * state 는 항상 존재(최악 심각도; blocked면 BLOCKLISTED), recentWindow 는 셀이 없으면 빈 배열.
+ */
 export interface ResourceOverview {
   kind: ResourceKind;
   value: string;
@@ -31,9 +34,9 @@ export interface ResourceOverview {
   blockedUntil: string | null;
   blockPermanent: boolean;
   contexts: number;
-  state?: ResourceState;
-  score?: number | null;
-  window?: boolean[]; // 대표 셀의 최근 outcome 성공 플래그(오래된→최신)
+  state: ResourceState; // 항상 존재(최악 심각도; blocked면 BLOCKLISTED)
+  score: number | null; // 최저 score, 셀 없으면 null
+  recentWindow: boolean[]; // 최저-score 셀의 window 성공 플래그(오래된→최신), 셀 없으면 []
 }
 
 export interface PoolOverview {
