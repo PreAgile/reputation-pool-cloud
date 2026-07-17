@@ -9,6 +9,7 @@ import io.github.preagile.reputationpool.cloud.readmodel.ScoreHistoryReader.Scor
 import io.github.preagile.reputationpool.core.domain.PoolSnapshot;
 import io.github.preagile.reputationpool.core.domain.ResourceId;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
+import io.github.preagile.reputationpool.core.pool.ResourcePool;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -17,10 +18,13 @@ import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -81,6 +85,37 @@ public class PoolController {
         int safeHours = Math.max(1, Math.min(hours, MAX_HISTORY_HOURS));
         Instant since = clock.instant().minus(Duration.ofHours(safeHours));
         return scoreHistory.read(AdminTenant.of(jwt), resource, since);
+    }
+
+    /**
+     * 리소스를 수동 차단한다(운영자 개입). {@code permanent=true}면 영구 차단, 아니면 {@code seconds}(기본
+     * 3600) 동안 임시 차단. 테넌트는 JWT에서 서버가 결정한다. 엔진이 {@code RESOURCE_BLOCKLISTED} 이벤트를
+     * 발생시키므로 감사 타임라인·이벤트 피드에 그대로 반영된다. 자동 차단이 없는 엔진에서 운영자가 위험한
+     * 리소스를 즉시 격리할 수 있는 유일한 경로다.
+     */
+    @PostMapping("/resources/{kind}/{value}/block")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void block(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable String kind,
+            @PathVariable String value,
+            @RequestParam(defaultValue = "false") boolean permanent,
+            @RequestParam(name = "seconds", required = false) Long seconds) {
+        ResourceId resource = parseResource(kind, value);
+        ResourcePool pool = registry.poolFor(AdminTenant.of(jwt));
+        if (permanent) {
+            pool.blockPermanently(resource);
+        } else {
+            long ttl = seconds != null && seconds > 0 ? seconds : 3600;
+            pool.block(resource, Duration.ofSeconds(ttl));
+        }
+    }
+
+    /** 리소스의 차단을 해제한다(수동). 엔진이 {@code RESOURCE_UNBLOCKED} 이벤트를 발생시킨다. */
+    @DeleteMapping("/resources/{kind}/{value}/block")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unblock(@AuthenticationPrincipal Jwt jwt, @PathVariable String kind, @PathVariable String value) {
+        registry.poolFor(AdminTenant.of(jwt)).unblock(parseResource(kind, value));
     }
 
     private static ResourceId parseResource(String kind, String value) {

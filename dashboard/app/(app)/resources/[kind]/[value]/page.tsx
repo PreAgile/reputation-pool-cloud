@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -16,6 +16,7 @@ import {
 import { api } from "@/lib/api";
 import type { AuditEventPage, AuditEventRecord, ResourceDetail, ScoreHistory } from "@/lib/types";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 
 /** score-history 컨텍스트별 시계열을 recharts LineChart 한 판이 먹는 wide 포맷으로 병합. */
@@ -67,14 +68,21 @@ export default function ResourceDetailPage() {
   const [history, setHistory] = useState<ScoreHistory | null>(null);
   const [events, setEvents] = useState<AuditEventRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [acting, setActing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const base = `/pools/resources/${encodeURIComponent(kind)}/${encodeURIComponent(value)}`;
+
+  // 상세는 차단/해제 후 다시 불러와야 하므로 콜백으로 분리.
+  const reloadDetail = useCallback(() => {
+    return api<ResourceDetail>(base)
+      .then(setDetail)
+      .catch((e) => setError(e instanceof Error ? e.message : "불러오지 못했습니다"));
+  }, [base]);
 
   useEffect(() => {
     if (!kind || !value) return;
-    const base = `/pools/resources/${encodeURIComponent(kind)}/${encodeURIComponent(value)}`;
-
-    api<ResourceDetail>(base)
-      .then(setDetail)
-      .catch((e) => setError(e instanceof Error ? e.message : "불러오지 못했습니다"));
+    void reloadDetail();
 
     // 곡선/타임라인은 보조 데이터 — 실패해도 상세 자체는 보이도록 조용히 빈 상태 처리.
     api<ScoreHistory>(`${base}/score-history?hours=24`)
@@ -84,7 +92,26 @@ export default function ResourceDetailPage() {
     api<AuditEventPage>("/events?page=0&size=100")
       .then((p) => setEvents(p.events))
       .catch(() => setEvents([]));
-  }, [kind, value]);
+  }, [kind, value, base, reloadDetail]);
+
+  // 수동 차단/해제 (운영자 개입). 성공 후 상세를 다시 불러와 배지·상태를 갱신한다.
+  async function mutate(action: "block" | "unblock", permanent = false) {
+    if (acting) return;
+    setActing(true);
+    setActionError(null);
+    try {
+      if (action === "block") {
+        await api<void>(`${base}/block${permanent ? "?permanent=true" : ""}`, { method: "POST" });
+      } else {
+        await api<void>(`${base}/block`, { method: "DELETE" });
+      }
+      await reloadDetail();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "요청에 실패했습니다");
+    } finally {
+      setActing(false);
+    }
+  }
 
   // score-history → wide 포맷 병합(시각 오름차순). 컨텍스트별로 라인 하나.
   const { chartRows, contexts } = useMemo(() => {
@@ -136,8 +163,8 @@ export default function ResourceDetailPage() {
     <div className="mx-auto max-w-5xl">
       <BackLink />
 
-      {/* 헤더: kind 배지 + value + 차단 상태 */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
+      {/* 헤더: kind 배지 + value + 차단 상태 + 수동 차단/해제 */}
+      <div className="mb-2 flex flex-wrap items-center gap-3">
         <span className="rounded-full bg-accent-soft px-2.5 py-1 text-xs font-bold text-accent">
           {detail.kind}
         </span>
@@ -150,8 +177,21 @@ export default function ResourceDetailPage() {
             </span>
           </div>
         )}
+        {/* 수동 차단/해제 (운영자 개입). 엔진에 자동 차단이 없어 이 버튼이 유일한 격리 경로. */}
+        <div className="ml-auto flex gap-2">
+          {detail.blocked ? (
+            <Button variant="ghost" disabled={acting} onClick={() => mutate("unblock")}>
+              {acting ? "처리 중…" : "차단 해제"}
+            </Button>
+          ) : (
+            <Button variant="ghost" disabled={acting} onClick={() => mutate("block", true)}>
+              {acting ? "처리 중…" : "차단"}
+            </Button>
+          )}
+        </div>
       </div>
-      {/* TODO(#12): unblock 엔드포인트 추가 시 "차단 해제" 버튼 연결 (현재 PoolController는 GET 전용, 차단은 읽기 전용) */}
+      {actionError && <div className="mb-4 text-sm text-block">요청 실패 · {actionError}</div>}
+      {!actionError && <div className="mb-6" />}
 
       {/* 평판 곡선 (24h) */}
       <section className="mb-6">
@@ -173,11 +213,10 @@ export default function ResourceDetailPage() {
                     minTickGap={40}
                   />
                   <YAxis
-                    domain={[0, 1]}
-                    tickCount={6}
+                    domain={["auto", "auto"]}
                     tick={{ fill: "var(--muted)", fontSize: 11 }}
                     stroke="var(--line)"
-                    width={40}
+                    width={48}
                   />
                   <Tooltip content={<ChartTooltip />} />
                   {contexts.map((ctx, i) => (
