@@ -35,13 +35,22 @@ public final class MeterRecorder {
      * Removes and returns the accumulated lease deltas per tenant+day, resetting each counter to zero.
      * The rollup adds these to {@code usage_meter}; a delta whose DB write fails is handed back via
      * {@link #restore} so it is retried next cycle rather than lost.
+     *
+     * <p>Buckets for days before {@code today} are reclaimed after being drained: a past day receives no
+     * further increments, so keeping its zeroed counter would only leak an entry per (tenant × elapsed day)
+     * for the lifetime of the process. Today's bucket is kept so a concurrent increment is not dropped.
      */
-    public Map<Key, Long> drainLeaseDeltas() {
+    public Map<Key, Long> drainLeaseDeltas(LocalDate today) {
         Map<Key, Long> deltas = new HashMap<>();
-        for (Map.Entry<Key, LongAdder> entry : leaseCounts.entrySet()) {
+        var it = leaseCounts.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
             long delta = entry.getValue().sumThenReset();
             if (delta != 0) {
                 deltas.put(entry.getKey(), delta);
+            }
+            if (entry.getKey().day().isBefore(today)) {
+                it.remove(); // 지난 날짜: 이후 증분이 없으므로 소진 후 회수
             }
         }
         return deltas;

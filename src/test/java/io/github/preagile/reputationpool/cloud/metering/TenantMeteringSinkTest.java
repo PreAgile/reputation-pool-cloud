@@ -30,7 +30,8 @@ class TenantMeteringSinkTest {
         sink.emit(new PoolEvent.ResourceLeased(PROXY, SCRAPE, AT, AT.plusSeconds(30)));
         sink.emit(new PoolEvent.ResourceLeased(PROXY, SCRAPE, AT.plusSeconds(1), AT.plusSeconds(31)));
 
-        Map<Key, Long> deltas = recorder.drainLeaseDeltas();
+        // today = the events' day, so the bucket is kept (not a past day) and the count survives the drain.
+        Map<Key, Long> deltas = recorder.drainLeaseDeltas(LocalDate.of(2026, 7, 17));
         assertThat(deltas).containsExactly(Map.entry(new Key("acme", LocalDate.of(2026, 7, 17)), 2L));
     }
 
@@ -42,7 +43,7 @@ class TenantMeteringSinkTest {
         sink.emit(new PoolEvent.LeaseReleased(PROXY, SCRAPE, AT));
         sink.emit(new PoolEvent.ResourceRecovered(PROXY, SCRAPE, AT));
 
-        assertThat(recorder.drainLeaseDeltas()).isEmpty();
+        assertThat(recorder.drainLeaseDeltas(LocalDate.of(2026, 7, 17))).isEmpty();
     }
 
     @Test
@@ -51,7 +52,8 @@ class TenantMeteringSinkTest {
         TenantMeteringSink sink = new TenantMeteringSink("acme", recorder);
         sink.emit(new PoolEvent.ResourceLeased(PROXY, SCRAPE, AT, AT.plusSeconds(30)));
 
-        assertThat(recorder.drainLeaseDeltas()).isNotEmpty();
-        assertThat(recorder.drainLeaseDeltas()).isEmpty();
+        LocalDate today = LocalDate.of(2026, 7, 17);
+        assertThat(recorder.drainLeaseDeltas(today)).isNotEmpty();
+        assertThat(recorder.drainLeaseDeltas(today)).isEmpty();
     }
 }

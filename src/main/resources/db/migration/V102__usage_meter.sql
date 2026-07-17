@@ -19,5 +19,3 @@ create table usage_meter (
     updated_at   timestamptz not null,
     primary key (tenant_id, metric, period_start)
 );
-
-create index usage_meter_tenant_metric_idx on usage_meter (tenant_id, metric, period_start);

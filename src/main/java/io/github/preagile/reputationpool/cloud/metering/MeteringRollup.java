@@ -60,13 +60,14 @@ public final class MeteringRollup {
 
     @Scheduled(fixedDelayString = "${reputation-pool.metering.flush-interval:PT1M}")
     public void flush() {
-        flushLeaseDeltas();
-        samplePoolSizes();
+        LocalDate today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
+        flushLeaseDeltas(today);
+        samplePoolSizes(today);
     }
 
-    private void flushLeaseDeltas() {
+    private void flushLeaseDeltas(LocalDate today) {
         Timestamp now = Timestamp.from(clock.instant());
-        for (Map.Entry<Key, Long> entry : recorder.drainLeaseDeltas().entrySet()) {
+        for (Map.Entry<Key, Long> entry : recorder.drainLeaseDeltas(today).entrySet()) {
             Key key = entry.getKey();
             long delta = entry.getValue();
             try {
@@ -83,8 +84,7 @@ public final class MeteringRollup {
         }
     }
 
-    private void samplePoolSizes() {
-        LocalDate today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
+    private void samplePoolSizes(LocalDate today) {
         Timestamp now = Timestamp.from(clock.instant());
         for (ManagedPool managed : registry.managedPools()) {
             try {
