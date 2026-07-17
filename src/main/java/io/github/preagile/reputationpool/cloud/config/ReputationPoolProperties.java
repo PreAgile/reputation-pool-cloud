@@ -13,13 +13,15 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param checkpointInterval how often the background checkpointer saves the pool snapshot
  * @param engine reputation-engine tuning (window and cool/recover thresholds)
  * @param audit audit-trail retention configuration
+ * @param metering usage-metering rollup configuration
  */
 @ConfigurationProperties("reputation-pool")
 public record ReputationPoolProperties(
         @DefaultValue("PT30S") Duration leaseTtl,
         @DefaultValue("PT30S") Duration checkpointInterval,
         @DefaultValue Engine engine,
-        @DefaultValue Audit audit) {
+        @DefaultValue Audit audit,
+        @DefaultValue Metering metering) {
 
     /**
      * Reputation-engine tuning. Defaults mirror the L1 adapter demos and the reference server: window
@@ -47,4 +49,13 @@ public record ReputationPoolProperties(
             return retention != null && !retention.isZero() && !retention.isNegative();
         }
     }
+
+    /**
+     * Usage-metering rollup (issue #10). {@code flushInterval} is how often accumulated in-memory lease
+     * counts are flushed to {@code usage_meter} and pool sizes sampled; a shorter interval narrows the
+     * window of counts lost on a crash.
+     *
+     * @param flushInterval how often the metering rollup runs
+     */
+    public record Metering(@DefaultValue("PT1M") Duration flushInterval) {}
 }
