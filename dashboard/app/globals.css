@@ -10,7 +10,8 @@
   --surface: #ffffff;
   --surface-2: #f7f8fa;
   --ink: #191f28;
-  --muted: #8b95a1;
+  /* muted: 흰 배경에서 WCAG AA(4.5:1)를 넘도록 진하게. 예전 #8b95a1은 3.03:1로 미달(a11y 회귀에서 검출). */
+  --muted: #5f6b7a;
   --line: #e8ebee;
   --accent: #3182f6;
   --accent-soft: #e8f3ff;
