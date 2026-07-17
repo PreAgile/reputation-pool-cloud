@@ -4,16 +4,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.preagile.reputationpool.cloud.readmodel.PoolViewAssembler.PoolOverview;
 import io.github.preagile.reputationpool.cloud.readmodel.PoolViewAssembler.ResourceDetail;
+import io.github.preagile.reputationpool.cloud.readmodel.PoolViewAssembler.ResourceOverview;
 import io.github.preagile.reputationpool.core.domain.Blocklist;
 import io.github.preagile.reputationpool.core.domain.CellKey;
 import io.github.preagile.reputationpool.core.domain.Context;
+import io.github.preagile.reputationpool.core.domain.FailureType;
+import io.github.preagile.reputationpool.core.domain.Outcome;
 import io.github.preagile.reputationpool.core.domain.PoolSnapshot;
 import io.github.preagile.reputationpool.core.domain.ReputationCell;
 import io.github.preagile.reputationpool.core.domain.ResourceId;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
 import io.github.preagile.reputationpool.core.domain.ResourceState;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -77,6 +82,76 @@ class PoolViewAssemblerTest {
     void detail_ofUnknownResource_isEmpty() {
         assertThat(PoolViewAssembler.detail(snapshot(), new ResourceId(ResourceKind.PROXY, "nope"), NOW))
                 .isEmpty();
+    }
+
+    @Test
+    void overview_representsResourceByWorstStateWorstScoreAndThatCellsWindow() {
+        // p1 has two cells: a healthy one with the higher score, and a cooling one with the lower score
+        // whose window is fail, success, fail. The row must read COOLING (worst severity), score -5.0
+        // (worst), and the cooling cell's window as [false, true, false].
+        Map<CellKey, ReputationCell> cells = new HashMap<>();
+        cells.put(
+                new CellKey(p1, new Context("healthy")),
+                ReputationCell.fresh(p1, new Context("healthy"), NOW).toBuilder()
+                        .score(3.0)
+                        .state(ResourceState.HEALTHY)
+                        .window(List.of(new Outcome.Success(Duration.ofMillis(10))))
+                        .build());
+        cells.put(
+                new CellKey(p1, new Context("cooling")),
+                ReputationCell.fresh(p1, new Context("cooling"), NOW).toBuilder()
+                        .score(-5.0)
+                        .state(ResourceState.COOLING)
+                        .window(List.of(
+                                new Outcome.Failure(FailureType.TIMEOUT, Duration.ofMillis(20)),
+                                new Outcome.Success(Duration.ofMillis(10)),
+                                new Outcome.Failure(FailureType.BLOCKED, Duration.ofMillis(30))))
+                        .build());
+        PoolSnapshot snapshot = new PoolSnapshot(cells, Blocklist.empty(), java.util.Set.of(p1));
+
+        ResourceOverview row = only(PoolViewAssembler.overview(snapshot, NOW));
+
+        assertThat(row.state()).isEqualTo("COOLING");
+        assertThat(row.score()).isEqualTo(-5.0);
+        assertThat(row.recentWindow()).containsExactly(false, true, false);
+    }
+
+    @Test
+    void overview_blockedResourceReadsBlocklistedRegardlessOfCellStates() {
+        // p2 is permanently blocked but its only cell is HEALTHY: block wins the state, yet score/window
+        // still come from the cell.
+        Map<CellKey, ReputationCell> cells = new HashMap<>();
+        cells.put(
+                new CellKey(p2, new Context("a")),
+                ReputationCell.fresh(p2, new Context("a"), NOW).toBuilder()
+                        .score(1.5)
+                        .state(ResourceState.HEALTHY)
+                        .window(List.of(new Outcome.Success(Duration.ofMillis(10))))
+                        .build());
+        PoolSnapshot snapshot = new PoolSnapshot(cells, Blocklist.empty().blockPermanently(p2), java.util.Set.of());
+
+        ResourceOverview row = only(PoolViewAssembler.overview(snapshot, NOW));
+
+        assertThat(row.state()).isEqualTo("BLOCKLISTED");
+        assertThat(row.score()).isEqualTo(1.5);
+        assertThat(row.recentWindow()).containsExactly(true);
+    }
+
+    @Test
+    void overview_resourceWithoutCellsHasNullScoreEmptyWindowAndHealthyState() {
+        // A registered resource never yet used: no cells → HEALTHY, null score, empty window.
+        PoolSnapshot snapshot = new PoolSnapshot(new HashMap<>(), Blocklist.empty(), java.util.Set.of(p1));
+
+        ResourceOverview row = only(PoolViewAssembler.overview(snapshot, NOW));
+
+        assertThat(row.state()).isEqualTo("HEALTHY");
+        assertThat(row.score()).isNull();
+        assertThat(row.recentWindow()).isEmpty();
+    }
+
+    private static ResourceOverview only(PoolOverview overview) {
+        assertThat(overview.resources()).hasSize(1);
+        return overview.resources().get(0);
     }
 
     private PoolSnapshot snapshot() {
