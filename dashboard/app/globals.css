@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+/* next-themes sets class="dark" on <html>; drive dark via that class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Toss형 토큰 (라이트 기본) ──
+   넉넉한 여백·굵은 숫자·토스 블루 하나·상태는 기능색만. AI-generic 디폴트 회피. */
+:root {
+  --bg: #f2f4f6;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --ink: #191f28;
+  --muted: #8b95a1;
+  --line: #e8ebee;
+  --accent: #3182f6;
+  --accent-soft: #e8f3ff;
+  /* 상태 = 기능색 (accent와 분리) */
+  --ok: #15b877;       /* HEALTHY */
+  --cool: #e6a323;     /* COOLING */
+  --recover: #12b5a5;  /* RECOVERING */
+  --block: #f04452;    /* BLOCKLISTED */
+}
+.dark {
+  --bg: #17191d;
+  --surface: #202329;
+  --surface-2: #262a31;
+  --ink: #eaecef;
+  --muted: #8b95a1;
+  --line: #2a2e35;
+  --accent: #4593fc;
+  --accent-soft: #1b2a3f;
+  --ok: #2bc07f;
+  --cool: #efb23e;
+  --recover: #25c2b0;
+  --block: #f4606c;
+}
+
+/* 토큰 → Tailwind 유틸(bg-surface, text-ink, text-accent, border-line …). 테마 전환은 CSS 변수로. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-cool: var(--cool);
+  --color-recover: var(--recover);
+  --color-block: var(--block);
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+    "Apple SD Gothic Neo", "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius-toss: 14px;
+}
+
+html {
+  color-scheme: light dark;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+/* 숫자가 열맞춤되게: KPI·score·ID 등에 .tnum */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
