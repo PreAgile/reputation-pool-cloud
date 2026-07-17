@@ -49,6 +49,12 @@ services:
       # (auth bypass), so compose fails if it is unset: copy .env.example to .env for local dev, or
       # inject the secret in production. Clients send it in the x-api-key metadata header.
       REPUTATION_POOL_API_KEY: ${REPUTATION_POOL_API_KEY:?set REPUTATION_POOL_API_KEY (copy .env.example to .env for local dev)}
+      # REST control-plane admin login (issue #11). Optional: unset leaves the admin console disabled
+      # (fail closed — /api/** rejects everything), so the gRPC data plane above works without them. Set
+      # all three to use the console; JWT_SECRET must be at least 32 bytes (HS256 needs a 256-bit key).
+      REPUTATION_POOL_ADMIN_USERNAME: ${REPUTATION_POOL_ADMIN_USERNAME:-}
+      REPUTATION_POOL_ADMIN_PASSWORD: ${REPUTATION_POOL_ADMIN_PASSWORD:-}
+      REPUTATION_POOL_ADMIN_JWT_SECRET: ${REPUTATION_POOL_ADMIN_JWT_SECRET:-}
     ports:
       - "8083:8083"
       - "9093:9093"

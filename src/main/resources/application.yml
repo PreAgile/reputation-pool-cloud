@@ -1,6 +1,12 @@
 spring:
   application:
     name: reputation-pool-cloud
+  autoconfigure:
+    # Spring Security's default in-memory user (with a generated password logged at startup) is
+    # meaningless here: the control plane authenticates with a JWT (oauth2 resource server), and gRPC
+    # uses its own x-api-key interceptor. Excluding it removes an unused account and a confusing log line.
+    exclude:
+      - org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
   datasource:
     url: ${REPUTATION_POOL_DB_URL:jdbc:postgresql://localhost:5435/reputation_pool}
     username: ${REPUTATION_POOL_DB_USERNAME:reputation_pool}
@@ -37,6 +43,17 @@ reputation-pool:
     # nothing is seeded, so the api_key table stays empty and the interceptor rejects all gRPC calls
     # (fail closed). Supply via REPUTATION_POOL_API_KEY; #11 replaces this with per-tenant key mgmt.
     api-key: ${REPUTATION_POOL_API_KEY:}
+  # REST control-plane admin login (issue #11). All three secrets come from env / a secret manager;
+  # no baked defaults. When any is unset the admin console is disabled (fail closed): login cannot mint
+  # a token and every /api/** call is rejected — the gRPC data plane is unaffected. The jwt-secret must
+  # be at least 32 bytes (HS256 needs a 256-bit key); a shorter value fails fast at startup. v1 is a
+  # single admin login bound to `tenant`, which scopes the dashboard read model (no RBAC yet).
+  admin:
+    username: ${REPUTATION_POOL_ADMIN_USERNAME:}
+    password: ${REPUTATION_POOL_ADMIN_PASSWORD:}
+    tenant: ${REPUTATION_POOL_ADMIN_TENANT:default}
+    jwt-secret: ${REPUTATION_POOL_ADMIN_JWT_SECRET:}
+    token-ttl: ${REPUTATION_POOL_ADMIN_TOKEN_TTL:PT1H}
   lease-ttl: PT30S
   checkpoint-interval: PT30S
   engine:
