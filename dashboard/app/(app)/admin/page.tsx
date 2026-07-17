@@ -48,6 +48,8 @@ function sortTenants(list: Tenant[]): Tenant[] {
 export default function AdminPage() {
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // actuator health(public, /api 밖)라 api() 래퍼 대신 same-origin fetch로 직접 조회한다.
+  const [health, setHealth] = useState<{ status: string } | null | "error">(null);
 
   // 생성 폼
   const [formOpen, setFormOpen] = useState(false);
@@ -69,6 +71,13 @@ export default function AdminPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    fetch("/actuator/health")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((h: { status?: string }) => setHealth({ status: h.status ?? "UNKNOWN" }))
+      .catch(() => setHealth("error"));
+  }, []);
 
   function resetForm() {
     setFormOpen(false);
@@ -112,16 +121,33 @@ export default function AdminPage() {
         {!formOpen && <Button onClick={() => setFormOpen(true)}>새 테넌트</Button>}
       </div>
 
-      {/* 헬스: actuator health는 /actuator/health에 있고 dev의 /api rewrite로는 닿지 않음.
-          라이브 호출을 넣지 않고 후속 안내만 표시한다. */}
-      <Card className="mb-4 p-4">
-        <div className="text-sm font-bold text-ink">시스템 헬스</div>
-        <p className="mt-1 text-sm text-muted">
-          헬스 지표는 후속입니다 (별도 프록시 필요). Spring actuator는{" "}
-          <code className="font-mono text-xs text-ink">/actuator/health</code>에 있고 현재 dev
-          프록시는 <code className="font-mono text-xs text-ink">/api</code>만 전달합니다.
-        </p>
-        {/* TODO(#12): actuator 헬스용 rewrite 추가 후 연결 */}
+      {/* 시스템 헬스: actuator health(public)를 same-origin으로 조회. dev는 next의 /actuator rewrite,
+          prod는 Caddy(#15)가 /actuator를 app으로 라우팅한다. */}
+      <Card className="mb-4 flex items-center justify-between p-4">
+        <div>
+          <div className="text-sm font-bold text-ink">시스템 헬스</div>
+          <p className="mt-0.5 text-xs text-muted">
+            Spring actuator <code className="font-mono text-ink">/actuator/health</code>
+          </p>
+        </div>
+        {health === null ? (
+          <span className="text-sm text-muted">확인 중…</span>
+        ) : health === "error" ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-block/12 px-2 py-0.5 text-xs font-bold text-block">
+            <span className="size-1.5 rounded-full bg-current" />
+            확인 불가
+          </span>
+        ) : (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-bold",
+              health.status === "UP" ? "text-ok bg-ok/12" : "text-block bg-block/12",
+            )}
+          >
+            <span className="size-1.5 rounded-full bg-current" />
+            {health.status}
+          </span>
+        )}
       </Card>
 
       {/* 생성 폼(인라인) */}

@@ -169,7 +169,7 @@ function PageHeader() {
   return (
     <div className="mb-6">
       <h1 className="mb-2 text-xl font-extrabold tracking-tight text-ink">사용량</h1>
-      <p className="text-sm text-muted">리소스가 이번 달 얼마나 임대됐는지와 풀 현황을 한눈에 봅니다.</p>
+      <p className="text-sm text-muted">이번 달 리소스 임대 건수와 등록된 리소스 수를 한눈에 봅니다.</p>
     </div>
   );
 }
