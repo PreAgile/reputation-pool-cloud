@@ -31,6 +31,8 @@
   --cool-ink: #8a5a00;     /* on cool/12 ≈5.4 (amber가 가장 어려워 충분히 어둡게) */
   --recover-ink: #0a726a;  /* on recover/12 ≈5.2 */
   --block-ink: #bd2130;    /* on block/12 ≈5.3 */
+  /* muted-ink: 중립 배지(폐기됨/반납 등) text on bg-muted/12 틴트 전용. 라이트는 muted 그대로 AA 통과. */
+  --muted-ink: #5f6b7a;    /* on muted/12 (light) ≥4.5 */
 }
 .dark {
   --bg: #17191d;
@@ -54,6 +56,8 @@
   --cool-ink: #efb23e;     /* on cool/12 ≈6.5 */
   --recover-ink: #25c2b0;  /* on recover/12 ≈5.7 */
   --block-ink: #f47983;    /* on block/12 ≈5.1 */
+  /* 다크 muted(#8b95a1)는 muted/12 틴트 위 4.3으로 미달 → 배지 텍스트만 살짝 밝게 올려 AA 통과. */
+  --muted-ink: #9aa4b0;    /* on muted/12 (dark) ≈5.3 */
 }
 
 /* 토큰 → Tailwind 유틸(bg-surface, text-ink, text-accent, border-line …). 테마 전환은 CSS 변수로. */
@@ -63,6 +67,7 @@
   --color-surface-2: var(--surface-2);
   --color-ink: var(--ink);
   --color-muted: var(--muted);
+  --color-muted-ink: var(--muted-ink);
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);

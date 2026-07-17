@@ -22,7 +22,7 @@ function KeyStatusBadge({ revoked }: { revoked: boolean }) {
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-bold",
-        revoked ? "text-muted bg-muted/12" : "text-ok-ink bg-ok/12",
+        revoked ? "text-muted-ink bg-muted/12" : "text-ok-ink bg-ok/12",
       )}
     >
       <span className="size-1.5 rounded-full bg-current" />
@@ -256,7 +256,7 @@ export default function KeysPage() {
                               type="button"
                               disabled={revokingId === k.id}
                               onClick={() => onRevoke(k.id)}
-                              className="rounded-[8px] px-2 py-1 text-xs font-bold text-block hover:bg-block/12 disabled:opacity-50"
+                              className="rounded-[8px] px-2 py-1 text-xs font-bold text-block-ink hover:bg-block/12 disabled:opacity-50"
                             >
                               {revokingId === k.id ? "폐기 중…" : "확인"}
                             </button>
@@ -273,7 +273,7 @@ export default function KeysPage() {
                           <button
                             type="button"
                             onClick={() => setConfirmId(k.id)}
-                            className="rounded-[8px] px-2 py-1 text-xs font-bold text-block hover:bg-block/12"
+                            className="rounded-[8px] px-2 py-1 text-xs font-bold text-block-ink hover:bg-block/12"
                           >
                             폐기
                           </button>
