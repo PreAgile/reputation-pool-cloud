@@ -147,6 +147,46 @@ class ControlPlaneIT {
         assertThat(events.getBody()).containsKey("events");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void manualBlockThenUnblock() {
+        HttpHeaders auth = authHeaders();
+
+        // Permanently block a resource (operator intervention). The engine has no auto-blocklist, so
+        // this endpoint is the only path that produces a BLOCKLISTED resource.
+        ResponseEntity<Void> blocked = rest.exchange(
+                "/api/pools/resources/proxy/blk-01/block?permanent=true",
+                HttpMethod.POST,
+                new HttpEntity<>(auth),
+                Void.class);
+        assertThat(blocked.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+        ResponseEntity<Map> overview =
+                rest.exchange("/api/pools/resources", HttpMethod.GET, new HttpEntity<>(auth), Map.class);
+        List<Map<String, Object>> resources =
+                (List<Map<String, Object>>) overview.getBody().get("resources");
+        assertThat(resources).anySatisfy(r -> {
+            assertThat(r.get("value")).isEqualTo("blk-01");
+            assertThat(r.get("blocked")).isEqualTo(true);
+            assertThat(r.get("blockPermanent")).isEqualTo(true);
+            assertThat(r.get("state")).isEqualTo("BLOCKLISTED");
+        });
+
+        // Unblock → immediate; a cell-less, unregistered resource drops out of the overview entirely.
+        ResponseEntity<Void> unblocked = rest.exchange(
+                "/api/pools/resources/proxy/blk-01/block", HttpMethod.DELETE, new HttpEntity<>(auth), Void.class);
+        assertThat(unblocked.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+        ResponseEntity<Map> after =
+                rest.exchange("/api/pools/resources", HttpMethod.GET, new HttpEntity<>(auth), Map.class);
+        List<Map<String, Object>> stillThere =
+                (List<Map<String, Object>>) after.getBody().get("resources");
+        assertThat(stillThere).noneSatisfy(r -> {
+            assertThat(r.get("value")).isEqualTo("blk-01");
+            assertThat(r.get("blocked")).isEqualTo(true);
+        });
+    }
+
     /** Logs in with the configured admin credentials and returns headers carrying the bearer token. */
     private HttpHeaders authHeaders() {
         ResponseEntity<Map> login = rest.exchange(
