@@ -16,9 +16,12 @@ import javax.sql.DataSource;
  * server never needed to read it back), so cloud owns this read side as its own plain-JDBC query,
  * matching the adapter's idiom.
  *
- * <p>Pages newest-first by {@code seq} (the total order the ledger is written in) using a bounded
- * keyset-friendly {@code LIMIT}: it fetches one extra row to report {@code hasMore} rather than a
- * {@code COUNT(*)}, so a page read never scans the whole (unbounded) table.
+ * <p>Pages newest-first by {@code seq} (the total order the ledger is written in) using
+ * {@code LIMIT ? OFFSET ?} — classic offset pagination. It fetches one extra row to report
+ * {@code hasMore} cheaply rather than issuing a {@code COUNT(*)}. Note this is <em>not</em> keyset
+ * pagination: {@code OFFSET n} still makes the database walk and discard the first {@code n} rows, so
+ * cost grows with the page offset and deep pages get progressively slower. True keyset pagination (a
+ * {@code seq < ?} cursor that seeks instead of skipping) is deferred follow-up work.
  *
  * <p><b>Tenant-scope caveat.</b> {@code audit_event} carries no tenant/pool column yet — the trail is
  * a shared broadcaster fed by the single interim pool — so events are currently <em>global</em>, not

@@ -1,6 +1,5 @@
 package io.github.preagile.reputationpool.cloud.web;
 
-import java.util.Map;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -23,7 +22,7 @@ public class ControlPlaneExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatus(exception.getStatusCode());
         String reason = exception.getReason();
         if (reason != null) {
-            problem.setProperties(Map.of("message", reason));
+            problem.setDetail(reason);
         }
         return problem;
     }

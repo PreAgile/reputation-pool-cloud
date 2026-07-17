@@ -2,6 +2,7 @@ package io.github.preagile.reputationpool.cloud.security;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
@@ -32,10 +33,12 @@ public final class AdminTokenService {
 
     private final JwtEncoder encoder;
     private final AdminAuthProperties properties;
+    private final Clock clock;
 
-    public AdminTokenService(JwtEncoder encoder, AdminAuthProperties properties) {
+    public AdminTokenService(JwtEncoder encoder, AdminAuthProperties properties, Clock clock) {
         this.encoder = Objects.requireNonNull(encoder, "encoder must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
     /**
@@ -46,7 +49,7 @@ public final class AdminTokenService {
         if (!properties.configured() || !credentialsMatch(username, password)) {
             return Optional.empty();
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Instant expiresAt = now.plus(properties.tokenTtl());
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(ISSUER)

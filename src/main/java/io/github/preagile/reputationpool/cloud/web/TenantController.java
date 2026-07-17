@@ -51,6 +51,13 @@ public class TenantController {
         if (id.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant id must not be blank");
         }
+        // Onboard before the existence check so the operation self-heals. If a prior create persisted the
+        // row but its onboard threw, the tenant is orphaned (durable but absent from the registry); a plain
+        // "exists? -> 409" would short-circuit and never re-onboard it. Running the idempotent onboard first
+        // re-onboards that orphan on retry (then the 409 below is correct — the row really does exist), which
+        // is what makes "retry after a partial failure is safe" actually true. For a brand-new id it is a
+        // cheap idempotent no-op, and the create below still guards the durable row.
+        registry.onboard(id);
         if (tenants.findById(id).isPresent()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant already exists");
         }
@@ -65,9 +72,6 @@ public class TenantController {
             }
             throw e;
         }
-        // Onboard only after the row is durably created, so the registry never tracks a tenant that
-        // failed to persist. Idempotent, so a retry after a partial failure is safe.
-        registry.onboard(id);
         return ResponseEntity.created(URI.create("/api/tenants/" + id)).body(tenant);
     }
 

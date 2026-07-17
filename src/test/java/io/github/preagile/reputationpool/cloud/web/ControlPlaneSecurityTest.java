@@ -10,8 +10,6 @@ import io.github.preagile.reputationpool.cloud.security.AdminTokenService;
 import io.github.preagile.reputationpool.cloud.security.SecurityConfiguration;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
@@ -46,9 +44,13 @@ class ControlPlaneSecurityTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class Clocks {
+        // Real clock, not a fixed one: AdminTokenService now stamps the JWT's iat/exp from this clock,
+        // while the NimbusJwtDecoder validates exp against system time. A fixed past instant would mint a
+        // token that is already expired by the decoder's wall clock, so the auth round trip must use the
+        // real clock. This slice asserts only status codes, never timestamps, so determinism is not needed.
         @Bean
         Clock clock() {
-            return Clock.fixed(Instant.parse("2026-07-16T00:00:00Z"), ZoneOffset.UTC);
+            return Clock.systemUTC();
         }
     }
 

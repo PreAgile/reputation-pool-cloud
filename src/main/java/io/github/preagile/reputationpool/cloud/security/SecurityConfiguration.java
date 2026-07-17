@@ -32,9 +32,11 @@ import org.springframework.security.web.SecurityFilterChain;
  * <p><b>Scope.</b> This is the <em>servlet</em> filter chain, so it guards only the HTTP surface on
  * {@code server.port} (8083). The gRPC data plane runs on its own Netty server ({@code grpc.server.port}
  * 9093) with its own {@link ApiKeyAuthInterceptor}; it is not a servlet request and is untouched here —
- * exactly the isolation the plan requires (gRPC excluded from JWT auth). Actuator {@code health}/{@code
- * info} stay public for probes; {@code POST /api/auth/login} is public so an admin can obtain a token;
- * every other {@code /api/**} path requires a valid admin JWT. Anything else is denied by default.
+ * exactly the isolation the plan requires (gRPC excluded from JWT auth). This chain has no {@code
+ * securityMatcher}, so it governs <em>every</em> servlet path — not just {@code /api/**} — which is why
+ * an unmapped path outside any known prefix is denied by default rather than falling through unguarded.
+ * Actuator {@code health}/{@code info} stay public for probes; {@code POST /api/auth/login} is public so
+ * an admin can obtain a token; every other request requires a valid admin JWT.
  *
  * <p><b>Stateless.</b> The API is token-only: no session, no CSRF token (there is no cookie/session to
  * protect), no form login or HTTP Basic. A caller either presents a valid {@code Authorization: Bearer}
@@ -55,8 +57,7 @@ public class SecurityConfiguration {
 
     @Bean
     SecurityFilterChain controlPlaneSecurity(HttpSecurity http, JwtDecoder jwtDecoder) throws Exception {
-        return http.securityMatcher("/api/**", "/actuator/**")
-                .csrf(AbstractHttpConfigurer::disable)
+        return http.csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(
                         auth -> auth.requestMatchers(EndpointRequest.to(HealthEndpoint.class, InfoEndpoint.class))
@@ -109,8 +110,9 @@ public class SecurityConfiguration {
     }
 
     @Bean
-    AdminTokenService adminTokenService(JwtEncoder adminJwtEncoder, AdminAuthProperties properties) {
-        return new AdminTokenService(adminJwtEncoder, properties);
+    AdminTokenService adminTokenService(
+            JwtEncoder adminJwtEncoder, AdminAuthProperties properties, java.time.Clock clock) {
+        return new AdminTokenService(adminJwtEncoder, properties, clock);
     }
 
     @Bean
