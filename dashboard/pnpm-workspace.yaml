@@ -1,4 +1,9 @@
-# sharp(Next 이미지 최적화 네이티브 바이너리)의 install 스크립트 실행 허용.
-# pnpm 10+는 공급망 보안상 의존성 빌드 스크립트를 기본 차단하며, 신뢰하는 것만 여기 명시한다.
+# 의존성 install 스크립트 실행 허용. pnpm 10+는 공급망 보안상 빌드 스크립트를 기본 차단하며,
+# 신뢰하는 것만 여기 명시한다.
+#   - sharp: Next 이미지 최적화 네이티브 바이너리
+#   - msw: 테스트용 Mock Service Worker (postinstall)
+#   - esbuild: vitest/vite 번들러 네이티브 바이너리
 allowBuilds:
   sharp: true
+  msw: true
+  esbuild: true

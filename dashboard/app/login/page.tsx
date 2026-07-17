@@ -40,15 +40,21 @@ export default function LoginPage() {
         <div className="text-lg font-extrabold tracking-tight">reputation-pool 콘솔</div>
         <div className="mb-6 mt-1 text-sm text-muted">관리자 로그인</div>
 
-        <label className="mb-1 block text-xs font-semibold text-muted">아이디</label>
+        <label htmlFor="username" className="mb-1 block text-xs font-semibold text-muted">
+          아이디
+        </label>
         <input
+          id="username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
           className={`${field} mb-4`}
         />
-        <label className="mb-1 block text-xs font-semibold text-muted">비밀번호</label>
+        <label htmlFor="password" className="mb-1 block text-xs font-semibold text-muted">
+          비밀번호
+        </label>
         <input
+          id="password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
