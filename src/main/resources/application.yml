@@ -31,6 +31,11 @@ management:
 
 server:
   port: ${PORT:8083}
+  # Caddy(#15) 뒤에서 X-Forwarded-For / X-Forwarded-* 헤더의 실제 클라이언트 IP를 request.getRemoteAddr()에
+  # 반영한다 — 로그인 브루트포스 방어(#28)가 프록시 뒤에서도 진짜 클라이언트 IP로 스로틀하기 위함. 신뢰 경계는
+  # 네트워크다: 8083은 Caddy만 접근 가능해야 하며 앱을 외부에 직접 노출하지 말 것. 그렇지 않으면 클라이언트가
+  # X-Forwarded-For를 위조해 스로틀을 우회하거나 다른 IP를 덮어씌울 수 있다.
+  forward-headers-strategy: framework
 
 grpc:
   server:
@@ -54,6 +59,16 @@ reputation-pool:
     tenant: ${REPUTATION_POOL_ADMIN_TENANT:default}
     jwt-secret: ${REPUTATION_POOL_ADMIN_JWT_SECRET:}
     token-ttl: ${REPUTATION_POOL_ADMIN_TOKEN_TTL:PT1H}
+    # 로그인 브루트포스 방어(#28). POST /api/auth/login을 소스 IP 기준으로 스로틀한다. v1은 단일 admin
+    # 계정이라 "계정 잠금"은 self-DoS이므로, 계정이 아니라 IP를 일시 차단한다. L1: window 안에서 max-attempts
+    # 실패 시 그 IP를 block-duration 동안 차단(429 + Retry-After), 로그인 성공 시 해당 IP 카운터 리셋.
+    # L2: global-max-per-second는 여러 IP 분산 시도에 대한 전역 초당 상한 안전판.
+    login-throttle:
+      enabled: ${REPUTATION_POOL_ADMIN_LOGIN_THROTTLE_ENABLED:true}
+      max-attempts: 5
+      window: PT15M
+      block-duration: PT15M
+      global-max-per-second: 20
   lease-ttl: PT30S
   checkpoint-interval: PT30S
   engine:

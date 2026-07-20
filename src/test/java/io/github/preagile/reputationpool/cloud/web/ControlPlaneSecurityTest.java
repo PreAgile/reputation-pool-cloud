@@ -53,6 +53,13 @@ class ControlPlaneSecurityTest {
         Clock clock() {
             return Clock.systemUTC();
         }
+
+        // SecurityConfiguration's LoginThrottleFilter (issue #28) needs a MeterRegistry; the web slice does
+        // not auto-configure one, so supply a simple in-memory registry.
+        @Bean
+        io.micrometer.core.instrument.MeterRegistry meterRegistry() {
+            return new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        }
     }
 
     @Autowired

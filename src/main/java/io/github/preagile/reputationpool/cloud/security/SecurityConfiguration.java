@@ -1,9 +1,11 @@
 package io.github.preagile.reputationpool.cloud.security;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.jwk.OctetSequenceKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.security.SecureRandom;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -24,6 +26,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -50,13 +53,14 @@ import org.springframework.security.web.SecurityFilterChain;
  * ({@link JwtEncoder}) and verifying ({@link JwtDecoder}); the secret never leaves this process.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(AdminAuthProperties.class)
+@EnableConfigurationProperties({AdminAuthProperties.class, LoginThrottleProperties.class})
 public class SecurityConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(SecurityConfiguration.class);
 
     @Bean
-    SecurityFilterChain controlPlaneSecurity(HttpSecurity http, JwtDecoder jwtDecoder) throws Exception {
+    SecurityFilterChain controlPlaneSecurity(
+            HttpSecurity http, JwtDecoder jwtDecoder, LoginThrottleFilter loginThrottleFilter) throws Exception {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(
@@ -66,10 +70,25 @@ public class SecurityConfiguration {
                                 .permitAll()
                                 .anyRequest()
                                 .authenticated())
+                // Brute-force defence (issue #28): runs after login is admitted by permitAll but before any
+                // JWT authentication, so a blocked IP is answered with 429 before touching the controller.
+                .addFilterBefore(loginThrottleFilter, BearerTokenAuthenticationFilter.class)
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder)))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .build();
+    }
+
+    /** The IP-based login limiter (issue #28); {@link Clock}-driven so expiry/unblock are testable. */
+    @Bean
+    LoginThrottle loginThrottle(LoginThrottleProperties properties, java.time.Clock clock) {
+        return new LoginThrottle(properties, clock);
+    }
+
+    @Bean
+    LoginThrottleFilter loginThrottleFilter(
+            LoginThrottle loginThrottle, MeterRegistry meterRegistry, ObjectMapper objectMapper) {
+        return new LoginThrottleFilter(loginThrottle, meterRegistry, objectMapper);
     }
 
     /**
