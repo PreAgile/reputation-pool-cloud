@@ -84,6 +84,10 @@ class LoginThrottleFilterTest {
         return post("/api/auth/login")
                 .with(request -> {
                     request.setRemoteAddr(ip);
+                    // MockMvc leaves servletPath empty; a real embedded Tomcat (DispatcherServlet mapped
+                    // to "/") returns the in-context path. Set it so the filter's getServletPath() match
+                    // mirrors runtime.
+                    request.setServletPath("/api/auth/login");
                     return request;
                 })
                 .contentType(MediaType.APPLICATION_JSON)

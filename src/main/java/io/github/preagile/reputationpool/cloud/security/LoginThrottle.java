@@ -31,6 +31,13 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class LoginThrottle {
 
+    /**
+     * Hard ceiling on tracked IPs — a memory backstop against a massive distributed spray of unique
+     * source IPs. Once exceeded (after pruning stale entries), un-blocked counters are shed; blocked IPs
+     * (the real defence) and the L2 global ceiling still hold.
+     */
+    private static final int MAX_TRACKED_IPS = 100_000;
+
     private final LoginThrottleProperties properties;
     private final Clock clock;
 
@@ -98,6 +105,10 @@ public final class LoginThrottle {
             return;
         }
         Instant now = clock.instant();
+        // Opportunistic sweep on the write path so entries for IPs that failed a few times and never
+        // returned cannot accumulate forever (OOM). Writes are naturally rare here — recordFailure runs
+        // only for attempts the L2 ceiling already admitted — so a full scan per failure is cheap.
+        pruneExpired(now);
         IpState state = perIp.computeIfAbsent(ip, key -> new IpState());
         synchronized (state) {
             Instant windowStart = now.minus(properties.window());
@@ -110,6 +121,53 @@ public final class LoginThrottle {
                 state.failures.clear();
             }
         }
+    }
+
+    /**
+     * Evicts entries that no longer carry a live signal: an IP that is not currently blocked and whose
+     * most recent failure has aged out of {@link LoginThrottleProperties#window}. If the map still
+     * exceeds {@link #MAX_TRACKED_IPS} afterwards (a flood of distinct live IPs), it sheds un-blocked
+     * counters as a memory backstop — a graceful degradation that never drops an active block.
+     */
+    private void pruneExpired(Instant now) {
+        perIp.forEach((ip, state) -> {
+            synchronized (state) {
+                if (isStale(state, now)) {
+                    perIp.remove(ip, state);
+                }
+            }
+        });
+        if (perIp.size() <= MAX_TRACKED_IPS) {
+            return;
+        }
+        perIp.forEach((ip, state) -> {
+            if (perIp.size() <= MAX_TRACKED_IPS) {
+                return;
+            }
+            synchronized (state) {
+                if (state.blockedUntil == null || !now.isBefore(state.blockedUntil)) {
+                    perIp.remove(ip, state);
+                }
+            }
+        });
+    }
+
+    /** Whether an entry can be forgotten: not actively blocked and its newest failure is out of window. */
+    private boolean isStale(IpState state, Instant now) {
+        if (state.blockedUntil != null && now.isBefore(state.blockedUntil)) {
+            return false;
+        }
+        Instant lastFailure = state.failures.peekLast();
+        if (lastFailure == null) {
+            return true;
+        }
+        Instant windowStart = now.minus(properties.window());
+        return !lastFailure.isAfter(windowStart);
+    }
+
+    /** Number of tracked IP entries — package-private so tests can assert stale entries are evicted. */
+    int trackedIpCount() {
+        return perIp.size();
     }
 
     /** Clears an IP's failure/block state after a successful login — legitimate use is not penalised. */

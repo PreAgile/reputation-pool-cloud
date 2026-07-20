@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,7 +64,9 @@ public final class LoginThrottleFilter extends OncePerRequestFilter {
         // Only the login POST is brute-forceable; skip everything else (and skip entirely when disabled).
         return !throttle.enabled()
                 || !HttpMethod.POST.matches(request.getMethod())
-                || !LOGIN_PATH.equals(request.getRequestURI());
+                // getServletPath() strips any context path so the match holds when the app is deployed
+                // under a non-root context (getRequestURI() would include that prefix and never match).
+                || !LOGIN_PATH.equals(request.getServletPath());
     }
 
     // Throttle only the original request dispatch: an internal ERROR/ASYNC re-dispatch of the same login
@@ -112,6 +115,9 @@ public final class LoginThrottleFilter extends OncePerRequestFilter {
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setHeader(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds));
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        // The detail message is Korean, so pin UTF-8 before writing or the body is mojibake under a
+        // non-UTF-8 default charset.
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.getWriter().write(objectMapper.writeValueAsString(problem));
     }
 }

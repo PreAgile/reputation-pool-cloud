@@ -110,6 +110,45 @@ class LoginThrottleTest {
     }
 
     @Test
+    void pruneEvictsStaleEntriesButKeepsBlockedOnes() {
+        // window 15m, block 1h so a tripped block outlives the window in this test.
+        LoginThrottleProperties props = new LoginThrottleProperties(true, 5, WINDOW, Duration.ofHours(1), 100);
+        LoginThrottle throttle = new LoginThrottle(props, clock);
+
+        String stale = "203.0.113.20"; // fails twice (sub-threshold), then never returns
+        String blocked = "203.0.113.21"; // trips the block
+
+        throttle.recordFailure(stale);
+        throttle.recordFailure(stale);
+        for (int i = 0; i < 5; i++) {
+            throttle.recordFailure(blocked);
+        }
+        assertThat(throttle.trackedIpCount()).isEqualTo(2);
+
+        // Slide past the window (stale's failures age out) but not past the 1h block.
+        clock.advance(WINDOW.plusSeconds(1));
+
+        // Any write triggers the opportunistic prune; add a fresh IP to drive it.
+        throttle.recordFailure("203.0.113.22");
+
+        // stale evicted; blocked kept; the fresh IP added → 2 entries.
+        assertThat(throttle.trackedIpCount()).isEqualTo(2);
+        assertThat(throttle.checkAllowed(blocked).allowed()).isFalse(); // still blocked
+        assertThat(throttle.checkAllowed(stale).allowed()).isTrue(); // forgotten → fresh
+    }
+
+    @Test
+    void pruneKeepsEntriesWithFailuresStillInsideWindow() {
+        LoginThrottle throttle = throttle(5, 100);
+
+        throttle.recordFailure("203.0.113.30"); // recent, sub-threshold
+        clock.advance(Duration.ofMinutes(1)); // still well inside the 15m window
+        throttle.recordFailure("203.0.113.31"); // triggers a prune
+
+        assertThat(throttle.trackedIpCount()).isEqualTo(2); // both are still live
+    }
+
+    @Test
     void disabledThrottleAlwaysAllows() {
         LoginThrottleProperties disabled = new LoginThrottleProperties(false, 1, WINDOW, BLOCK, 1);
         LoginThrottle throttle = new LoginThrottle(disabled, clock);

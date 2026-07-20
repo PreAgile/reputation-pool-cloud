@@ -32,4 +32,27 @@ public record LoginThrottleProperties(
         @DefaultValue("5") int maxAttempts,
         @DefaultValue("PT15M") Duration window,
         @DefaultValue("PT15M") Duration blockDuration,
-        @DefaultValue("20") int globalMaxPerSecond) {}
+        @DefaultValue("20") int globalMaxPerSecond) {
+
+    /**
+     * Fail fast on misconfiguration. This record is instantiated by Spring's property binding at startup,
+     * so an invalid value aborts the boot with a clear message instead of silently self-DoS-ing the sole
+     * admin login (e.g. {@code max-attempts: 0} would block the operator on the very first attempt).
+     */
+    public LoginThrottleProperties {
+        if (maxAttempts < 1) {
+            throw new IllegalArgumentException("login-throttle.max-attempts must be >= 1, but was " + maxAttempts);
+        }
+        if (globalMaxPerSecond < 1) {
+            throw new IllegalArgumentException(
+                    "login-throttle.global-max-per-second must be >= 1, but was " + globalMaxPerSecond);
+        }
+        if (window == null || window.isZero() || window.isNegative()) {
+            throw new IllegalArgumentException("login-throttle.window must be a positive duration, but was " + window);
+        }
+        if (blockDuration == null || blockDuration.isZero() || blockDuration.isNegative()) {
+            throw new IllegalArgumentException(
+                    "login-throttle.block-duration must be a positive duration, but was " + blockDuration);
+        }
+    }
+}

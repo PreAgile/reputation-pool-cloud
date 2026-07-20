@@ -19,7 +19,8 @@
 - **신뢰 프록시 IP.** 실제 클라이언트 IP는 `request.getRemoteAddr()`로 얻으며, `server.forward-headers-strategy:
   framework`로 Caddy(#15) 뒤의 `X-Forwarded-For` 실제 IP가 반영된다. 이는 신뢰 경계가 네트워크일 때만 안전하다 —
   8083 포트는 리버스 프록시만 접근 가능해야 하고 앱을 외부에 직접 노출하면 안 된다(그러지 않으면 `X-Forwarded-For`
-  위조로 스로틀 우회·타 IP 프레이밍이 가능).
+  위조로 스로틀 우회·타 IP 프레이밍이 가능). 이 전제를 강제하려고 `compose.yaml`은 app의 8083/9093을 loopback
+  (`127.0.0.1`)에만 바인딩한다 — 브라우저는 Caddy(`:8080`)로만 접근하고, 8083을 `0.0.0.0`에 재노출하지 않는다.
 - **관측성.** 차단 발동 시 WARN 로그(자격·사용자명 미기록, 소스 IP만)와 `auth.login.throttled` 카운터를 남긴다
   (#14/#45 알림 파이프라인 훅). 인메모리 구현(Caffeine 등 외부 의존성 없이 `ConcurrentHashMap` + `Clock` 만료).
 - 설정: `reputation-pool.admin.login-throttle.*` (`enabled`, `max-attempts`, `window`, `block-duration`,
