@@ -84,9 +84,7 @@ class ForwardedHeaderThrottleIT {
                 ipABlocked = true;
                 retryAfter = resp.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
             } else {
-                assertThat(resp.getStatusCode())
-                        .as("차단 전에는 자격 오류(401)여야 한다")
-                        .isEqualTo(HttpStatus.UNAUTHORIZED);
+                assertThat(resp.getStatusCode()).as("차단 전에는 자격 오류(401)여야 한다").isEqualTo(HttpStatus.UNAUTHORIZED);
             }
         }
         assertThat(ipABlocked).as("IP A는 max-attempts 초과 후 429로 차단돼야 한다").isTrue();
