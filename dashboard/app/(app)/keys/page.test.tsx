@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { apiKeysFixture } from "@/test/fixtures";
+import { ToastProvider } from "@/components/ui/toast";
 import KeysPage from "./page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -39,7 +40,7 @@ afterAll(() => server.close());
 
 describe("API 키 화면 (integration + MSW)", () => {
   it("테넌트 JWT를 디코드해 키 목록을 렌더한다", async () => {
-    render(<KeysPage />);
+    render(<KeysPage />, { wrapper: ToastProvider });
 
     expect(await screen.findByRole("heading", { name: "API 키 관리" })).toBeInTheDocument();
 
@@ -58,7 +59,7 @@ describe("API 키 화면 (integration + MSW)", () => {
 
   it("키를 발급하면 rawToken이 1회 노출된다", async () => {
     const user = userEvent.setup();
-    render(<KeysPage />);
+    render(<KeysPage />, { wrapper: ToastProvider });
     await screen.findByRole("table");
 
     await user.click(screen.getByRole("button", { name: "새 키 발급" }));
@@ -71,7 +72,7 @@ describe("API 키 화면 (integration + MSW)", () => {
 
   it("tenant 클레임이 없으면 폴백 안내를 보여준다", async () => {
     localStorage.setItem("rp_admin_token", "header.payload.sig"); // 디코드 실패 → null
-    render(<KeysPage />);
+    render(<KeysPage />, { wrapper: ToastProvider });
     expect(await screen.findByText("테넌트 정보를 확인할 수 없습니다.")).toBeInTheDocument();
   });
 });

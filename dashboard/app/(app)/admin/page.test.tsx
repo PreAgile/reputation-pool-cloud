@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { tenantsFixture } from "@/test/fixtures";
+import { ToastProvider } from "@/components/ui/toast";
 import AdminPage from "./page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -18,7 +19,7 @@ afterAll(() => server.close());
 
 describe("관리자 화면 (integration + MSW)", () => {
   it("테넌트 목록과 헬스 배지를 렌더한다", async () => {
-    render(<AdminPage />);
+    render(<AdminPage />, { wrapper: ToastProvider });
 
     expect(await screen.findByRole("heading", { name: "관리자" })).toBeInTheDocument();
 
@@ -37,7 +38,7 @@ describe("관리자 화면 (integration + MSW)", () => {
   });
 
   it("테넌트를 최신 생성순으로 정렬한다", async () => {
-    render(<AdminPage />);
+    render(<AdminPage />, { wrapper: ToastProvider });
     const table = await screen.findByRole("table");
     await within(table).findByText("Acme Corp");
 

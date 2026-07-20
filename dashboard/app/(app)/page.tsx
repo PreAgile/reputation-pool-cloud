@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { PoolOverview, ResourceKind, ResourceOverview, ResourceState } from "@/lib/types";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { Sparkline } from "@/components/sparkline";
 import { cn } from "@/lib/cn";
@@ -95,7 +96,7 @@ export default function OverviewPage() {
       {error && (
         <Card className="p-4 text-sm text-block">불러오지 못했습니다 · {error}</Card>
       )}
-      {!error && !data && <div className="text-sm text-muted">불러오는 중…</div>}
+      {!error && !data && <OverviewSkeleton />}
 
       {data && (
         <>
@@ -202,6 +203,31 @@ export default function OverviewPage() {
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+/** 오버뷰 로딩 스켈레톤: KPI 5칸 + 필터/검색 줄 + 표 자리를 실제 레이아웃대로 채운다. */
+function OverviewSkeleton() {
+  return (
+    <div aria-busy="true" aria-live="polite">
+      <span className="sr-only">불러오는 중</span>
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} className="h-[76px] w-full rounded-[14px]" />
+        ))}
+      </div>
+      <div className="mb-3 flex items-center justify-between">
+        <Skeleton className="h-8 w-56 rounded-full" />
+        <Skeleton className="h-8 w-56 rounded-[10px]" />
+      </div>
+      <Card className="p-4">
+        <div className="space-y-3">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-6 w-full" />
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

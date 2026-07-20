@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import type { Tenant } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 
 /** ISO-8601 → 한국 로케일 표기. 파싱 실패 시 원문 그대로. */
 function fmtDate(iso: string): string {
@@ -46,6 +47,7 @@ function sortTenants(list: Tenant[]): Tenant[] {
 }
 
 export default function AdminPage() {
+  const toast = useToast();
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // actuator health(public, /api 밖)라 api() 래퍼 대신 same-origin fetch로 직접 조회한다.
@@ -104,8 +106,11 @@ export default function AdminPage() {
       });
       resetForm();
       await load();
+      toast.success(`테넌트 "${trimmedId}"를 생성했습니다.`);
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : "테넌트 생성에 실패했습니다");
+      const msg = e instanceof Error ? e.message : "테넌트 생성에 실패했습니다";
+      setFormError(msg);
+      toast.error(`생성 실패 · ${msg}`);
     } finally {
       setCreating(false);
     }
