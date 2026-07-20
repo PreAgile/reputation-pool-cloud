@@ -1,5 +1,6 @@
 package io.github.preagile.reputationpool.cloud.engine;
 
+import io.github.preagile.reputationpool.cloud.alert.AlertingEventSink;
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import io.github.preagile.reputationpool.core.port.EventSink;
@@ -77,13 +78,18 @@ public class EngineConfiguration {
 
     /**
      * The sink every tenant's pool emits through: the same {@code AdvisorServer.assemble} fan-out to
-     * both the live gRPC {@link EventBroadcaster} and the durable audit trail. Shared across tenants
-     * (event-stream and audit isolation are a deferred follow-up), so each per-tenant pool is handed
-     * this one sink.
+     * the live gRPC {@link EventBroadcaster} and the durable audit trail, now with the state-transition
+     * {@link AlertingEventSink} joined beside them (issue #45). Shared across tenants (event-stream and
+     * audit isolation are a deferred follow-up), so each per-tenant pool is handed this one sink.
+     *
+     * <p>Including the alerting sink unconditionally is safe: it forwards only BLOCKLISTED transitions,
+     * alerting is opt-in (a no-op until a webhook is configured), and the notifier never blocks or throws
+     * — plus {@code CompositeEventSink} already isolates each delegate's failures from the others.
      */
     @Bean
-    EventSink poolEventSink(EventBroadcaster broadcaster, PostgresAuditTrail auditTrail) {
-        return new CompositeEventSink(List.of(broadcaster, auditTrail));
+    EventSink poolEventSink(
+            EventBroadcaster broadcaster, PostgresAuditTrail auditTrail, AlertingEventSink alertingEventSink) {
+        return new CompositeEventSink(List.of(broadcaster, auditTrail, alertingEventSink));
     }
 
     /**
