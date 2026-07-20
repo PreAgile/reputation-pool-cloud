@@ -9,6 +9,8 @@ export type Crumb = { label: string; href?: string };
  * 마지막 조각에 aria-current="page" 를 붙인다. 구분자(/)는 장식이라 스크린리더에서 숨긴다.
  */
 export function Breadcrumb({ items, className }: { items: Crumb[]; className?: string }) {
+  // 항목이 없으면 빈 nav를 남기지 않고 아무것도 그리지 않는다.
+  if (items.length === 0) return null;
   return (
     <nav aria-label="위치 경로" className={cn("mb-4", className)}>
       <ol className="flex flex-wrap items-center gap-1.5 text-sm">
