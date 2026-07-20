@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import type { ApiKeySummary, IssuedApiKey } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
 
 /** ISO-8601 → 한국 로케일 표기. 파싱 실패 시 원문 그대로. */
 function fmtDate(iso: string): string {
@@ -42,6 +43,7 @@ function sortKeys(keys: ApiKeySummary[]): ApiKeySummary[] {
 }
 
 export default function KeysPage() {
+  const toast = useToast();
   const [tenantId, setTenantId] = useState<string | null | undefined>(undefined);
   const [keys, setKeys] = useState<ApiKeySummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,8 +96,11 @@ export default function KeysPage() {
       setFormOpen(false);
       setLabel("");
       await load(tenantId);
+      toast.success("API 키를 발급했습니다.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "키 발급에 실패했습니다");
+      const msg = e instanceof Error ? e.message : "키 발급에 실패했습니다";
+      setError(msg);
+      toast.error(`발급 실패 · ${msg}`);
     } finally {
       setIssuing(false);
     }
@@ -109,8 +114,11 @@ export default function KeysPage() {
       await api<void>(`/tenants/${tenantId}/api-keys/${id}`, { method: "DELETE" });
       setConfirmId(null);
       await load(tenantId);
+      toast.success("키를 폐기했습니다.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "키 폐기에 실패했습니다");
+      const msg = e instanceof Error ? e.message : "키 폐기에 실패했습니다";
+      setError(msg);
+      toast.error(`폐기 실패 · ${msg}`);
     } finally {
       setRevokingId(null);
     }

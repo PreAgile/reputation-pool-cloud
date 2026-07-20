@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { setupServer } from "msw/node";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, delay } from "msw";
 import { overviewFixture } from "@/test/fixtures";
 import OverviewPage from "./page";
 
@@ -37,5 +37,23 @@ describe("풀 오버뷰 화면 (integration + MSW)", () => {
     const goodIdx = texts.findIndex((t) => t.includes("proxy-good"));
     expect(badIdx).toBeGreaterThanOrEqual(0);
     expect(badIdx).toBeLessThan(goodIdx);
+  });
+
+  it("로딩 중 스켈레톤을 보여주고 데이터 도착 후 감춘다", async () => {
+    server.use(
+      http.get("*/api/pools/resources", async () => {
+        await delay(30);
+        return HttpResponse.json(overviewFixture);
+      }),
+    );
+    render(<OverviewPage />);
+
+    // 로딩 라이브 영역(스켈레톤)이 보인다. 아직 리소스 행은 없다.
+    expect(screen.getByText("불러오는 중")).toBeInTheDocument();
+    expect(screen.queryByText("proxy-bad")).not.toBeInTheDocument();
+
+    // 도착 후 스켈레톤이 사라지고 데이터가 뜬다.
+    await screen.findByText("proxy-bad");
+    expect(screen.queryByText("불러오는 중")).not.toBeInTheDocument();
   });
 });

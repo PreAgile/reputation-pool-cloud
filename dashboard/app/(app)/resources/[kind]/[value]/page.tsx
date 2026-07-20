@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import {
   CartesianGrid,
   Line,
@@ -17,7 +16,10 @@ import { api } from "@/lib/api";
 import type { AuditEventPage, AuditEventRecord, ResourceDetail, ScoreHistory } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
+import { useToast } from "@/components/ui/toast";
 import { usePoll } from "@/lib/use-poll";
 
 /** score-history 컨텍스트별 시계열을 recharts LineChart 한 판이 먹는 wide 포맷으로 병합. */
@@ -64,6 +66,15 @@ export default function ResourceDetailPage() {
   const params = useParams<{ kind: string; value: string }>();
   const kind = params.kind; // 경로는 소문자, 백엔드가 대문자로 정규화
   const value = params.value;
+  const toast = useToast();
+
+  // 상세 로드 전에도 그릴 수 있도록 경로 파라미터로 브레드크럼을 구성(풀 오버뷰 / KIND / value).
+  // KIND 는 전용 경로가 없어 링크 없이(중간 조각), value 는 현재 위치로 표기된다.
+  const crumbs = [
+    { label: "풀 오버뷰", href: "/" },
+    { label: (kind ?? "").toUpperCase() },
+    { label: value ?? "" },
+  ];
 
   const [detail, setDetail] = useState<ResourceDetail | null>(null);
   const [history, setHistory] = useState<ScoreHistory | null>(null);
@@ -117,8 +128,17 @@ export default function ResourceDetailPage() {
         await api<void>(`${base}/block`, { method: "DELETE" });
       }
       await reloadDetail();
+      toast.success(
+        action === "blockPermanent"
+          ? "영구 차단했습니다."
+          : action === "blockTemp"
+            ? "1시간 차단했습니다."
+            : "차단을 해제했습니다.",
+      );
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "요청에 실패했습니다");
+      const msg = e instanceof Error ? e.message : "요청에 실패했습니다";
+      setActionError(msg);
+      toast.error(`요청 실패 · ${msg}`);
     } finally {
       setActing(false);
     }
@@ -153,7 +173,7 @@ export default function ResourceDetailPage() {
   if (error) {
     return (
       <div className="mx-auto max-w-5xl">
-        <BackLink />
+        <Breadcrumb items={crumbs} />
         <Card className="p-4 text-sm text-block">불러오지 못했습니다 · {error}</Card>
       </div>
     );
@@ -162,8 +182,8 @@ export default function ResourceDetailPage() {
   if (!detail) {
     return (
       <div className="mx-auto max-w-5xl">
-        <BackLink />
-        <div className="text-sm text-muted">불러오는 중…</div>
+        <Breadcrumb items={crumbs} />
+        <DetailSkeleton />
       </div>
     );
   }
@@ -172,7 +192,7 @@ export default function ResourceDetailPage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <BackLink />
+      <Breadcrumb items={crumbs} />
 
       {/* 헤더: kind 배지 + value + 차단 상태 + 수동 차단/해제 */}
       <div className="mb-2 flex flex-wrap items-center gap-3">
@@ -349,13 +369,31 @@ export default function ResourceDetailPage() {
   );
 }
 
-function BackLink() {
+/** 상세 로딩 스켈레톤: 헤더 · 평판 곡선 카드 · 셀 표 자리를 실제 레이아웃과 비슷하게 채운다. */
+function DetailSkeleton() {
   return (
-    <Link
-      href="/"
-      className="mb-4 inline-flex items-center gap-1 text-sm font-semibold text-muted hover:text-ink"
-    >
-      ← 풀 오버뷰
-    </Link>
+    <div aria-busy="true" aria-live="polite">
+      <span className="sr-only">불러오는 중</span>
+      {/* 헤더 줄: kind 배지 + value */}
+      <div className="mb-6 flex items-center gap-3">
+        <Skeleton className="h-6 w-14 rounded-full" />
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="ml-auto h-9 w-24 rounded-[10px]" />
+      </div>
+      {/* 평판 곡선 카드 */}
+      <Skeleton className="mb-3 h-4 w-40" />
+      <Card className="mb-6 p-4">
+        <Skeleton className="h-72 w-full" />
+      </Card>
+      {/* 셀 표 */}
+      <Skeleton className="mb-3 h-4 w-28" />
+      <Card className="p-4">
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-6 w-full" />
+          ))}
+        </div>
+      </Card>
+    </div>
   );
 }
