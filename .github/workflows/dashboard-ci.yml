@@ -121,7 +121,10 @@ jobs:
         working-directory: .
         run: docker compose logs --no-color
 
+      # cleanup 은 항상 실행(always)하되, down -v 의 non-zero exit(볼륨/네트워크 제거 race 등)가
+      # e2e 통과한 job 을 fail 로 만들지 않도록 continue-on-error 로 결과 전파를 끊는다.
       - name: Tear down stack
         if: always()
+        continue-on-error: true
         working-directory: .
         run: docker compose down -v
