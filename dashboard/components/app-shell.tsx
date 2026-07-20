@@ -143,14 +143,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   // 접힘 상태를 localStorage 에서 복원(하이드레이션 후). 초기 SSR 은 항상 펼침.
+  // 사생활 보호 모드/스토리지 차단 환경에서 localStorage 접근이 throw 할 수 있어 감싼다.
   useEffect(() => {
-    setCollapsed(window.localStorage.getItem(COLLAPSE_KEY) === "1");
+    try {
+      setCollapsed(window.localStorage.getItem(COLLAPSE_KEY) === "1");
+    } catch {
+      /* localStorage 차단 환경 — 기본(펼침) 유지 */
+    }
   }, []);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
       const next = !prev;
-      window.localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      try {
+        window.localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        /* localStorage 차단 환경 — 상태만 전환하고 영속화는 생략 */
+      }
       return next;
     });
   }

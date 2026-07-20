@@ -61,7 +61,8 @@ export function CommandPalette({
     let alive = true;
     api<PoolOverview>("/pools/resources")
       .then((d) => {
-        if (alive) {
+        // 204/빈 본문/예상 밖 구조여도 안전하게 — d?.resources 가 없으면 검색 소스만 비활성.
+        if (alive && d?.resources) {
           setResources(d.resources);
           setLoaded(true);
         }
@@ -144,7 +145,7 @@ export function CommandPalette({
                   {resources.map((r) => (
                     <Command.Item
                       key={`${r.kind}:${r.value}`}
-                      value={`${r.value} ${KIND_LABEL[r.kind]} ${r.kind}`}
+                      value={`${r.value} ${KIND_LABEL[r.kind]} ${r.kind}`.toLowerCase()}
                       onSelect={() => go(detailHref(r))}
                       className="flex cursor-pointer select-none items-center justify-between gap-3 rounded-[10px] px-3 py-2.5 text-sm text-ink outline-none data-[selected=true]:bg-surface-2 data-[selected=true]:text-ink"
                     >
