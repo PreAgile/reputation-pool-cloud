@@ -3,7 +3,9 @@
 #   - sharp: Next 이미지 최적화 네이티브 바이너리
 #   - msw: 테스트용 Mock Service Worker (postinstall)
 #   - esbuild: vitest/vite 번들러 네이티브 바이너리
+#   - unrs-resolver: eslint-config-next(ESLint import resolver) 네이티브 바이너리 (#58)
 allowBuilds:
   sharp: true
   msw: true
   esbuild: true
+  unrs-resolver: true
