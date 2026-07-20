@@ -8,6 +8,12 @@ import type { ApiKeySummary, IssuedApiKey } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import {
+  DropdownMenu,
+  DropdownMenuIconTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 /** ISO-8601 → 한국 로케일 표기. 파싱 실패 시 원문 그대로. */
 function fmtDate(iso: string): string {
@@ -57,8 +63,7 @@ export default function KeysPage() {
   const [issued, setIssued] = useState<IssuedApiKey | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // 폐기 확인 중인 키 id
-  const [confirmId, setConfirmId] = useState<string | null>(null);
+  // 폐기 진행 중인 키 id(중복 클릭 방지)
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -112,7 +117,6 @@ export default function KeysPage() {
     setError(null);
     try {
       await api<void>(`/tenants/${tenantId}/api-keys/${id}`, { method: "DELETE" });
-      setConfirmId(null);
       await load(tenantId);
       toast.success("키를 폐기했습니다.");
     } catch (e) {
@@ -257,34 +261,22 @@ export default function KeysPage() {
                       <td className="px-4 py-2.5 text-right">
                         {revoked ? (
                           <span className="text-muted">—</span>
-                        ) : confirmId === k.id ? (
-                          <span className="inline-flex items-center justify-end gap-2">
-                            <span className="text-xs text-muted">폐기할까요?</span>
-                            <button
-                              type="button"
-                              disabled={revokingId === k.id}
-                              onClick={() => onRevoke(k.id)}
-                              className="rounded-[8px] px-2 py-1 text-xs font-bold text-block-ink hover:bg-block/12 disabled:opacity-50"
-                            >
-                              {revokingId === k.id ? "폐기 중…" : "확인"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={revokingId === k.id}
-                              onClick={() => setConfirmId(null)}
-                              className="rounded-[8px] px-2 py-1 text-xs font-bold text-muted hover:bg-surface-2 disabled:opacity-50"
-                            >
-                              취소
-                            </button>
-                          </span>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmId(k.id)}
-                            className="rounded-[8px] px-2 py-1 text-xs font-bold text-block-ink hover:bg-block/12"
-                          >
-                            폐기
-                          </button>
+                          // "⋯" 오버플로 메뉴. 폐기는 파괴적 액션이라 상태색 빨강으로 표시.
+                          <DropdownMenu>
+                            <DropdownMenuIconTrigger
+                              label={`${k.label ?? k.prefix} 작업 메뉴 열기`}
+                            />
+                            <DropdownMenuContent>
+                              <DropdownMenuItem
+                                destructive
+                                disabled={revokingId === k.id}
+                                onSelect={() => onRevoke(k.id)}
+                              >
+                                키 폐기
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         )}
                       </td>
                     </tr>

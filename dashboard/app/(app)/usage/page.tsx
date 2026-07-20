@@ -16,6 +16,11 @@ import type { UsageSummary } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Button } from "@/components/ui/button";
+import {
+  DateRangePicker,
+  RANGE_PRESETS,
+  type RangePreset,
+} from "@/components/ui/date-range-picker";
 
 /** 일별 리스 바 차트가 먹는 행: ms 타임스탬프 + count. */
 type ChartRow = { t: number; count: number };
@@ -53,6 +58,8 @@ function ChartTooltip({ active, payload, label }: TooltipProps<number, string>) 
 export default function UsagePage() {
   const [data, setData] = useState<UsageSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 일별 리스 창(프리셋). 백엔드가 최근 30일을 주므로 기본 30일, 24h/7d 는 클라이언트에서 좁힌다.
+  const [range, setRange] = useState<RangePreset>(RANGE_PRESETS[2]);
 
   useEffect(() => {
     api<UsageSummary>("/usage")
@@ -60,16 +67,21 @@ export default function UsagePage() {
       .catch((e) => setError(e instanceof Error ? e.message : "불러오지 못했습니다"));
   }, []);
 
-  // dailyLeases → 시각 오름차순 바 차트 행 + 최근 30일 합계.
+  // dailyLeases → 시각 오름차순 바 차트 행 + 선택 창 합계. 창은 최신 날짜 기준 최근 range.days 일.
   const { chartRows, windowTotal } = useMemo(() => {
     if (!data) return { chartRows: [] as ChartRow[], windowTotal: 0 };
     const rows = data.dailyLeases
       .map((d) => ({ t: new Date(`${d.date}T00:00:00`).getTime(), count: d.count }))
       .filter((r) => !Number.isNaN(r.t))
       .sort((a, b) => a.t - b.t);
-    const total = data.dailyLeases.reduce((sum, d) => sum + d.count, 0);
-    return { chartRows: rows, windowTotal: total };
-  }, [data]);
+    if (rows.length === 0) return { chartRows: rows, windowTotal: 0 };
+    // 최신 날짜에서 (days-1)일 이전까지만 남긴다(24h→최신 1일, 7d→7일).
+    const maxT = rows[rows.length - 1].t;
+    const cutoff = maxT - (range.days - 1) * 86_400_000;
+    const windowed = rows.filter((r) => r.t >= cutoff);
+    const total = windowed.reduce((sum, r) => sum + r.count, 0);
+    return { chartRows: windowed, windowTotal: total };
+  }, [data, range.days]);
 
   if (error) {
     return (
@@ -99,12 +111,15 @@ export default function UsagePage() {
       <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatTile label="이번 달 임대 건수" value={fmtNum(data.monthLeaseTotal)} accent />
         <StatTile label="등록 리소스 수" value={fmtNum(data.poolSize)} />
-        <StatTile label="최근 30일 임대 건수" value={fmtNum(windowTotal)} />
+        <StatTile label={`${range.label} 임대 건수`} value={fmtNum(windowTotal)} />
       </section>
 
-      {/* 일별 리스 차트 */}
+      {/* 일별 리스 차트 — 기간은 날짜 범위 피커로 파라미터화(24h/7d/30d). */}
       <section className="mb-6">
-        <h2 className="mb-3 text-sm font-bold text-ink">일별 임대 · 최근 30일</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-bold text-ink">일별 임대 · {range.label}</h2>
+          <DateRangePicker value={range} onChange={setRange} label="사용량 기간 선택" />
+        </div>
         <Card className="p-4">
           {hasBars ? (
             <div className="h-72 w-full">

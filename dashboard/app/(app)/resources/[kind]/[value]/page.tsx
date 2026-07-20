@@ -20,6 +20,12 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { useToast } from "@/components/ui/toast";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  DateRangePicker,
+  RANGE_PRESETS,
+  type RangePreset,
+} from "@/components/ui/date-range-picker";
 import { usePoll } from "@/lib/use-poll";
 
 /** score-history 컨텍스트별 시계열을 recharts LineChart 한 판이 먹는 wide 포맷으로 병합. */
@@ -82,6 +88,8 @@ export default function ResourceDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // 평판 곡선 조회 기간(프리셋). 기본 최근 24시간 — 원천이 분당 1점이라 이 범위면 충분.
+  const [range, setRange] = useState<RangePreset>(RANGE_PRESETS[0]);
 
   const base = `/pools/resources/${encodeURIComponent(kind)}/${encodeURIComponent(value)}`;
 
@@ -93,14 +101,15 @@ export default function ResourceDetailPage() {
   }, [base]);
 
   // 곡선/타임라인은 보조 데이터 — 실패해도 상세 자체는 보이도록 조용히 빈 상태 처리.
+  // 곡선 조회 기간은 날짜 범위 피커(range.hours)로 파라미터화.
   const reloadAux = useCallback(() => {
-    api<ScoreHistory>(`${base}/score-history?hours=24`)
+    api<ScoreHistory>(`${base}/score-history?hours=${range.hours}`)
       .then(setHistory)
       .catch(() => setHistory({ contexts: [] }));
     api<AuditEventPage>("/events?page=0&size=100")
       .then((p) => setEvents(p.events))
       .catch(() => setEvents([]));
-  }, [base]);
+  }, [base, range.hours]);
 
   useEffect(() => {
     if (!kind || !value) return;
@@ -229,142 +238,152 @@ export default function ResourceDetailPage() {
       {actionError && <div className="mb-4 text-sm text-block">요청 실패 · {actionError}</div>}
       {!actionError && <div className="mb-6" />}
 
-      {/* 평판 곡선 (24h) */}
-      <section className="mb-6">
-        <h2 className="mb-3 text-sm font-bold text-ink">평판 곡선 · 최근 24시간</h2>
-        <Card className="p-4">
-          {hasCurve ? (
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartRows} margin={{ top: 8, right: 12, bottom: 4, left: -12 }}>
-                  <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" vertical={false} />
-                  <XAxis
-                    dataKey="t"
-                    type="number"
-                    scale="time"
-                    domain={["dataMin", "dataMax"]}
-                    tickFormatter={(t) => fmtClock(t as number)}
-                    tick={{ fill: "var(--muted)", fontSize: 11 }}
-                    stroke="var(--line)"
-                    minTickGap={40}
-                  />
-                  <YAxis
-                    domain={["auto", "auto"]}
-                    tick={{ fill: "var(--muted)", fontSize: 11 }}
-                    stroke="var(--line)"
-                    width={48}
-                  />
-                  <Tooltip content={<ChartTooltip />} />
-                  {contexts.map((ctx, i) => (
-                    <Line
-                      key={ctx}
-                      type="monotone"
-                      dataKey={ctx}
-                      name={ctx}
-                      stroke={LINE_TOKENS[i % LINE_TOKENS.length]}
-                      strokeWidth={2}
-                      dot={false}
-                      activeDot={{ r: 3 }}
-                      connectNulls
-                      isAnimationActive={false}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="flex h-40 items-center justify-center text-sm text-muted">
-              샘플 아직 없음
-            </div>
-          )}
-          {hasCurve && contexts.length > 1 && (
-            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 pl-1 text-xs">
-              {contexts.map((ctx, i) => (
-                <span key={ctx} className="flex items-center gap-1.5 text-muted">
-                  <span
-                    className="size-2 rounded-full"
-                    style={{ background: LINE_TOKENS[i % LINE_TOKENS.length] }}
-                  />
-                  {ctx}
-                </span>
-              ))}
-            </div>
-          )}
-        </Card>
-      </section>
+      {/* 곡선/셀/타임라인을 세로 스택 대신 탭으로(방향키·활성 칩 전환은 Radix Tabs 기본). */}
+      <Tabs defaultValue="curve">
+        <TabsList aria-label="리소스 상세 보기">
+          <TabsTrigger value="curve">평판 곡선</TabsTrigger>
+          <TabsTrigger value="cells">컨텍스트별 셀</TabsTrigger>
+          <TabsTrigger value="timeline">감사 타임라인</TabsTrigger>
+        </TabsList>
 
-      {/* 컨텍스트별 셀 표 */}
-      <section className="mb-6">
-        <h2 className="mb-3 text-sm font-bold text-ink">컨텍스트별 셀</h2>
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-muted">
-                  <th className="px-4 py-2.5 font-bold">컨텍스트</th>
-                  <th className="px-4 py-2.5 text-right font-bold">score</th>
-                  <th className="px-4 py-2.5 font-bold">상태</th>
-                  <th className="px-4 py-2.5 text-right font-bold">연속 실패</th>
-                  <th className="px-4 py-2.5 text-right font-bold">연속 성공</th>
-                  <th className="px-4 py-2.5 text-right font-bold" title="점수 계산에 쓰는 최근 판정 개수">
-                    평가 표본
-                  </th>
-                  <th className="px-4 py-2.5 font-bold" title="냉각(COOLING)이 풀리는 시각">냉각 해제 시각</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.cells.map((c) => (
-                  <tr key={c.context} className="border-t border-line">
-                    <td className="px-4 py-2.5 font-mono text-ink">{c.context}</td>
-                    <td className="tnum px-4 py-2.5 text-right font-mono text-ink">
-                      {c.score.toFixed(3)}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <StatusBadge state={c.state} />
-                    </td>
-                    <td className="tnum px-4 py-2.5 text-right text-muted">{c.consecutiveFailures}</td>
-                    <td className="tnum px-4 py-2.5 text-right text-muted">{c.consecutiveSuccesses}</td>
-                    <td className="tnum px-4 py-2.5 text-right text-muted">{c.windowSize}</td>
-                    <td className="tnum px-4 py-2.5 text-muted">{fmtDateTime(c.cooldownUntil)}</td>
-                  </tr>
-                ))}
-                {detail.cells.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                      셀이 없습니다.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+        {/* 평판 곡선 — 기간은 날짜 범위 피커로 파라미터화(24h/7d/30d). */}
+        <TabsContent value="curve">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-ink">평판 곡선 · {range.label}</h2>
+            <DateRangePicker value={range} onChange={setRange} label="곡선 기간 선택" />
           </div>
-        </Card>
-      </section>
-
-      {/* 감사 타임라인 */}
-      <section className="mb-6">
-        <h2 className="mb-3 text-sm font-bold text-ink">감사 타임라인</h2>
-        <Card className="p-2">
-          {events === null ? (
-            <div className="px-2 py-6 text-center text-sm text-muted">불러오는 중…</div>
-          ) : timeline.length === 0 ? (
-            <div className="px-2 py-6 text-center text-sm text-muted">이 리소스의 감사 이벤트가 없습니다.</div>
-          ) : (
-            <ul className="divide-y divide-line">
-              {timeline.map((e) => (
-                <li key={e.seq} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2.5">
-                  <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs font-bold text-ink">
-                    {e.eventType}
+          <Card className="p-4">
+            {hasCurve ? (
+              <div className="h-72 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartRows} margin={{ top: 8, right: 12, bottom: 4, left: -12 }}>
+                    <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" vertical={false} />
+                    <XAxis
+                      dataKey="t"
+                      type="number"
+                      scale="time"
+                      domain={["dataMin", "dataMax"]}
+                      tickFormatter={(t) => fmtClock(t as number)}
+                      tick={{ fill: "var(--muted)", fontSize: 11 }}
+                      stroke="var(--line)"
+                      minTickGap={40}
+                    />
+                    <YAxis
+                      domain={["auto", "auto"]}
+                      tick={{ fill: "var(--muted)", fontSize: 11 }}
+                      stroke="var(--line)"
+                      width={48}
+                    />
+                    <Tooltip content={<ChartTooltip />} />
+                    {contexts.map((ctx, i) => (
+                      <Line
+                        key={ctx}
+                        type="monotone"
+                        dataKey={ctx}
+                        name={ctx}
+                        stroke={LINE_TOKENS[i % LINE_TOKENS.length]}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="flex h-40 items-center justify-center text-sm text-muted">
+                샘플 아직 없음
+              </div>
+            )}
+            {hasCurve && contexts.length > 1 && (
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 pl-1 text-xs">
+                {contexts.map((ctx, i) => (
+                  <span key={ctx} className="flex items-center gap-1.5 text-muted">
+                    <span
+                      className="size-2 rounded-full"
+                      style={{ background: LINE_TOKENS[i % LINE_TOKENS.length] }}
+                    />
+                    {ctx}
                   </span>
-                  <span className="tnum text-xs text-muted">{fmtDateTime(e.occurredAt)}</span>
-                  {e.context && <span className="font-mono text-xs text-muted">{e.context}</span>}
-                  {e.cause && <span className="text-xs text-muted">· {e.cause}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </section>
+                ))}
+              </div>
+            )}
+          </Card>
+        </TabsContent>
+
+        {/* 컨텍스트별 셀 표 */}
+        <TabsContent value="cells">
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-muted">
+                    <th className="px-4 py-2.5 font-bold">컨텍스트</th>
+                    <th className="px-4 py-2.5 text-right font-bold">score</th>
+                    <th className="px-4 py-2.5 font-bold">상태</th>
+                    <th className="px-4 py-2.5 text-right font-bold">연속 실패</th>
+                    <th className="px-4 py-2.5 text-right font-bold">연속 성공</th>
+                    <th className="px-4 py-2.5 text-right font-bold" title="점수 계산에 쓰는 최근 판정 개수">
+                      평가 표본
+                    </th>
+                    <th className="px-4 py-2.5 font-bold" title="냉각(COOLING)이 풀리는 시각">냉각 해제 시각</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.cells.map((c) => (
+                    <tr key={c.context} className="border-t border-line">
+                      <td className="px-4 py-2.5 font-mono text-ink">{c.context}</td>
+                      <td className="tnum px-4 py-2.5 text-right font-mono text-ink">
+                        {c.score.toFixed(3)}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <StatusBadge state={c.state} />
+                      </td>
+                      <td className="tnum px-4 py-2.5 text-right text-muted">{c.consecutiveFailures}</td>
+                      <td className="tnum px-4 py-2.5 text-right text-muted">{c.consecutiveSuccesses}</td>
+                      <td className="tnum px-4 py-2.5 text-right text-muted">{c.windowSize}</td>
+                      <td className="tnum px-4 py-2.5 text-muted">{fmtDateTime(c.cooldownUntil)}</td>
+                    </tr>
+                  ))}
+                  {detail.cells.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-muted">
+                        셀이 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* 감사 타임라인 */}
+        <TabsContent value="timeline">
+          <Card className="p-2">
+            {events === null ? (
+              <div className="px-2 py-6 text-center text-sm text-muted">불러오는 중…</div>
+            ) : timeline.length === 0 ? (
+              <div className="px-2 py-6 text-center text-sm text-muted">이 리소스의 감사 이벤트가 없습니다.</div>
+            ) : (
+              <ul className="divide-y divide-line">
+                {timeline.map((e) => (
+                  <li key={e.seq} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2.5">
+                    <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs font-bold text-ink">
+                      {e.eventType}
+                    </span>
+                    <span className="tnum text-xs text-muted">{fmtDateTime(e.occurredAt)}</span>
+                    {e.context && <span className="font-mono text-xs text-muted">{e.context}</span>}
+                    {e.cause && <span className="text-xs text-muted">· {e.cause}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

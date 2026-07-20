@@ -25,20 +25,23 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 describe("리소스 상세 화면 (integration + MSW)", () => {
-  it("헤더·평판 곡선·셀 표·감사 타임라인을 렌더한다", async () => {
+  it("헤더·탭(곡선/셀/타임라인)을 렌더하고, 셀 탭에서 표를 보여준다", async () => {
+    const user = userEvent.setup();
     render(<ResourceDetailPage />, { wrapper: ToastProvider });
 
     // 헤더: kind 배지 + value(mono h1). (PROXY 는 브레드크럼·헤더 배지 둘 다에 나오므로 존재만 확인)
     expect(await screen.findByRole("heading", { name: "proxy-good" })).toBeInTheDocument();
     expect(screen.getAllByText("PROXY").length).toBeGreaterThanOrEqual(1);
 
-    // 평판 곡선 섹션(score-history 있으니 빈 상태 문구가 아니어야 한다).
+    // 탭 3종 + 기본 활성은 평판 곡선(score-history 있으니 빈 상태 문구가 아니어야 한다).
+    expect(screen.getByRole("tablist", { name: "리소스 상세 보기" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "평판 곡선" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("heading", { name: /평판 곡선/ })).toBeInTheDocument();
     expect(screen.queryByText("샘플 아직 없음")).not.toBeInTheDocument();
 
-    // 컨텍스트별 셀 표: us-east(정상)·eu-west(냉각) 두 행 + score 렌더.
-    expect(screen.getByRole("heading", { name: "컨텍스트별 셀" })).toBeInTheDocument();
-    const table = screen.getByRole("table");
+    // 셀 탭으로 전환하면 us-east(정상)·eu-west(냉각) 두 행 + score 가 나온다.
+    await user.click(screen.getByRole("tab", { name: "컨텍스트별 셀" }));
+    const table = await screen.findByRole("table");
     expect(within(table).getByText("us-east")).toBeInTheDocument();
     expect(within(table).getByText("eu-west")).toBeInTheDocument();
     expect(within(table).getByText("정상")).toBeInTheDocument();
@@ -46,9 +49,12 @@ describe("리소스 상세 화면 (integration + MSW)", () => {
     expect(within(table).getByText("42.000")).toBeInTheDocument();
   });
 
-  it("감사 타임라인은 이 리소스(PROXY/proxy-good) 이벤트만 남긴다", async () => {
+  it("감사 타임라인 탭은 이 리소스(PROXY/proxy-good) 이벤트만 남긴다", async () => {
+    const user = userEvent.setup();
     render(<ResourceDetailPage />, { wrapper: ToastProvider });
     await screen.findByRole("heading", { name: "proxy-good" });
+
+    await user.click(screen.getByRole("tab", { name: "감사 타임라인" }));
 
     // eventsFixture 중 proxy-good 건(RESOURCE_LEASED)만 통과, acct-cool 건은 걸러진다.
     expect(await screen.findByText("RESOURCE_LEASED")).toBeInTheDocument();
