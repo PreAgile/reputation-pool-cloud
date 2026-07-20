@@ -133,6 +133,19 @@ body {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+@keyframes rp-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 커맨드 팔레트 모달: scale(.97→1). 원본 pop(.96)과 달리 이슈 스펙에 맞춰 .97 로. */
+@keyframes rp-scale-in {
+  from { opacity: 0; transform: translate(-50%, 0) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+@keyframes rp-scale-out {
+  from { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  to { opacity: 0; transform: translate(-50%, 0) scale(0.97); }
+}
 
 /* origin scale+fade — 오버플로 메뉴(DropdownMenu). transform-origin 은 Radix 가 계산. */
 .rp-anim-pop {
@@ -154,6 +167,20 @@ body {
 }
 .rp-anim-popover[data-state="closed"] {
   animation: rp-fade-out var(--motion-fast) var(--ease-std);
+}
+
+/* 커맨드 팔레트(⌘K) — 스크림 fade + 모달 scale. Radix Dialog data-state 로 enter/exit. */
+.rp-anim-scrim[data-state="open"] {
+  animation: rp-fade-in var(--motion-base) var(--ease-out);
+}
+.rp-anim-scrim[data-state="closed"] {
+  animation: rp-fade-out var(--motion-fast) var(--ease-std);
+}
+.rp-anim-dialog[data-state="open"] {
+  animation: rp-scale-in var(--motion-base) var(--ease-out);
+}
+.rp-anim-dialog[data-state="closed"] {
+  animation: rp-scale-out var(--motion-fast) var(--ease-std);
 }
 
 /* 모션 감소 선호 시 전역 무력화(스켈레톤 맥동 등 포함). 접근성 필수. */
