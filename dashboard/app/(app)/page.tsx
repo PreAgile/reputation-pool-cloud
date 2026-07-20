@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import type { PoolOverview, ResourceKind, ResourceOverview, ResourceState } from "@/lib/types";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -9,6 +9,13 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { Sparkline } from "@/components/sparkline";
+import { useToast } from "@/components/ui/toast";
+import {
+  DropdownMenu,
+  DropdownMenuIconTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/cn";
 import { usePoll } from "@/lib/use-poll";
 
@@ -50,11 +57,13 @@ function formatBlock(r: ResourceOverview): string {
 }
 
 export default function OverviewPage() {
-  const router = useRouter();
+  const toast = useToast();
   const [data, setData] = useState<PoolOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<ResourceKind | "ALL">("ALL");
+  // 오버플로 메뉴로 차단/해제가 진행 중인 행 키(중복 클릭 방지).
+  const [actingKey, setActingKey] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api<PoolOverview>("/pools/resources")
@@ -68,6 +77,35 @@ export default function OverviewPage() {
 
   // 보이는 동안 15초마다 갱신(백그라운드 탭이면 자동 정지). 상태·score가 알아서 최신으로.
   usePoll(load, 15000);
+
+  // 오버플로 메뉴의 빠른 차단/해제(상세 화면과 같은 mutation·toast 재사용). 성공 후 목록 재로딩.
+  async function onAction(r: ResourceOverview, action: "unblock" | "blockPermanent" | "blockTemp") {
+    const rowKey = `${r.kind}:${r.value}`;
+    if (actingKey) return;
+    setActingKey(rowKey);
+    const base = `/pools/resources/${r.kind.toLowerCase()}/${encodeURIComponent(r.value)}`;
+    try {
+      if (action === "blockPermanent") {
+        await api<void>(`${base}/block?permanent=true`, { method: "POST" });
+      } else if (action === "blockTemp") {
+        await api<void>(`${base}/block?seconds=3600`, { method: "POST" });
+      } else {
+        await api<void>(`${base}/block`, { method: "DELETE" });
+      }
+      load();
+      toast.success(
+        action === "blockPermanent"
+          ? "영구 차단했습니다."
+          : action === "blockTemp"
+            ? "1시간 차단했습니다."
+            : "차단을 해제했습니다.",
+      );
+    } catch (e) {
+      toast.error(`요청 실패 · ${e instanceof Error ? e.message : "요청에 실패했습니다"}`);
+    } finally {
+      setActingKey(null);
+    }
+  }
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -147,32 +185,31 @@ export default function OverviewPage() {
                     <th className="px-4 py-2.5 font-bold">최근 판정</th>
                     <th className="px-4 py-2.5 text-right font-bold">컨텍스트</th>
                     <th className="px-4 py-2.5 font-bold">차단</th>
+                    <th className="px-4 py-2.5 text-right font-bold">작업</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => {
-                    const go = () =>
-                      router.push(`/resources/${r.kind.toLowerCase()}/${encodeURIComponent(r.value)}`);
+                    const href = `/resources/${r.kind.toLowerCase()}/${encodeURIComponent(r.value)}`;
                     return (
                     <tr
                       key={`${r.kind}:${r.value}`}
-                      onClick={go}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          go();
-                        }
-                      }}
-                      tabIndex={0}
-                      role="link"
-                      aria-label={`${r.value} 상세 보기`}
-                      className="cursor-pointer border-t border-line transition hover:bg-surface-2 focus:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      className="border-t border-line transition hover:bg-surface-2"
                     >
                       <td className="px-4 py-2.5">
                         <KindBadge kind={r.kind} />
                       </td>
-                      <td className="max-w-[16rem] truncate px-4 py-2.5 font-mono text-ink" title={r.value}>
-                        {r.value}
+                      {/* 행 전체를 link 로 두면 오버플로 메뉴가 nested-interactive 가 되므로,
+                          내비게이션은 값 셀의 링크로만 노출한다(a11y). */}
+                      <td className="max-w-[16rem] truncate px-4 py-2.5">
+                        <Link
+                          href={href}
+                          title={r.value}
+                          aria-label={`${r.value} 상세 보기`}
+                          className="rounded-[4px] font-mono text-ink hover:text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        >
+                          {r.value}
+                        </Link>
                       </td>
                       <td className="px-4 py-2.5">
                         <StatusBadge state={r.state} />
@@ -185,12 +222,36 @@ export default function OverviewPage() {
                       </td>
                       <td className="tnum px-4 py-2.5 text-right text-muted">{r.contexts}</td>
                       <td className="px-4 py-2.5 text-muted">{formatBlock(r)}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        <DropdownMenu>
+                          <DropdownMenuIconTrigger label={`${r.value} 작업 메뉴 열기`} />
+                          <DropdownMenuContent>
+                            {r.blocked ? (
+                              <DropdownMenuItem onSelect={() => onAction(r, "unblock")}>
+                                차단 해제
+                              </DropdownMenuItem>
+                            ) : (
+                              <>
+                                <DropdownMenuItem onSelect={() => onAction(r, "blockTemp")}>
+                                  1시간 차단
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  destructive
+                                  onSelect={() => onAction(r, "blockPermanent")}
+                                >
+                                  영구 차단
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
                     </tr>
                     );
                   })}
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-muted">
+                      <td colSpan={8} className="px-4 py-8 text-center text-muted">
                         {data.resources.length === 0
                           ? "등록된 리소스가 없습니다."
                           : "조건에 맞는 리소스가 없습니다."}

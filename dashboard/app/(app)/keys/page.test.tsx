@@ -70,6 +70,24 @@ describe("API 키 화면 (integration + MSW)", () => {
     expect(screen.getByText("rp_live_SECRET_RAW_TOKEN")).toBeInTheDocument();
   });
 
+  it("오버플로 메뉴에서 키를 폐기하면 성공 토스트를 띄운다", async () => {
+    server.use(
+      http.delete(
+        "*/api/tenants/default/api-keys/key-active-new",
+        () => new HttpResponse(null, { status: 204 }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<KeysPage />, { wrapper: ToastProvider });
+    await screen.findByRole("table");
+
+    // 활성 키(프로덕션 수집기) 행의 "⋯" 메뉴 → 키 폐기(파괴적).
+    await user.click(screen.getByRole("button", { name: "프로덕션 수집기 작업 메뉴 열기" }));
+    await user.click(await screen.findByRole("menuitem", { name: "키 폐기" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("키를 폐기했습니다");
+  });
+
   it("tenant 클레임이 없으면 폴백 안내를 보여준다", async () => {
     localStorage.setItem("rp_admin_token", "header.payload.sig"); // 디코드 실패 → null
     render(<KeysPage />, { wrapper: ToastProvider });

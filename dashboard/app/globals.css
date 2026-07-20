@@ -104,3 +104,67 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ── 모션 토큰 (#54 P2) ──
+   지속시간 3단계 + 이징 2종. enter 는 ease-out(부드럽게 안착), 상태 전환은 표준 이징. */
+:root {
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-std: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Radix data-state=open/closed 전환용 키프레임(enter/exit). Radix Presence 가
+   닫힐 때 요소를 잠깐 유지하며 [data-state=closed] 애니메이션을 재생한다. */
+@keyframes rp-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes rp-pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes rp-pop-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.96); }
+}
+@keyframes rp-slide-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* origin scale+fade — 오버플로 메뉴(DropdownMenu). transform-origin 은 Radix 가 계산. */
+.rp-anim-pop {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+}
+.rp-anim-pop[data-state="open"] {
+  animation: rp-pop-in var(--motion-base) var(--ease-out);
+}
+.rp-anim-pop[data-state="closed"] {
+  animation: rp-pop-out var(--motion-fast) var(--ease-std);
+}
+
+/* fade+slide — 날짜 범위 팝오버(Popover). */
+.rp-anim-popover {
+  transform-origin: var(--radix-popover-content-transform-origin);
+}
+.rp-anim-popover[data-state="open"] {
+  animation: rp-slide-in var(--motion-base) var(--ease-out);
+}
+.rp-anim-popover[data-state="closed"] {
+  animation: rp-fade-out var(--motion-fast) var(--ease-std);
+}
+
+/* 모션 감소 선호 시 전역 무력화(스켈레톤 맥동 등 포함). 접근성 필수. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
