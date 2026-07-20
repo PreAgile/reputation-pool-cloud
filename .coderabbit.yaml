@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit 설정. 이 레포는 한글로 운영한다(문서·이슈·커밋) — 리뷰도 한국어로 받는다.
+# 언어만 지정하고 나머지 리뷰 동작은 기본값을 따른다.
+
+# 리뷰 요약·워크스루·인라인 코멘트를 한국어(ko-KR)로 생성한다.
+language: "ko-KR"
+
+reviews:
+  # PR 상단 고수준 요약은 유지, 시(poem)는 끈다(노이즈 감소).
+  high_level_summary: true
+  poem: false
