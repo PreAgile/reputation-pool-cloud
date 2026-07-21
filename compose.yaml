@@ -139,8 +139,30 @@ services:
       - reputation-pool-grafana-data:/var/lib/grafana
     restart: unless-stopped
 
+  # 일일 DB 백업(#15). db 를 pg_dump(-Fc)로 덤프해 backups 볼륨에 남기고 보존 기간 경과분을 지운다.
+  # postgres:17 이미지의 pg_dump/pg_restore 를 그대로 써 추가 의존이 없다. 하루 한 번 실행 후 대기하며,
+  # 복원은 scripts/restore.sh, 복원 가능성은 RestoreRehearsalIT 가 자동 검증한다(#15 종료 기준).
+  backup:
+    image: postgres:17
+    container_name: reputation-pool-backup
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # db 컨테이너와 같은 비밀번호. app/db 와 동일 변수로 항상 일치.
+      PGPASSWORD: ${REPUTATION_POOL_DB_PASSWORD:-reputation_pool}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    # 성공 시 24h 대기, 실패 시 1h 뒤 재시도 — 일시적 장애로 하루치 백업을 통째로 잃지 않도록.
+    entrypoint: ["/bin/sh", "-c", "while true; do if /usr/local/bin/backup.sh; then sleep 86400; else echo 'backup failed (1시간 후 재시도)'; sleep 3600; fi; done"]
+    volumes:
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - ./scripts/restore.sh:/usr/local/bin/restore.sh:ro
+      - reputation-pool-backups:/backups
+    restart: unless-stopped
+
 volumes:
   reputation-pool-db-data:
   caddy-data:
   reputation-pool-prometheus-data:
   reputation-pool-grafana-data:
+  reputation-pool-backups:
