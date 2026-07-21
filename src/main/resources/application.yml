@@ -23,10 +23,22 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # prometheus (issue #45) is exposed but NOT public: only health/info are permitAll in
+        # SecurityConfiguration, so /actuator/prometheus falls under the authenticated() catch-all and a
+        # scraper must present the admin bearer token (fail-closed). Relax to permitAll only behind a
+        # trusted network boundary.
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
+        enabled: true
+  # Opt in to the Prometheus registry explicitly. Exposing the endpoint is not enough on its own: the
+  # scrape endpoint only appears once a PrometheusMeterRegistry exists, and that registry is gated on this
+  # flag (its @ConditionalOnEnabledMetricsExport falls back to management.defaults.metrics.export.enabled,
+  # which is not on here). Setting it directly is the targeted opt-in.
+  prometheus:
+    metrics:
+      export:
         enabled: true
 
 server:
