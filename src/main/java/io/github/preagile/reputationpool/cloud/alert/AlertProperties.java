@@ -1,5 +1,7 @@
 package io.github.preagile.reputationpool.cloud.alert;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -29,7 +31,8 @@ public record AlertProperties(
      * with a clear message instead of silently swallowing every alert later (a malformed URL would only
      * surface as a swallowed send failure). A blank URL is allowed — that is simply the disabled state.
      *
-     * @throws IllegalArgumentException if the timeout is non-positive, or a non-blank URL is not http(s)
+     * @throws IllegalArgumentException if the timeout is non-positive, or a non-blank URL is not a
+     *     well-formed http(s) URL with a host
      */
     public AlertProperties {
         if (timeout == null || timeout.isZero() || timeout.isNegative()) {
@@ -39,6 +42,19 @@ public record AlertProperties(
             String trimmed = webhookUrl.strip();
             if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
                 throw new IllegalArgumentException("alerts.webhook-url must be an http(s) URL, but was " + webhookUrl);
+            }
+            // Prefix alone is not enough: values like "https://" (no host) or one with embedded whitespace
+            // pass the check above but blow up later in URI.create()/HttpRequest — and the notifier swallows
+            // that, so alerting would be a silent no-op despite enabled=true. Parse it here so a malformed
+            // URL aborts the boot (fail-fast), which is the documented contract.
+            URI uri;
+            try {
+                uri = new URI(trimmed);
+            } catch (URISyntaxException e) {
+                throw new IllegalArgumentException("alerts.webhook-url is not a valid URI, but was " + webhookUrl, e);
+            }
+            if (uri.getHost() == null || uri.getHost().isBlank()) {
+                throw new IllegalArgumentException("alerts.webhook-url must have a host, but was " + webhookUrl);
             }
         }
     }

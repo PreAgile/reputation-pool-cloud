@@ -32,10 +32,19 @@ public final class WebhookAlertNotifier implements AlertNotifier {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
+    /**
+     * The parsed webhook target, resolved once at construction (the URL is fixed for the app's lifetime).
+     * {@code null} when alerting is inactive, in which case {@link #notify(AlertPayload)} never reads it.
+     * {@link AlertProperties} has already validated the URL, so this parse cannot fail here.
+     */
+    private final URI webhookUri;
+
     public WebhookAlertNotifier(AlertProperties properties, HttpClient httpClient, ObjectMapper objectMapper) {
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.httpClient = Objects.requireNonNull(httpClient, "httpClient must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.webhookUri =
+                properties.active() ? URI.create(properties.webhookUrl().strip()) : null;
     }
 
     @Override
@@ -47,7 +56,7 @@ public final class WebhookAlertNotifier implements AlertNotifier {
             byte[] body = objectMapper.writeValueAsBytes(payload);
             Duration timeout = properties.timeout();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(properties.webhookUrl().strip()))
+                    .uri(webhookUri)
                     .timeout(timeout)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body))

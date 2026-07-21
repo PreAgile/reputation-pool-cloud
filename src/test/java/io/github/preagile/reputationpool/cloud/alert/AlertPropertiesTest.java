@@ -49,6 +49,32 @@ class AlertPropertiesTest {
     }
 
     @Test
+    void rejectsHttpUrlWithoutHost() {
+        // Passes the http(s) prefix check but carries no host: at send time this would build a hostless URI
+        // that HttpRequest rejects, and the notifier swallows that -> a silent no-op. Must fail fast at boot.
+        // (Depending on the JDK a hostless authority may surface as a syntax error or a null host; either way
+        // it must abort construction, so we assert the fail-fast IllegalArgumentException, not the exact text.)
+        assertThatThrownBy(() -> new AlertProperties(true, "https://", T))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("webhook-url");
+        assertThatThrownBy(() -> new AlertProperties(true, "http://", T))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("webhook-url");
+        assertThatThrownBy(() -> new AlertProperties(true, "https:///no-host-path", T))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("host");
+    }
+
+    @Test
+    void rejectsMalformedUri() {
+        // Embedded whitespace / illegal characters: prefix check passes, but URI parsing fails. Without this
+        // the malformed value would only surface later as a swallowed URI.create() exception.
+        assertThatThrownBy(() -> new AlertProperties(true, "https://ho st/x", T))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("webhook-url");
+    }
+
+    @Test
     void rejectsNonPositiveTimeout() {
         assertThatThrownBy(() -> new AlertProperties(true, "https://hooks.example/x", Duration.ZERO))
                 .isInstanceOf(IllegalArgumentException.class)
