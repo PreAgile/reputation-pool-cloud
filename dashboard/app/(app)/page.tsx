@@ -290,13 +290,20 @@ function ResourcePreviewDrawer({
   resource: ResourceOverview | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const r = resource;
+  // 닫힘 애니메이션(rp-anim-drawer-out, 120~240ms) 동안 Radix 는 Content 를 잠시 유지한다. resource 가
+  // 즉시 null 이 되면 그 사이 제목·본문이 먼저 사라진 빈 드로어가 슬라이드 아웃돼 깜빡인다 — 마지막
+  // 리소스를 붙잡아 내용을 끝까지 유지한다(리뷰 반영). 열림 여부는 여전히 현재 resource 로만 판단한다.
+  const [active, setActive] = useState<ResourceOverview | null>(null);
+  useEffect(() => {
+    if (resource) setActive(resource);
+  }, [resource]);
+  const r = resource ?? active;
   const detailHref = r
     ? `/resources/${r.kind.toLowerCase()}/${encodeURIComponent(r.value)}`
     : "#";
   return (
     <Drawer
-      open={r != null}
+      open={resource != null}
       onOpenChange={onOpenChange}
       title={r ? r.value : ""}
       description={r ? (KIND_LABEL[r.kind] ?? r.kind) : undefined}
