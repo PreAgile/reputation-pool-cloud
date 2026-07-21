@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.boot.actuate.health.HealthEndpoint;
 import org.springframework.boot.actuate.info.InfoEndpoint;
+import org.springframework.boot.actuate.metrics.export.prometheus.PrometheusScrapeEndpoint;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -64,7 +65,13 @@ public class SecurityConfiguration {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(
-                        auth -> auth.requestMatchers(EndpointRequest.to(HealthEndpoint.class, InfoEndpoint.class))
+                        // health/info: liveness·readiness probes and the dashboard health card. prometheus
+                        // (#14): the metrics scrape is permitAll so an in-cluster Prometheus can pull it
+                        // without a bearer token — the trust boundary is the network: the app binds
+                        // loopback-only and Caddy does NOT route /actuator/prometheus to the outside, so
+                        // this endpoint is reachable only from inside the compose network.
+                        auth -> auth.requestMatchers(EndpointRequest.to(
+                                        HealthEndpoint.class, InfoEndpoint.class, PrometheusScrapeEndpoint.class))
                                 .permitAll()
                                 .requestMatchers("/api/auth/login")
                                 .permitAll()

@@ -1,0 +1,10 @@
+# Grafana datasource 프로비저닝 (#14). compose 네트워크의 Prometheus 를 기본 데이터소스로 붙인다.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
