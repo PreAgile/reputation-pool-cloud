@@ -14,6 +14,8 @@ RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 out="${BACKUP_DIR}/${PGDATABASE}_${ts}.dump"
+# set -eu 로 pg_dump 실패 시 즉시 종료돼도 불완전한 .partial 이 남지 않게 한다(성공 후엔 mv 되어 no-op).
+trap 'rm -f "${out}.partial"' EXIT
 
 mkdir -p "$BACKUP_DIR"
 # -Fc(custom): 압축 + pg_restore 로 선택 복원 가능. 원자적 쓰기: 임시 파일에 받은 뒤 rename.

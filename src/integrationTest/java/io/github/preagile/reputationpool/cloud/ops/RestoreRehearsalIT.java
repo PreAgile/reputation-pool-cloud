@@ -59,40 +59,42 @@ class RestoreRehearsalIT {
 
         // 덤프를 소스 → 호스트 → 대상 컨테이너로 옮긴다(-Fc 는 바이너리라 파일로 복사).
         Path onHost = Files.createTempFile("rehearsal", ".dump");
-        SOURCE.copyFileFromContainer("/tmp/rehearsal.dump", onHost.toString());
-        TARGET.copyFileToContainer(MountableFile.forHostPath(onHost), "/tmp/rehearsal.dump");
+        try {
+            SOURCE.copyFileFromContainer("/tmp/rehearsal.dump", onHost.toString());
+            TARGET.copyFileToContainer(MountableFile.forHostPath(onHost), "/tmp/rehearsal.dump");
 
-        // restore.sh 와 동일하게 대상(빈) DB 로 복원한다.
-        org.testcontainers.containers.Container.ExecResult restore = TARGET.execInContainer(
-                "pg_restore",
-                "-U",
-                TARGET.getUsername(),
-                "-d",
-                TARGET.getDatabaseName(),
-                "--clean",
-                "--if-exists",
-                "--no-owner",
-                "/tmp/rehearsal.dump");
-        assertThat(restore.getExitCode())
-                .as("pg_restore 성공: %s", restore.getStderr())
-                .isZero();
+            // restore.sh 와 동일하게 대상(빈) DB 로 복원한다.
+            org.testcontainers.containers.Container.ExecResult restore = TARGET.execInContainer(
+                    "pg_restore",
+                    "-U",
+                    TARGET.getUsername(),
+                    "-d",
+                    TARGET.getDatabaseName(),
+                    "--clean",
+                    "--if-exists",
+                    "--no-owner",
+                    "/tmp/rehearsal.dump");
+            assertThat(restore.getExitCode())
+                    .as("pg_restore 성공: %s", restore.getStderr())
+                    .isZero();
 
-        // then: 대상 DB 에 행이 그대로 살아있다.
-        try (Connection c =
-                        DriverManager.getConnection(TARGET.getJdbcUrl(), TARGET.getUsername(), TARGET.getPassword());
-                Statement s = c.createStatement();
-                ResultSet rs = s.executeQuery("SELECT id, note FROM rehearsal ORDER BY id")) {
-            assertThat(rs.next()).isTrue();
-            assertThat(rs.getInt("id")).isEqualTo(1);
-            assertThat(rs.getString("note")).isEqualTo("alpha");
-            assertThat(rs.next()).isTrue();
-            assertThat(rs.getInt("id")).isEqualTo(2);
-            assertThat(rs.next()).isTrue();
-            assertThat(rs.getInt("id")).isEqualTo(3);
-            assertThat(rs.getString("note")).isEqualTo("charlie");
-            assertThat(rs.next()).as("정확히 3행만 복원").isFalse();
+            // then: 대상 DB 에 행이 그대로 살아있다.
+            try (Connection c = DriverManager.getConnection(
+                            TARGET.getJdbcUrl(), TARGET.getUsername(), TARGET.getPassword());
+                    Statement s = c.createStatement();
+                    ResultSet rs = s.executeQuery("SELECT id, note FROM rehearsal ORDER BY id")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt("id")).isEqualTo(1);
+                assertThat(rs.getString("note")).isEqualTo("alpha");
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt("id")).isEqualTo(2);
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt("id")).isEqualTo(3);
+                assertThat(rs.getString("note")).isEqualTo("charlie");
+                assertThat(rs.next()).as("정확히 3행만 복원").isFalse();
+            }
+        } finally {
+            Files.deleteIfExists(onHost);
         }
-
-        Files.deleteIfExists(onHost);
     }
 }

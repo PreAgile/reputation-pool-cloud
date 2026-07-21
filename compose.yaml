@@ -152,7 +152,8 @@ services:
       # db 컨테이너와 같은 비밀번호. app/db 와 동일 변수로 항상 일치.
       PGPASSWORD: ${REPUTATION_POOL_DB_PASSWORD:-reputation_pool}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
-    entrypoint: ["/bin/sh", "-c", "while true; do /usr/local/bin/backup.sh || echo 'backup failed (다음 주기 재시도)'; sleep 86400; done"]
+    # 성공 시 24h 대기, 실패 시 1h 뒤 재시도 — 일시적 장애로 하루치 백업을 통째로 잃지 않도록.
+    entrypoint: ["/bin/sh", "-c", "while true; do if /usr/local/bin/backup.sh; then sleep 86400; else echo 'backup failed (1시간 후 재시도)'; sleep 3600; fi; done"]
     volumes:
       - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
       - ./scripts/restore.sh:/usr/local/bin/restore.sh:ro
