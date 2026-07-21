@@ -103,6 +103,44 @@ services:
       - caddy-data:/data
     restart: unless-stopped
 
+  # 모니터링(#14 / D7b). app 의 /actuator/prometheus 를 스크레이프해 시계열로 쌓고 Grafana 로 본다.
+  # 둘 다 compose 네트워크 내부에서만 동작: Prometheus 는 호스트 포트를 안 열고 app:8083 을 직접 긁으며
+  # (이 엔드포인트는 permitAll 이지만 Caddy 로는 외부 차단 — 신뢰 경계=네트워크), Grafana 만 로컬 확인용
+  # 으로 loopback 3001 에 노출한다. 프로덕션 노출/인증은 #15 후속(Caddy 뒤 or 별도 통제).
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: reputation-pool-prometheus
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - reputation-pool-prometheus-data:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: reputation-pool-grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      # fail-closed: 알려진 admin/admin 을 두지 않는다 — 비밀번호는 필수다. 미설정 시 compose 가 즉시
+      # 실패한다(REPUTATION_POOL_API_KEY 와 동일 규약). 로컬은 .env(.env.example 복사), 프로덕션은 시크릿.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD (copy .env.example for local dev)}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      # loopback 만: 로컬에서 대시보드 확인용. 외부 노출은 #15 후속.
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - reputation-pool-grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
 volumes:
   reputation-pool-db-data:
   caddy-data:
+  reputation-pool-prometheus-data:
+  reputation-pool-grafana-data:

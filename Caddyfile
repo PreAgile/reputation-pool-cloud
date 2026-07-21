@@ -14,6 +14,12 @@
 	handle /api/* {
 		reverse_proxy app:8083
 	}
+	# 내부 전용(#14): 프로메테우스 스크레이프는 외부(:80)로 노출하지 않는다. app 은 loopback 바인딩이고
+	# Spring Security 에서 이 엔드포인트는 permitAll 이라, 신뢰 경계는 네트워크다 — compose 네트워크의
+	# Prometheus 만 app:8083 을 직접 긁고, Caddy 를 통한 외부 접근은 404 로 막는다. (health/info 아래로 유지)
+	handle /actuator/prometheus* {
+		respond 404
+	}
 	# actuator health/info (public) — 화면6 헬스 카드가 same-origin으로 조회.
 	handle /actuator/* {
 		reverse_proxy app:8083

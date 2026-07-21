@@ -95,6 +95,8 @@ jobs:
           REPUTATION_POOL_ADMIN_USERNAME: admin
           REPUTATION_POOL_ADMIN_PASSWORD: admin1234
           REPUTATION_POOL_ADMIN_JWT_SECRET: ci0123456789abcdef0123456789abcdef
+          # Grafana(#14) 관리자 비번은 compose 필수값 — CI 스택 기동용 throwaway.
+          GRAFANA_ADMIN_PASSWORD: ci-local-dev-admin
         run: docker compose up -d --build
 
       # Caddy 한 오리진(:8080)이 대시보드를 서빙할 때까지 대기(최대 ~2분).
