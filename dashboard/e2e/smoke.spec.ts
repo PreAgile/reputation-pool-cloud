@@ -6,7 +6,7 @@ async function login(page: Page) {
   await page.locator('input[autocomplete="username"]').fill("admin");
   await page.locator('input[autocomplete="current-password"]').fill("admin1234");
   await page.getByRole("button", { name: "로그인" }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/overview$/);
 }
 
 test("로그인 후 6개 화면을 내비게이션한다", async ({ page }) => {

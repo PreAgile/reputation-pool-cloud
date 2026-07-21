@@ -77,7 +77,7 @@ export default function ResourceDetailPage() {
   // 상세 로드 전에도 그릴 수 있도록 경로 파라미터로 브레드크럼을 구성(풀 오버뷰 / KIND / value).
   // KIND 는 전용 경로가 없어 링크 없이(중간 조각), value 는 현재 위치로 표기된다.
   const crumbs = [
-    { label: "풀 오버뷰", href: "/" },
+    { label: "풀 오버뷰", href: "/overview" },
     { label: (kind ?? "").toUpperCase() },
     { label: value ?? "" },
   ];

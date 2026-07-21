@@ -66,7 +66,7 @@ describe("리소스 상세 화면 (integration + MSW)", () => {
     await screen.findByRole("heading", { name: "proxy-good" });
 
     const nav = screen.getByRole("navigation", { name: "위치 경로" });
-    expect(within(nav).getByRole("link", { name: "풀 오버뷰" })).toHaveAttribute("href", "/");
+    expect(within(nav).getByRole("link", { name: "풀 오버뷰" })).toHaveAttribute("href", "/overview");
     expect(within(nav).getByText("PROXY")).toBeInTheDocument();
     expect(within(nav).getByText("proxy-good")).toHaveAttribute("aria-current", "page");
   });
