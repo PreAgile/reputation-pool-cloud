@@ -74,7 +74,7 @@ const SCREENS: ScreenSpec[] = [
   },
   {
     name: "overview",
-    path: "/",
+    path: "/overview",
     token: TOKEN,
     stub: stubOverview,
     ready: async (page) => {

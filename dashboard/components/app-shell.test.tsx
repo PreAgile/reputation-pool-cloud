@@ -6,7 +6,7 @@ import { seriousViolations } from "@/test/a11y";
 
 // 라우팅/인증/테마 훅 대체 — AppShell 은 usePathname, 내부 UserMenu·CommandPalette 는 나머지 훅을 쓴다.
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/",
+  usePathname: () => "/overview",
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ logout: vi.fn() }) }));

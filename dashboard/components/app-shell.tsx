@@ -16,7 +16,7 @@ type NavItem = { href: string; label: string; icon: React.ReactNode };
 /** 16px 스트로크 아이콘(접힌 레일에서 라벨 대신 노출). currentColor 로 상태색 상속. */
 const NAV: NavItem[] = [
   {
-    href: "/",
+    href: "/overview",
     label: "풀 오버뷰",
     icon: (
       <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -181,7 +181,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <nav className="flex flex-col gap-1">
             {NAV.map((n) => {
-              const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
+              const active = path === n.href || path.startsWith(`${n.href}/`);
               return <NavLink key={n.href} item={n} active={active} collapsed={collapsed} />;
             })}
           </nav>
