@@ -8,6 +8,7 @@
 
 - 엔진 소스를 복사하거나 cloud에서 우회 구현하지 않는다.
 - 변경은 작은 수직 단위로 만들고, 관련 검증을 함께 추가한다.
+- 테스트에는 항상 한글 `@DisplayName`으로 "어떤 상황 → 어떤 결과"를 명시한다(가시성 우선). 상세는 [`docs/engineering/testing-and-review.md`](docs/engineering/testing-and-review.md) 참고.
 - 명시된 Maven Central release만 의존한다. snapshot/dynamic version은 사용하지 않는다.
 - 비밀값과 민감한 tenant 데이터는 코드·테스트 fixture·로그에 남기지 않는다.
 - 인증·권한·tenant 경계는 fail closed를 기본으로 한다.

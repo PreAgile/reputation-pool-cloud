@@ -17,6 +17,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
 import javax.sql.DataSource;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -41,6 +42,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
  */
 @SpringBootTest(properties = "grpc.server.port=0")
 @Import(EngineWiringIT.Containers.class)
+@DisplayName("EngineWiringIT: 실제 PostgreSQL 위에서 클라우드 전체 배선이 부팅되고 테넌트 체크포인트가 pool_id 로 격리되는지 검증하는 통합테스트")
 class EngineWiringIT {
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -68,6 +70,7 @@ class EngineWiringIT {
     private DataSource dataSource;
 
     @Test
+    @DisplayName("컨텍스트를 띄우면 → 테넌트별 풀 레지스트리와 gRPC 표면(어드바이저·브로드캐스터)이 모두 주입된다")
     void contextBoots_withThePerTenantRegistryAndGrpcSurfaceWired() {
         assertThat(registry).isNotNull();
         assertThat(advisorService).isNotNull();
@@ -75,6 +78,7 @@ class EngineWiringIT {
     }
 
     @Test
+    @DisplayName("두 테넌트가 각자 체크포인트를 저장하면 → 한쪽 저장이 다른 쪽 행을 지우지 않고 pool_id 로 격리된다")
     void twoTenantsCheckpointWithoutErasingEachOther() {
         tenantRepository.create(new Tenant("tenant-a", "Tenant A", "active", Instant.parse("2026-07-17T00:00:00Z")));
         tenantRepository.create(new Tenant("tenant-b", "Tenant B", "active", Instant.parse("2026-07-17T00:00:00Z")));

@@ -13,6 +13,7 @@ import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import java.time.Clock;
 import java.util.List;
 import javax.sql.DataSource;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -41,6 +42,7 @@ import org.springframework.test.web.servlet.MockMvc;
             // 32-byte secret: HS256 needs a 256-bit key.
             "reputation-pool.admin.jwt-secret=0123456789abcdef0123456789abcdef"
         })
+@DisplayName("컨트롤 플레인 보안: 토큰 없으면 401, 유효 토큰이면 200 으로 API 접근을 통제하는 인증 계약")
 class ControlPlaneSecurityTest {
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -83,22 +85,26 @@ class ControlPlaneSecurityTest {
     private UsageMeterReader usageMeterReader;
 
     @Test
+    @DisplayName("토큰 없이 /api/tenants 를 호출하면 → 401 로 거부한다")
     void protectedEndpoint_withoutToken_is401() throws Exception {
         mvc.perform(get("/api/tenants")).andExpect(status().isUnauthorized());
     }
 
     @Test
+    @DisplayName("토큰 없이 /api/usage 를 호출하면 → 401 로 거부한다")
     void usageEndpoint_withoutToken_is401() throws Exception {
         mvc.perform(get("/api/usage")).andExpect(status().isUnauthorized());
     }
 
     @Test
+    @DisplayName("위조된(디코딩 불가) 토큰으로 호출하면 → 401 로 거부한다")
     void protectedEndpoint_withGarbageToken_is401() throws Exception {
         mvc.perform(get("/api/tenants").header("Authorization", "Bearer not-a-real-token"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
+    @DisplayName("실제 로그인으로 발급된 유효 토큰으로 호출하면 → 200 으로 허용한다")
     void protectedEndpoint_withValidToken_is200() throws Exception {
         org.mockito.Mockito.when(tenants.findAll()).thenReturn(List.of());
         String token = tokenService
@@ -111,6 +117,7 @@ class ControlPlaneSecurityTest {
     }
 
     @Test
+    @DisplayName("올바른 자격증명이면 → 200 과 함께 비어있지 않은 Bearer 타입 토큰을 발급한다")
     void login_withValidCredentials_returnsToken() throws Exception {
         mvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -121,6 +128,7 @@ class ControlPlaneSecurityTest {
     }
 
     @Test
+    @DisplayName("비밀번호가 틀리면 → 401 로 거부한다")
     void login_withWrongPassword_is401() throws Exception {
         mvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

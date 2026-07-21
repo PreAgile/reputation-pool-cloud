@@ -7,12 +7,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
  * Unit tests for the IP-based login limiter (issue #28), driven by an adjustable {@link Clock} so the
  * sliding window, the temporary block, and its expiry are deterministic — no sleeping.
  */
+@DisplayName("LoginThrottle: IP별 실패 슬라이딩 윈도우와 전역 상한으로 로그인 시도를 제한하는 제한기")
 class LoginThrottleTest {
 
     private static final Duration WINDOW = Duration.ofMinutes(15);
@@ -27,6 +29,7 @@ class LoginThrottleTest {
     }
 
     @Test
+    @DisplayName("한 IP 가 윈도우 안에서 최대 시도(5회) 실패를 채우면 → 차단하고 retryAfter 를 블록 시간으로 알려준다")
     void blocksIpAfterMaxAttempts() {
         LoginThrottle throttle = throttle(5, 100);
         String ip = "203.0.113.7";
@@ -44,6 +47,7 @@ class LoginThrottleTest {
     }
 
     @Test
+    @DisplayName("차단된 뒤 블록 시간이 경과하면 → 다시 허용된다")
     void unblocksAfterBlockDurationElapses() {
         LoginThrottle throttle = throttle(5, 100);
         String ip = "203.0.113.8";
@@ -59,6 +63,7 @@ class LoginThrottleTest {
     }
 
     @Test
+    @DisplayName("윈도우를 벗어난 예전 실패는 → 잊혀서 이후 실패가 임계치에 걸리지 않아 허용된다")
     void slidingWindowForgetsOldFailures() {
         LoginThrottle throttle = throttle(5, 100);
         String ip = "203.0.113.9";
@@ -76,6 +81,7 @@ class LoginThrottleTest {
     }
 
     @Test
+    @DisplayName("로그인 성공을 기록하면 → 그 IP 의 실패 카운터가 초기화되어 이전 실패가 잊혀진다")
     void successResetsCounter() {
         LoginThrottle throttle = throttle(5, 100);
         String ip = "203.0.113.10";
@@ -93,6 +99,7 @@ class LoginThrottleTest {
     }
 
     @Test
+    @DisplayName("여러 IP 로 초당 전역 상한을 넘겨 뿌리면 → 상한 초과분은 차단하고, 다음 초에는 다시 허용한다")
     void globalCeilingDeniesSprayFromManyIps() {
         LoginThrottle throttle = throttle(100, 3); // per-IP effectively off; global ceiling = 3/s
 
@@ -110,6 +117,7 @@ class LoginThrottleTest {
     }
 
     @Test
+    @DisplayName("프루닝이 돌면 → 윈도우가 지난 유휴 항목은 제거하되 아직 차단 중인 항목은 유지한다")
     void pruneEvictsStaleEntriesButKeepsBlockedOnes() {
         // window 15m, block 1h so a tripped block outlives the window in this test.
         LoginThrottleProperties props = new LoginThrottleProperties(true, 5, WINDOW, Duration.ofHours(1), 100);
@@ -138,6 +146,7 @@ class LoginThrottleTest {
     }
 
     @Test
+    @DisplayName("프루닝이 돌아도 → 아직 윈도우 안에 실패가 남아있는 항목은 제거하지 않고 유지한다")
     void pruneKeepsEntriesWithFailuresStillInsideWindow() {
         LoginThrottle throttle = throttle(5, 100);
 
@@ -149,6 +158,7 @@ class LoginThrottleTest {
     }
 
     @Test
+    @DisplayName("스로틀이 비활성(enabled=false)이면 → 실패를 기록해도 항상 허용한다")
     void disabledThrottleAlwaysAllows() {
         LoginThrottleProperties disabled = new LoginThrottleProperties(false, 1, WINDOW, BLOCK, 1);
         LoginThrottle throttle = new LoginThrottle(disabled, clock);

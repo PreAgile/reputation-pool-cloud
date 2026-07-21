@@ -13,6 +13,7 @@ import io.github.preagile.reputationpool.core.pool.ResourcePool;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -53,6 +54,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
             "grpc.server.port=0"
         })
 @Import(ScoreHistoryIT.Containers.class)
+@DisplayName("ScoreHistoryIT: 실제 PostgreSQL 에 적재된 score_sample 을 score-history·overview 엔드포인트가 되읽어 주는지 검증하는 통합테스트")
 class ScoreHistoryIT {
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -74,6 +76,7 @@ class ScoreHistoryIT {
     private ScoreSampler sampler;
 
     @Test
+    @DisplayName("정상·쿨링 컨텍스트를 샘플링하면 → score-history 는 컨텍스트별 점수 시계열을, overview 는 최악 상태(COOLING) 대표 셀을 노출한다")
     void samplesAreQueryableAndOverviewSurfacesRepresentativeCell() {
         // Drive the admin tenant's pool: one resource, a healthy context and a cooling one.
         ResourcePool pool = registry.poolFor("default");

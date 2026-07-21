@@ -13,6 +13,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import javax.sql.DataSource;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -47,6 +48,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
             "reputation-pool.admin.login-throttle.block-duration=PT15M",
             "reputation-pool.admin.login-throttle.global-max-per-second=1000"
         })
+@DisplayName("로그인 브루트포스 방어 필터: 반복 실패한 IP 를 429 로 차단하고 로그인 성공 시 카운터를 리셋하는 rate limiter")
 class LoginThrottleFilterTest {
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -95,6 +97,7 @@ class LoginThrottleFilterTest {
     }
 
     @Test
+    @DisplayName("같은 IP 의 로그인 실패가 한도(3회)를 넘으면 → 다음 요청을 429 와 Retry-After 헤더로 차단한다")
     void repeatedFailures_areBlockedWith429AndRetryAfter() throws Exception {
         String ip = "203.0.113.1";
         // max-attempts=3: three failing logins arm the block, the fourth request is throttled.
@@ -108,6 +111,7 @@ class LoginThrottleFilterTest {
     }
 
     @Test
+    @DisplayName("차단된 429 응답은 → 자격증명 유효성을 흘리지 않는 일반 안내 메시지와 status 429 만 담는다")
     void throttledResponse_isGeneric_andDoesNotLeakCredentials() throws Exception {
         String ip = "203.0.113.2";
         for (int i = 0; i < 3; i++) {
@@ -122,6 +126,7 @@ class LoginThrottleFilterTest {
     }
 
     @Test
+    @DisplayName("실패 도중 로그인에 성공하면 → 실패 카운터가 리셋되어 이후 실패가 다시 한도 아래에서 시작한다")
     void successfulLogin_resetsCounter() throws Exception {
         String ip = "203.0.113.3";
         // Two failures, then a success clears the counter, so two more failures still stay under the limit.
