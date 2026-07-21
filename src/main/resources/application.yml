@@ -80,3 +80,12 @@ reputation-pool:
     # Opt-in audit retention (ISO-8601, e.g. P30D). P0D (the default) means never purge — the trail
     # grows unbounded, exactly as the reference does when the knob is unset.
     retention: ${REPUTATION_POOL_AUDIT_RETENTION:P0D}
+  # 상태 전이 알림 MVP(이슈 #45, A 조각). 리소스가 BLOCKLISTED로 전이하면 운영자가 대시보드를 보고 있지
+  # 않아도 webhook 알림을 받는다. opt-in·fail-safe: enabled=false 또는 webhook-url이 비어 있으면 완전
+  # no-op이라 아무것도 전송하지 않는다(둘 다 설정해야 발동). 전송은 엔진 핫패스를 막지 않도록 별도 스레드에서
+  # fire-and-forget이며, 실패는 삼켜 로깅만 한다. 페이로드에는 kind/value·eventType·시각만 담고 비밀값은 넣지
+  # 않는다. 메일 채널·COOLING 급증 감지·메트릭 노출은 후속(메트릭은 core observability 포트 선행 필요).
+  alerts:
+    enabled: ${REPUTATION_POOL_ALERTS_ENABLED:false}
+    webhook-url: ${REPUTATION_POOL_ALERTS_WEBHOOK_URL:}
+    timeout: ${REPUTATION_POOL_ALERTS_TIMEOUT:PT2S}
