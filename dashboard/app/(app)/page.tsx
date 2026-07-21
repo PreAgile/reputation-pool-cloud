@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { Sparkline } from "@/components/sparkline";
+import { Drawer } from "@/components/ui/drawer";
 import { useToast } from "@/components/ui/toast";
 import {
   DropdownMenu,
@@ -64,6 +65,8 @@ export default function OverviewPage() {
   const [kindFilter, setKindFilter] = useState<ResourceKind | "ALL">("ALL");
   // 오버플로 메뉴로 차단/해제가 진행 중인 행 키(중복 클릭 방지).
   const [actingKey, setActingKey] = useState<string | null>(null);
+  // 값 클릭 시 리스트를 벗어나지 않고 여는 미리보기 드로어의 대상 리소스(#52 P4).
+  const [preview, setPreview] = useState<ResourceOverview | null>(null);
 
   const load = useCallback(() => {
     api<PoolOverview>("/pools/resources")
@@ -190,7 +193,6 @@ export default function OverviewPage() {
                 </thead>
                 <tbody>
                   {rows.map((r) => {
-                    const href = `/resources/${r.kind.toLowerCase()}/${encodeURIComponent(r.value)}`;
                     return (
                     <tr
                       key={`${r.kind}:${r.value}`}
@@ -199,17 +201,19 @@ export default function OverviewPage() {
                       <td className="px-4 py-2.5">
                         <KindBadge kind={r.kind} />
                       </td>
-                      {/* 행 전체를 link 로 두면 오버플로 메뉴가 nested-interactive 가 되므로,
-                          내비게이션은 값 셀의 링크로만 노출한다(a11y). */}
+                      {/* 값 셀은 이동 링크 대신 미리보기 드로어 트리거다 — 리스트 맥락을 유지한 채
+                          상세를 보고, 드로어 안의 "전체 상세 보기"로만 페이지 이동한다(#52 P4).
+                          행 전체를 트리거로 감싸면 오버플로 메뉴가 nested-interactive 가 되므로 값 셀만. */}
                       <td className="max-w-[16rem] truncate px-4 py-2.5">
-                        <Link
-                          href={href}
+                        <button
+                          type="button"
+                          onClick={() => setPreview(r)}
                           title={r.value}
-                          aria-label={`${r.value} 상세 보기`}
-                          className="rounded-[4px] font-mono text-ink hover:text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          aria-label={`${r.value} 미리보기`}
+                          className="rounded-[4px] text-left font-mono text-ink hover:text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                         >
                           {r.value}
-                        </Link>
+                        </button>
                       </td>
                       <td className="px-4 py-2.5">
                         <StatusBadge state={r.state} />
@@ -264,7 +268,81 @@ export default function OverviewPage() {
           </Card>
         </>
       )}
+
+      <ResourcePreviewDrawer
+        resource={preview}
+        onOpenChange={(open) => {
+          if (!open) setPreview(null);
+        }}
+      />
     </div>
+  );
+}
+
+/**
+ * 리소스 미리보기 드로어: 오버뷰에서 값을 클릭하면 리스트를 벗어나지 않고 요약(상태·score·최근 판정·차단)을
+ * 보여주고, "전체 상세 보기"로만 상세 페이지로 이동한다(#52 P4). 열림은 resource 유무로 제어한다.
+ */
+function ResourcePreviewDrawer({
+  resource,
+  onOpenChange,
+}: {
+  resource: ResourceOverview | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const r = resource;
+  const detailHref = r
+    ? `/resources/${r.kind.toLowerCase()}/${encodeURIComponent(r.value)}`
+    : "#";
+  return (
+    <Drawer
+      open={r != null}
+      onOpenChange={onOpenChange}
+      title={r ? r.value : ""}
+      description={r ? (KIND_LABEL[r.kind] ?? r.kind) : undefined}
+    >
+      {r && (
+        <div className="flex flex-col gap-5">
+          <dl className="grid grid-cols-[5rem_1fr] items-center gap-x-4 gap-y-3 text-sm">
+            <dt className="text-xs font-bold uppercase tracking-wide text-muted">상태</dt>
+            <dd>
+              <StatusBadge state={r.state} />
+            </dd>
+            <dt className="text-xs font-bold uppercase tracking-wide text-muted">score</dt>
+            <dd className="tnum font-mono text-ink">
+              {r.score != null ? r.score.toFixed(2) : <span className="text-muted">—</span>}
+            </dd>
+            <dt className="text-xs font-bold uppercase tracking-wide text-muted">컨텍스트</dt>
+            <dd className="tnum text-ink">{r.contexts}</dd>
+            <dt className="text-xs font-bold uppercase tracking-wide text-muted">차단</dt>
+            <dd className="text-muted">{formatBlock(r)}</dd>
+          </dl>
+
+          <div>
+            <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-muted">
+              최근 판정
+            </div>
+            <Sparkline flags={r.recentWindow} />
+          </div>
+
+          <Link
+            href={detailHref}
+            className="inline-flex items-center gap-1.5 self-start rounded-[10px] border border-line bg-surface-2 px-3 py-2 text-sm font-bold text-ink transition hover:border-accent hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            전체 상세 보기
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M6 3l5 5-5 5"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </Link>
+        </div>
+      )}
+    </Drawer>
   );
 }
 

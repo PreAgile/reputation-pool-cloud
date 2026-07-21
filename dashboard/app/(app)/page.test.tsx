@@ -35,12 +35,30 @@ describe("풀 오버뷰 화면 (integration + MSW)", () => {
     expect(screen.getAllByText("차단").length).toBeGreaterThan(0);
 
     // 심각도 정렬: BLOCKLISTED(proxy-bad)가 HEALTHY(proxy-good)보다 위.
-    const rows = screen.getAllByRole("link", { name: /상세 보기/ });
+    // 값 셀은 미리보기 드로어 트리거(button)다(#52 P4).
+    const rows = screen.getAllByRole("button", { name: /미리보기/ });
     const texts = rows.map((r) => r.textContent ?? "");
     const badIdx = texts.findIndex((t) => t.includes("proxy-bad"));
     const goodIdx = texts.findIndex((t) => t.includes("proxy-good"));
     expect(badIdx).toBeGreaterThanOrEqual(0);
     expect(badIdx).toBeLessThan(goodIdx);
+  });
+
+  it("값을 클릭하면 미리보기 드로어가 열리고 전체 상세 링크를 제공한다", async () => {
+    const user = userEvent.setup();
+    render(<OverviewPage />, { wrapper: ToastProvider });
+    await screen.findByText("proxy-bad");
+
+    // 드로어는 처음엔 닫혀 있다.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "proxy-bad 미리보기" }));
+
+    // 드로어(dialog)가 열리고, 리스트를 벗어나지 않는 상세 요약 + 전체 상세 링크를 보여준다.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    const detail = screen.getByRole("link", { name: /전체 상세 보기/ });
+    expect(detail).toHaveAttribute("href", "/resources/proxy/proxy-bad");
   });
 
   it("로딩 중 스켈레톤을 보여주고 데이터 도착 후 감춘다", async () => {
