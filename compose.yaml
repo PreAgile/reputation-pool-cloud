@@ -125,9 +125,10 @@ services:
     depends_on:
       - prometheus
     environment:
-      # 로컬/사내 기본값. 프로덕션은 시크릿으로 주입한다.
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # fail-closed: 알려진 admin/admin 을 두지 않는다 — 비밀번호는 필수다. 미설정 시 compose 가 즉시
+      # 실패한다(REPUTATION_POOL_API_KEY 와 동일 규약). 로컬은 .env(.env.example 복사), 프로덕션은 시크릿.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD (copy .env.example for local dev)}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
       # loopback 만: 로컬에서 대시보드 확인용. 외부 노출은 #15 후속.
