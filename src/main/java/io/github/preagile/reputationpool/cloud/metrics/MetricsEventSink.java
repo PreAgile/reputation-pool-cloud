@@ -1,5 +1,6 @@
 package io.github.preagile.reputationpool.cloud.metrics;
 
+import io.github.preagile.reputationpool.core.domain.FailureType;
 import io.github.preagile.reputationpool.core.domain.PoolEvent;
 import io.github.preagile.reputationpool.core.port.EventSink;
 import io.micrometer.core.instrument.Counter;
@@ -40,12 +41,19 @@ public final class MetricsEventSink implements EventSink {
 
     public MetricsEventSink(MeterRegistry registry) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
-        // Pre-register the tag-free counters so they are visible (at 0) from the first scrape. The cooled
-        // counter carries a low-cardinality `cause` tag, so it is resolved per-event instead.
+        // Pre-register every counter so it is visible (at 0) from the first scrape — an absent series and a
+        // series at 0 mean different things to a dashboard/alert rule, so a counter should exist from the
+        // start, not blink into being on its first event.
         this.leaseGranted = registry.counter(LEASE_GRANTED);
         this.blocklisted = registry.counter(BLOCKLISTED);
         this.unblocked = registry.counter(UNBLOCKED);
         this.recovered = registry.counter(RECOVERED);
+        // The cooled counter is split by `cause`; FailureType is a bounded enum, so pre-register all of its
+        // values (a handful of series, cardinality fixed at compile time). emit() then increments the same
+        // cached meter.
+        for (FailureType cause : FailureType.values()) {
+            registry.counter(COOLED, "cause", cause.name());
+        }
     }
 
     @Override

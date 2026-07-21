@@ -29,7 +29,7 @@ class MetricsEventSinkTest {
     }
 
     @Test
-    @DisplayName("생성 직후 아무 이벤트도 없으면 → 태그 없는 카운터들이 0 으로 미리 등록돼 있다")
+    @DisplayName("생성 직후 아무 이벤트도 없으면 → 모든 카운터가 0 으로 미리 등록돼 있다")
     void preRegistersCountersAtZero() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         new MetricsEventSink(registry);
@@ -38,6 +38,12 @@ class MetricsEventSinkTest {
         assertThat(count(registry, MetricsEventSink.BLOCKLISTED)).isZero();
         assertThat(count(registry, MetricsEventSink.UNBLOCKED)).isZero();
         assertThat(count(registry, MetricsEventSink.RECOVERED)).isZero();
+        // The cause-tagged cooled counter is pre-registered for every FailureType, so each is visible at 0
+        // before any COOLING event fires (no metric-absence gaps in dashboards/alerts).
+        for (FailureType cause : FailureType.values()) {
+            assertThat(count(registry, MetricsEventSink.COOLED, "cause", cause.name()))
+                    .isZero();
+        }
     }
 
     @Test
