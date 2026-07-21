@@ -1,41 +1,42 @@
 import type { Metadata } from "next";
-import { MarketingNav } from "@/components/marketing/marketing-nav";
-import {
-  Hero,
-  TrustSignals,
-  Features,
-  Capabilities,
-  HowItWorks,
-  Docs,
-  Contact,
-  Footer,
-} from "@/components/marketing/landing-sections";
+import { Landing } from "@/components/marketing/landing";
+import { HtmlLang } from "@/components/html-lang";
+import { getDict } from "@/components/marketing/i18n";
+
+const dict = getDict("en");
+
+// 도메인은 후속(#15) 확정 전까지 env(NEXT_PUBLIC_SITE_URL) 또는 임시값. OG/Twitter 이미지 절대경로 해석용.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://reputationpool.io";
 
 export const metadata: Metadata = {
-  title: "reputation·pool — The reputation API for proxy & account pools",
-  description:
-    "Stop hand-rolling cooldowns, blocklists, and lease logic. Acquire the healthiest resource and report the outcome — a verified open-source engine heals the pool for you.",
+  metadataBase: new URL(SITE_URL),
+  title: dict.meta.title,
+  description: dict.meta.description,
+  // 이중언어 SEO 시그널 — 기본 영어(/) + 한국어(/ko).
+  alternates: { canonical: "/", languages: { en: "/", ko: "/ko" } },
+  openGraph: {
+    type: "website",
+    title: dict.meta.title,
+    description: dict.meta.description,
+    images: ["/marketing/overview-en-dark.png"],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: dict.meta.title,
+    description: dict.meta.description,
+    images: ["/marketing/overview-en-dark.png"],
+  },
 };
 
 /**
- * 랜딩(#16 슬라이스 1) — 인증 밖 public 페이지(`(marketing)` 라우트 그룹). 루트 layout 의 토큰/테마를 상속한다.
- * 대시보드 오버뷰는 /overview 로 이전했고(랜딩이 `/` 를 차지), 로그인 후 /overview 로 진입한다.
- * 섹션: nav → hero → trust → features(실제 스크린샷) → capabilities → how it works → docs → contact → footer.
+ * 영어 랜딩(기본 로케일, `/`). 루트 layout 의 토큰/테마를 상속한다. i18n 은 마케팅에만 적용되고
+ * 로그인 뒤 대시보드는 한국어(/overview)로 유지된다. 루트 `<html lang="ko">` 를 영어로 보정.
  */
 export default function MarketingPage() {
   return (
-    <div className="min-h-screen bg-bg">
-      <MarketingNav />
-      <main>
-        <Hero />
-        <TrustSignals />
-        <Features />
-        <Capabilities />
-        <HowItWorks />
-        <Docs />
-        <Contact />
-      </main>
-      <Footer />
-    </div>
+    <>
+      <HtmlLang lang="en" />
+      <Landing locale="en" />
+    </>
   );
 }

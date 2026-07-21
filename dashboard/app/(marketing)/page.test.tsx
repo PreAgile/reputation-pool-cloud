@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within, fireEvent } from "@testing-library/react";
 import { seriousViolations } from "@/test/a11y";
 import MarketingPage from "./page";
 
@@ -27,15 +27,15 @@ describe("랜딩 페이지 (#16)", () => {
     expect(screen.getByRole("heading", { name: /Up and running in five minutes\./ })).toBeInTheDocument();
   });
 
-  it("주요 CTA — Get started(#contact) · Read the docs(#docs) 를 제공한다", () => {
+  it("주요 CTA — Get started(/#contact) · Read the docs(/#docs) 를 제공한다", () => {
     render(<MarketingPage />);
 
-    // "Get started" 는 nav·hero 여러 곳 → 모두 #contact 로 스크롤.
+    // "Get started" 는 nav·hero 여러 곳 → 모두 /#contact 로 스크롤(하위 경로에서도 홈 섹션 도달하도록 `/` 프리픽스).
     const starts = screen.getAllByRole("link", { name: "Get started" });
     expect(starts.length).toBeGreaterThan(0);
-    starts.forEach((a) => expect(a).toHaveAttribute("href", "#contact"));
+    starts.forEach((a) => expect(a).toHaveAttribute("href", "/#contact"));
 
-    expect(screen.getByRole("link", { name: "Read the docs" })).toHaveAttribute("href", "#docs");
+    expect(screen.getByRole("link", { name: "Read the docs" })).toHaveAttribute("href", "/#docs");
   });
 
   it("결제 없음 — Email us CTA 가 mailto(digle117@gmail.com) 로 연결된다", () => {
@@ -50,27 +50,56 @@ describe("랜딩 페이지 (#16)", () => {
     expect(screen.queryByRole("heading", { name: /pricing/i })).not.toBeInTheDocument();
   });
 
-  it("히어로 코드 스니펫과 기능행 실제 스크린샷을 노출한다", () => {
+  it("히어로 코드 스니펫과 기능행 스크린샷(영어·테마별 2장)을 노출한다", () => {
     render(<MarketingPage />);
 
     expect(screen.getAllByText(/acquire/).length).toBeGreaterThan(0);
-    // 3개 기능행 스크린샷이 실제 캡처 <img> 로 들어간다.
-    const overview = screen.getByRole("img", { name: /pool overview/i });
-    expect(overview).toHaveAttribute("src", "/marketing/overview-dark.png");
-    expect(screen.getByRole("img", { name: /per-context reputation curve/i })).toHaveAttribute(
-      "src",
-      "/marketing/detail-dark.png",
+    // 각 기능행은 라이트/다크 캡처 <img> 2장을 CSS 로 스왑한다. 기본 로케일(en)이라 소스는 *-en-*.
+    const srcOf = (name: RegExp) =>
+      screen.getAllByRole("img", { name }).map((el) => el.getAttribute("src"));
+    expect(srcOf(/pool overview/i)).toEqual(
+      expect.arrayContaining(["/marketing/overview-en-light.png", "/marketing/overview-en-dark.png"]),
     );
-    expect(screen.getByRole("img", { name: /live event stream/i })).toHaveAttribute(
-      "src",
-      "/marketing/events-dark.png",
+    expect(srcOf(/per-context reputation curve/i)).toEqual(
+      expect.arrayContaining(["/marketing/detail-en-light.png", "/marketing/detail-en-dark.png"]),
     );
+    expect(srcOf(/live event stream/i)).toEqual(
+      expect.arrayContaining(["/marketing/events-en-light.png", "/marketing/events-en-dark.png"]),
+    );
+  });
+
+  it("언어 스위처가 한국어(/ko)로 연결된다", () => {
+    render(<MarketingPage />);
+
+    // 스위처는 드롭다운 — 열기 전엔 메뉴가 DOM 에 없다.
+    fireEvent.click(screen.getByRole("button", { name: "Language" }));
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "한국어" })).toHaveAttribute("href", "/ko");
+    expect(within(menu).getByRole("menuitem", { name: "English" })).toHaveAttribute("href", "/");
   });
 
   it("GitHub 링크가 공개 엔진 레포를 가리킨다", () => {
     render(<MarketingPage />);
     const gh = screen.getAllByRole("link", { name: /GitHub/ });
     expect(gh.some((a) => a.getAttribute("href") === "https://github.com/PreAgile/reputation-pool")).toBe(true);
+  });
+
+  it("모바일: 햄버거 토글로 접이식 nav 를 열고 닫는다", () => {
+    render(<MarketingPage />);
+
+    // 기본은 닫힘 — 모바일 nav 는 DOM 에 없다(닫힌 aria-controls 참조 회피).
+    expect(screen.queryByRole("navigation", { name: "Mobile" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+    const mobileNav = screen.getByRole("navigation", { name: "Mobile" });
+    // 데스크톱에서 숨겨지는 섹션 링크가 모바일 메뉴에서 홈 섹션(`/#…`)으로 노출된다.
+    expect(within(mobileNav).getByRole("link", { name: "Features" })).toHaveAttribute("href", "/#features");
+    expect(within(mobileNav).getByRole("link", { name: "GitHub" })).toBeInTheDocument();
+    // 이 단계에선 Sign in 을 노출하지 않는다.
+    expect(within(mobileNav).queryByRole("link", { name: "Sign in" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close menu" }));
+    expect(screen.queryByRole("navigation", { name: "Mobile" })).not.toBeInTheDocument();
   });
 
   it("a11y: critical/serious 위반이 없다", async () => {

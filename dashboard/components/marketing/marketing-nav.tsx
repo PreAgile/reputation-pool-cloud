@@ -1,16 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonClass } from "@/components/ui/button";
 import { Brand } from "./logo";
+import { LanguageSwitcher } from "./language-switcher";
 import { GITHUB_REPO_URL, GITHUB_STARS } from "./constants";
+import { LOCALE_PATH, type Dict, type Locale } from "./i18n";
 
 /**
  * GitHub 배지 — [옥토캣] GitHub · open source [★금색]. 옥토캣은 currentColor(ink),
- * 별은 항상 금색(#F5B301) 채움(확정 시안과 동일). 스타 수는 값이 있을 때만 노출.
+ * 별은 항상 금색(#F5B301) 채움. 스타 수는 값이 있을 때만 노출.
  */
-function GitHubPill() {
+function GitHubPill({ label, openSource }: { label: string; openSource: string }) {
   return (
     <a
       href={GITHUB_REPO_URL}
@@ -24,14 +27,14 @@ function GitHubPill() {
           fill="currentColor"
         />
       </svg>
-      GitHub
+      {label}
       {GITHUB_STARS != null ? (
         <span className="tnum flex items-center gap-1 font-mono text-xs text-muted">
           <span aria-hidden="true">★</span>
           {GITHUB_STARS.toLocaleString("en-US")}
         </span>
       ) : (
-        <span className="hidden font-mono text-xs text-muted lg:inline">open source</span>
+        <span className="hidden font-mono text-xs text-muted lg:inline">{openSource}</span>
       )}
       <svg viewBox="0 0 24 24" className="size-3.5 shrink-0" aria-hidden="true">
         <path
@@ -45,22 +48,25 @@ function GitHubPill() {
   );
 }
 
-const NAV_LINKS: { href: string; label: string }[] = [
-  { href: "#features", label: "Features" },
-  { href: "#how", label: "How it works" },
-  { href: "#docs", label: "Docs" },
-];
+export function MarketingNav({ nav, locale }: { nav: Dict["nav"]; locale: Locale }) {
+  // md 미만에서는 데스크톱 nav 링크가 숨겨지므로(hidden md:flex) 접이식 메뉴로 대체한다.
+  const [open, setOpen] = useState(false);
+  const base = LOCALE_PATH[locale];
+  const links = [
+    { href: `${base}#features`, label: nav.links.features },
+    { href: `${base}#how`, label: nav.links.how },
+    { href: `${base}#docs`, label: nav.links.docs },
+  ];
 
-export function MarketingNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/80 backdrop-blur">
       <div className="mx-auto flex h-[60px] max-w-6xl items-center gap-6 px-6">
-        <Link href="/" aria-label="reputation·pool home">
+        <Link href={base} aria-label={nav.home}>
           <Brand />
         </Link>
 
         <nav aria-label="Primary" className="hidden items-center gap-6 md:flex">
-          {NAV_LINKS.map((l) => (
+          {links.map((l) => (
             <Link key={l.href} href={l.href} className="text-sm font-medium text-muted hover:text-ink">
               {l.label}
             </Link>
@@ -68,19 +74,60 @@ export function MarketingNav() {
         </nav>
 
         <div className="flex flex-1 items-center justify-end gap-2">
-          <GitHubPill />
+          <GitHubPill label={nav.github} openSource={nav.openSource} />
+          <LanguageSwitcher current={locale} label={nav.language} />
           <ThemeToggle />
-          <Link href="/login" className="hidden text-sm font-medium text-muted hover:text-ink sm:inline">
-            Sign in
-          </Link>
           <Link
-            href="#contact"
+            href={`${base}#contact`}
             className={buttonClass("primary", "inline-flex items-center justify-center text-accent-ink")}
           >
-            Get started
+            {nav.getStarted}
           </Link>
+          {/* 모바일 메뉴 토글 — md 미만 전용. 열렸을 때만 aria-controls 로 패널을 가리킨다(존재하지 않는 id 참조 회피). */}
+          <button
+            type="button"
+            aria-label={open ? nav.menuClose : nav.menuOpen}
+            aria-expanded={open}
+            aria-controls={open ? "mobile-nav" : undefined}
+            onClick={() => setOpen((v) => !v)}
+            className="grid size-9 place-items-center rounded-[8px] border border-line text-ink md:hidden"
+          >
+            <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              {open ? (
+                <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
+              ) : (
+                <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
+              )}
+            </svg>
+          </button>
         </div>
       </div>
+
+      {open && (
+        <nav id="mobile-nav" aria-label="Mobile" className="border-t border-line bg-bg px-6 py-3 md:hidden">
+          <div className="flex flex-col">
+            {links.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                onClick={() => setOpen(false)}
+                className="rounded-[8px] px-2 py-2.5 text-sm font-medium text-muted hover:bg-surface-2 hover:text-ink"
+              >
+                {l.label}
+              </Link>
+            ))}
+            <a
+              href={GITHUB_REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setOpen(false)}
+              className="rounded-[8px] px-2 py-2.5 text-sm font-medium text-muted hover:bg-surface-2 hover:text-ink"
+            >
+              {nav.github}
+            </a>
+          </div>
+        </nav>
+      )}
     </header>
   );
 }
