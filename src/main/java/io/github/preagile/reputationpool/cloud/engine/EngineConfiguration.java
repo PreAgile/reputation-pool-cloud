@@ -2,6 +2,7 @@ package io.github.preagile.reputationpool.cloud.engine;
 
 import io.github.preagile.reputationpool.cloud.alert.AlertingEventSink;
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
+import io.github.preagile.reputationpool.cloud.metrics.MetricsEventSink;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import io.github.preagile.reputationpool.core.port.EventSink;
 import io.github.preagile.reputationpool.core.port.ResourceStore;
@@ -84,12 +85,17 @@ public class EngineConfiguration {
      *
      * <p>Including the alerting sink unconditionally is safe: it forwards only BLOCKLISTED transitions,
      * alerting is opt-in (a no-op until a webhook is configured), and the notifier never blocks or throws
-     * — plus {@code CompositeEventSink} already isolates each delegate's failures from the others.
+     * — plus {@code CompositeEventSink} already isolates each delegate's failures from the others. The
+     * {@link MetricsEventSink} joins beside it (issue #45): it only increments Micrometer counters, which
+     * the actuator exposes at {@code /actuator/prometheus}, and is likewise non-blocking and failure-safe.
      */
     @Bean
     EventSink poolEventSink(
-            EventBroadcaster broadcaster, PostgresAuditTrail auditTrail, AlertingEventSink alertingEventSink) {
-        return new CompositeEventSink(List.of(broadcaster, auditTrail, alertingEventSink));
+            EventBroadcaster broadcaster,
+            PostgresAuditTrail auditTrail,
+            AlertingEventSink alertingEventSink,
+            MetricsEventSink metricsEventSink) {
+        return new CompositeEventSink(List.of(broadcaster, auditTrail, alertingEventSink, metricsEventSink));
     }
 
     /**

@@ -26,6 +26,9 @@ val grpcVersion = "1.63.0"
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    // Renders the Micrometer meters (issue #45) in Prometheus text format at /actuator/prometheus, so an
+    // external Prometheus can scrape them. Version is managed by the Spring Boot BOM.
+    implementation("io.micrometer:micrometer-registry-prometheus")
     // DataSource (HikariCP) + Flyway auto-configuration for the persistence adapter's store/trail.
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("net.devh:grpc-spring-boot-starter:3.1.0.RELEASE")
