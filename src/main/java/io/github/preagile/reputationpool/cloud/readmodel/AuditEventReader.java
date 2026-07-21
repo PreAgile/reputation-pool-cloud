@@ -16,12 +16,18 @@ import javax.sql.DataSource;
  * server never needed to read it back), so cloud owns this read side as its own plain-JDBC query,
  * matching the adapter's idiom.
  *
- * <p>Pages newest-first by {@code seq} (the total order the ledger is written in) using
- * {@code LIMIT ? OFFSET ?} — classic offset pagination. It fetches one extra row to report
- * {@code hasMore} cheaply rather than issuing a {@code COUNT(*)}. Note this is <em>not</em> keyset
- * pagination: {@code OFFSET n} still makes the database walk and discard the first {@code n} rows, so
- * cost grows with the page offset and deep pages get progressively slower. True keyset pagination (a
- * {@code seq < ?} cursor that seeks instead of skipping) is deferred follow-up work.
+ * <p>Pages newest-first by {@code seq} (the total order the ledger is written in) with <b>keyset
+ * (cursor) pagination</b> (issue #30): the first page is the latest {@code limit} rows, and each
+ * subsequent page is {@code WHERE seq < :beforeSeq ORDER BY seq DESC LIMIT :limit}. Because {@code seq}
+ * is the {@code IDENTITY} primary key, this is a bounded reverse index scan that <em>seeks</em> to the
+ * cursor rather than an {@code OFFSET} that walks and discards leading rows — cost is flat regardless of
+ * how deep the caller has scrolled. It fetches one extra row to report {@code hasMore} (and expose the
+ * {@code nextCursor}) cheaply rather than issuing a {@code COUNT(*)}. No new column, migration, or index
+ * is needed: the PK already provides the ordered access path.
+ *
+ * <p>Purging ({@code PostgresAuditTrail.purgeOlderThan}) deletes the <em>oldest</em> (lowest-{@code seq})
+ * tail, which is the opposite end from where a newest-first cursor walks, so a concurrent purge cannot
+ * make a live cursor skip or duplicate rows.
  *
  * <p><b>Tenant-scope caveat.</b> {@code audit_event} carries no tenant/pool column yet — the trail is
  * a shared broadcaster fed by the single interim pool — so events are currently <em>global</em>, not
@@ -33,9 +39,16 @@ public final class AuditEventReader {
 
     private static final long NANOS_PER_SECOND = 1_000_000_000L;
 
-    private static final String SELECT_PAGE = """
+    /** Hard ceiling on a single page, independent of what the caller asks for. */
+    private static final int MAX_LIMIT = 500;
+
+    private static final String SELECT_LATEST = """
             SELECT seq, event_type, resource_kind, resource_value, context, occurred_at, until, cause
-            FROM audit_event ORDER BY seq DESC LIMIT ? OFFSET ?""";
+            FROM audit_event ORDER BY seq DESC LIMIT ?""";
+
+    private static final String SELECT_BEFORE = """
+            SELECT seq, event_type, resource_kind, resource_value, context, occurred_at, until, cause
+            FROM audit_event WHERE seq < ? ORDER BY seq DESC LIMIT ?""";
 
     private final DataSource dataSource;
 
@@ -44,33 +57,47 @@ public final class AuditEventReader {
     }
 
     /**
-     * One page of the ledger, newest first.
+     * One page of the ledger, newest first, via keyset pagination.
      *
-     * @param page zero-based page index
-     * @param size page size (rows per page)
+     * @param beforeSeq exclusive upper bound on {@code seq}: {@code null} means "start at the latest",
+     *     otherwise the page holds the newest rows with {@code seq < beforeSeq}
+     * @param limit page size (rows per page), clamped to {@code [1, 500]}
+     * @return the page; {@link AuditEventPage#nextCursor()} is the {@code seq} to pass as the next
+     *     {@code beforeSeq}, or {@code null} when this is the last page
      */
-    public AuditEventPage page(int page, int size) {
-        int safeSize = Math.max(1, Math.min(size, 500));
-        int safePage = Math.max(0, page);
-        long offset = (long) safePage * safeSize;
+    public AuditEventPage page(Long beforeSeq, int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
         try (Connection connection = dataSource.getConnection();
-                PreparedStatement statement = connection.prepareStatement(SELECT_PAGE)) {
-            statement.setInt(1, safeSize + 1); // one extra row => hasMore without a COUNT(*)
-            statement.setLong(2, offset);
+                PreparedStatement statement = prepare(connection, beforeSeq, safeLimit)) {
             try (ResultSet rows = statement.executeQuery()) {
                 List<AuditEventRecord> events = new ArrayList<>();
                 while (rows.next()) {
                     events.add(map(rows));
                 }
-                boolean hasMore = events.size() > safeSize;
+                boolean hasMore = events.size() > safeLimit;
                 if (hasMore) {
-                    events.remove(events.size() - 1);
+                    events.remove(events.size() - 1); // drop the probe row
                 }
-                return new AuditEventPage(events, safePage, safeSize, hasMore);
+                // Cursor = seq of the last (oldest) row on this page; null when nothing more follows.
+                Long nextCursor = hasMore ? events.get(events.size() - 1).seq() : null;
+                return new AuditEventPage(events, nextCursor, hasMore);
             }
         } catch (SQLException e) {
             throw new IllegalStateException("audit event query failed", e);
         }
+    }
+
+    /** Latest-page vs before-cursor query, both fetching one probe row past {@code limit}. */
+    private static PreparedStatement prepare(Connection connection, Long beforeSeq, int limit) throws SQLException {
+        if (beforeSeq == null) {
+            PreparedStatement statement = connection.prepareStatement(SELECT_LATEST);
+            statement.setInt(1, limit + 1);
+            return statement;
+        }
+        PreparedStatement statement = connection.prepareStatement(SELECT_BEFORE);
+        statement.setLong(1, beforeSeq);
+        statement.setInt(2, limit + 1);
+        return statement;
     }
 
     private static AuditEventRecord map(ResultSet rows) throws SQLException {
@@ -104,6 +131,9 @@ public final class AuditEventReader {
             Instant until,
             String cause) {}
 
-    /** A page of events, newest first, with a cheap {@code hasMore} instead of a total count. */
-    public record AuditEventPage(List<AuditEventRecord> events, int page, int size, boolean hasMore) {}
+    /**
+     * A page of events, newest first. {@code nextCursor} is the {@code seq} to seek before for the next
+     * page, or {@code null} when the page is the last one; {@code hasMore} mirrors {@code nextCursor != null}.
+     */
+    public record AuditEventPage(List<AuditEventRecord> events, Long nextCursor, boolean hasMore) {}
 }

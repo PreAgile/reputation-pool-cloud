@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { eventsFixture } from "@/test/fixtures";
+import type { AuditEventPage } from "@/lib/types";
 import EventsPage from "./page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -14,6 +15,32 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
+
+/** 최신 페이지(커서 있음) + 과거 페이지(커서 없음, 마지막) 2단 페이지네이션 핸들러. */
+function paginate() {
+  const page1: AuditEventPage = {
+    events: [
+      {
+        seq: 5,
+        eventType: "RESOURCE_LEASED",
+        resourceKind: "PROXY",
+        resourceValue: "proxy-live",
+        context: "us-east",
+        occurredAt: "2026-07-18T08:33:00Z",
+        until: null,
+        cause: null,
+      },
+    ],
+    nextCursor: "Y3Vyc29yLTQ", // 불투명 커서(내용 무관)
+  };
+  const page2 = eventsFixture; // seq 3,2 · nextCursor null (마지막)
+  server.use(
+    http.get("*/api/events", ({ request }) => {
+      const url = new URL(request.url);
+      return HttpResponse.json(url.searchParams.get("cursor") ? page2 : page1);
+    }),
+  );
+}
 
 describe("라이브 이벤트 화면 (integration + MSW)", () => {
   it("이벤트 행과 필터 UI를 렌더한다", async () => {
@@ -56,5 +83,47 @@ describe("라이브 이벤트 화면 (integration + MSW)", () => {
     await user.click(toggle);
     expect(screen.getByRole("button", { name: "재개" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("일시정지됨")).toBeInTheDocument();
+  });
+
+  it("nextCursor 가 없으면 '더 보기' 버튼이 없다", async () => {
+    render(<EventsPage />);
+    await screen.findByText("proxy-good");
+    expect(screen.queryByRole("button", { name: "더 보기" })).not.toBeInTheDocument();
+  });
+
+  it("'더 보기'로 과거를 이어 append 하고, 폴링을 멈추며 '라이브로'를 노출한다", async () => {
+    const user = userEvent.setup();
+    paginate();
+    render(<EventsPage />);
+
+    // 최신 페이지: proxy-live 만 보이고 과거(acct-cool)는 아직 없다.
+    await screen.findByText("proxy-live");
+    expect(screen.queryByText("acct-cool")).not.toBeInTheDocument();
+
+    // 더 보기 → 과거 페이지 append(dedup, seq 정렬 유지) + 폴링 정지 표시.
+    await user.click(screen.getByRole("button", { name: "더 보기" }));
+    expect(await screen.findByText("acct-cool")).toBeInTheDocument();
+    expect(screen.getByText("proxy-live")).toBeInTheDocument(); // 기존 항목 유지
+    expect(screen.getByText("과거 보기 · 실시간 정지")).toBeInTheDocument();
+
+    // 마지막 페이지(nextCursor=null)라 더 보기 사라지고 안내 문구 노출.
+    expect(screen.queryByRole("button", { name: "더 보기" })).not.toBeInTheDocument();
+    expect(screen.getByText("더 이상 과거 이벤트가 없습니다.")).toBeInTheDocument();
+  });
+
+  it("'라이브로'를 누르면 최신으로 초기화하고 실시간 상태로 돌아온다", async () => {
+    const user = userEvent.setup();
+    paginate();
+    render(<EventsPage />);
+
+    await screen.findByText("proxy-live");
+    await user.click(screen.getByRole("button", { name: "더 보기" }));
+    await screen.findByText("acct-cool");
+
+    // 라이브로 → 최신 페이지로 재조회, 과거 항목 사라지고 실시간 라벨 복귀.
+    await user.click(screen.getByRole("button", { name: "라이브로" }));
+    await screen.findByText(/실시간 ·/);
+    expect(screen.queryByText("acct-cool")).not.toBeInTheDocument();
+    expect(screen.getByText("proxy-live")).toBeInTheDocument();
   });
 });
