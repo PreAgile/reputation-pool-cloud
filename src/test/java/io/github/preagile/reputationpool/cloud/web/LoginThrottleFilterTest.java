@@ -48,7 +48,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
             "reputation-pool.admin.login-throttle.block-duration=PT15M",
             "reputation-pool.admin.login-throttle.global-max-per-second=1000"
         })
-@DisplayName("로그인 브루트포스 방어 필터: 반복 실패한 IP 를 429 로 차단하고 로그인 성공 시 카운터를 리셋하는 rate limiter")
+@DisplayName("LoginThrottleFilter: 반복 실패한 IP 를 429 로 차단하고 로그인 성공 시 카운터를 리셋하는 rate limiter")
 class LoginThrottleFilterTest {
 
     @TestConfiguration(proxyBeanMethods = false)

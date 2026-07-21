@@ -42,7 +42,7 @@ import org.springframework.test.web.servlet.MockMvc;
             // 32-byte secret: HS256 needs a 256-bit key.
             "reputation-pool.admin.jwt-secret=0123456789abcdef0123456789abcdef"
         })
-@DisplayName("컨트롤 플레인 보안: 토큰 없으면 401, 유효 토큰이면 200 으로 API 접근을 통제하는 인증 계약")
+@DisplayName("ControlPlaneSecurity: 토큰 없으면 401, 유효 토큰이면 200 으로 API 접근을 통제하는 인증 계약")
 class ControlPlaneSecurityTest {
 
     @TestConfiguration(proxyBeanMethods = false)
