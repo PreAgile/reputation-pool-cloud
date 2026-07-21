@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.Optional;
 import java.util.Random;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -42,6 +43,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * unseeded key is rejected with {@code UNAUTHENTICATED}; a resolver outage yields {@code UNAVAILABLE}.
  * Runs in the {@code build} gate.
  */
+@DisplayName("ApiKeyAuthInterceptor: x-api-key 를 테넌트로 해석해 gRPC 호출을 인증/거부하는 인터셉터")
 class ApiKeyAuthInterceptorTest {
 
     private static final String VALID_KEY = "secret-key";
@@ -106,6 +108,7 @@ class ApiKeyAuthInterceptorTest {
     }
 
     @Test
+    @DisplayName("테넌트로 해석되는 유효한 키를 실으면 → 서비스까지 통과해 정상 응답(granted=true)을 받는다")
     void resolvableKey_passesThroughToTheService() throws Exception {
         startServerWith(ONE_KEY);
         withKey(VALID_KEY).register(registerProxy());
@@ -119,6 +122,7 @@ class ApiKeyAuthInterceptorTest {
     }
 
     @Test
+    @DisplayName("x-api-key 헤더 자체가 없으면 → UNAUTHENTICATED 로 거부한다")
     void missingKey_isRejectedWithUnauthenticated() throws Exception {
         startServerWith(ONE_KEY);
         assertThatThrownBy(() -> stub.register(registerProxy()))
@@ -127,6 +131,7 @@ class ApiKeyAuthInterceptorTest {
     }
 
     @Test
+    @DisplayName("어떤 테넌트로도 해석되지 않는 키면 → UNAUTHENTICATED 로 거부한다")
     void unknownKey_isRejectedWithUnauthenticated() throws Exception {
         startServerWith(ONE_KEY);
         assertThatThrownBy(() -> withKey("nope").register(registerProxy()))
@@ -136,6 +141,7 @@ class ApiKeyAuthInterceptorTest {
 
     /** Fail closed: with nothing seeded (resolver resolves nothing), even a plausible key is rejected. */
     @Test
+    @DisplayName("시드된 키가 하나도 없으면(fail-closed) → 그럴듯한 키라도 UNAUTHENTICATED 로 거부한다")
     void noKeySeeded_rejectsEvenPlausibleKey() throws Exception {
         startServerWith(NONE);
         assertThatThrownBy(() -> withKey(VALID_KEY).register(registerProxy()))
@@ -146,6 +152,7 @@ class ApiKeyAuthInterceptorTest {
     /** A blank header is rejected before any resolver lookup. */
     @ParameterizedTest
     @ValueSource(strings = {"", " "})
+    @DisplayName("빈 문자열/공백 키면 → 리졸버 조회 이전에 UNAUTHENTICATED 로 거부한다")
     void blankKey_isRejectedWithUnauthenticated(String blank) throws Exception {
         startServerWith(ONE_KEY);
         assertThatThrownBy(() -> withKey(blank).register(registerProxy()))
@@ -155,6 +162,7 @@ class ApiKeyAuthInterceptorTest {
 
     /** A resolver outage is surfaced as UNAVAILABLE, not a false UNAUTHENTICATED. */
     @Test
+    @DisplayName("리졸버가 예외로 장애 상태면 → 오인 거부(UNAUTHENTICATED)가 아니라 UNAVAILABLE 로 응답한다")
     void resolverOutage_isRejectedWithUnavailable() throws Exception {
         startServerWith(keyHash -> {
             throw new IllegalStateException("db down");

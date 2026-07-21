@@ -14,6 +14,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -37,6 +38,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
             "reputation-pool.metering.flush-interval=PT1H"
         })
 @Import(MeteringIT.Containers.class)
+@DisplayName("MeteringIT: 실제 PostgreSQL 의 usage_meter 에 테넌트별 리스 사용량과 풀 크기가 적재·조회되는지 검증하는 통합테스트")
 class MeteringIT {
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -61,6 +63,7 @@ class MeteringIT {
     private Clock clock;
 
     @Test
+    @DisplayName("리스를 3번 획득·반납하고 롤업을 플러시하면 → 월/일 리스 합계 3, 풀 크기 1 이 테넌트별로 미터링된다")
     void leasesAndPoolSizeAreMeteredPerTenant() {
         ResourcePool pool = registry.poolFor("metering-it");
         pool.register(new ResourceId(ResourceKind.PROXY, "p1"));

@@ -15,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -23,6 +24,7 @@ import org.mockito.ArgumentCaptor;
  * a total no-op when alerting is inactive (opt-in / fail-safe), and when active it dispatches exactly one
  * async POST to the configured URL — and never throws back at the caller even if the send fails.
  */
+@DisplayName("WebhookAlertNotifier: 활성일 때만 웹훅으로 비동기 POST 를 쏘는 알림 전송기")
 class WebhookAlertNotifierTest {
 
     private static final Duration T = Duration.ofSeconds(2);
@@ -36,6 +38,7 @@ class WebhookAlertNotifierTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    @DisplayName("알림이 비활성화(enabled=false)면 → HTTP 호출 없이 아무것도 하지 않는다")
     void isNoOpWhenInactive() {
         HttpClient client = mock(HttpClient.class);
         WebhookAlertNotifier notifier =
@@ -48,6 +51,7 @@ class WebhookAlertNotifierTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    @DisplayName("활성이어도 웹훅 URL 이 비어 있으면 → HTTP 호출 없이 아무것도 하지 않는다")
     void isNoOpWhenUrlBlank() {
         HttpClient client = mock(HttpClient.class);
         WebhookAlertNotifier notifier = new WebhookAlertNotifier(new AlertProperties(true, "", T), client, mapper());
@@ -59,6 +63,7 @@ class WebhookAlertNotifierTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    @DisplayName("활성 상태면 → 설정된 URL 로 JSON 비동기 POST 를 정확히 한 번 전송한다")
     void dispatchesOneAsyncPostWhenActive() {
         HttpClient client = mock(HttpClient.class);
         HttpResponse<Void> response = mock(HttpResponse.class);
@@ -81,6 +86,7 @@ class WebhookAlertNotifierTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    @DisplayName("전송이 실패(IOException)해도 → 호출자에게 예외를 던지지 않고 삼킨다")
     void swallowsSendFailure() {
         HttpClient client = mock(HttpClient.class);
         when(client.sendAsync(any(), any(HttpResponse.BodyHandler.class)))

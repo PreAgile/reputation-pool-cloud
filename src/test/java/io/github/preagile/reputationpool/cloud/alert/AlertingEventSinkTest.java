@@ -12,6 +12,7 @@ import io.github.preagile.reputationpool.core.domain.PoolEvent;
 import io.github.preagile.reputationpool.core.domain.ResourceId;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
 import java.time.Instant;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -21,6 +22,7 @@ import org.mockito.ArgumentCaptor;
  * engine hot path — never let a misbehaving notifier break event emission. The notifier is a Mockito
  * stub, so these run without a socket.
  */
+@DisplayName("AlertingEventSink: BLOCKLISTED 이벤트만 알림으로 전달하는 팬아웃 싱크")
 class AlertingEventSinkTest {
 
     private static final ResourceId PROXY = new ResourceId(ResourceKind.PROXY, "p1");
@@ -28,6 +30,7 @@ class AlertingEventSinkTest {
     private static final Instant AT = Instant.parse("2026-07-20T10:00:00Z");
 
     @Test
+    @DisplayName("BLOCKLISTED 이벤트가 들어오면 → 리소스 정보를 담은 페이로드로 알림을 전달한다")
     void forwardsBlocklistedEventWithPayload() {
         AlertNotifier notifier = mock(AlertNotifier.class);
         AlertingEventSink sink = new AlertingEventSink(notifier);
@@ -47,6 +50,7 @@ class AlertingEventSinkTest {
     }
 
     @Test
+    @DisplayName("until 이 Instant.MAX 인 영구 차단이면 → until 은 null, permanent 는 true 로 표시한다")
     void marksPermanentBlockWithNullUntil() {
         AlertNotifier notifier = mock(AlertNotifier.class);
         AlertingEventSink sink = new AlertingEventSink(notifier);
@@ -60,6 +64,7 @@ class AlertingEventSinkTest {
     }
 
     @Test
+    @DisplayName("BLOCKLISTED 가 아닌 다른 이벤트들은 → 알림을 전혀 보내지 않는다")
     void ignoresNonBlocklistEvents() {
         AlertNotifier notifier = mock(AlertNotifier.class);
         AlertingEventSink sink = new AlertingEventSink(notifier);
@@ -73,6 +78,7 @@ class AlertingEventSinkTest {
     }
 
     @Test
+    @DisplayName("알림 전송이 예외를 던져도 → 삼켜서 엔진의 이벤트 발행이 끊기지 않는다")
     void swallowsNotifierFailureSoTheEngineKeepsFlowing() {
         AlertNotifier notifier = mock(AlertNotifier.class);
         doThrow(new RuntimeException("boom")).when(notifier).notify(org.mockito.ArgumentMatchers.any());

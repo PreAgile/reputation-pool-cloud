@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Clock;
 import javax.sql.DataSource;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.DefaultApplicationArguments;
@@ -23,6 +24,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
  *
  * <p>Requires Docker; runs via {@code ./gradlew integrationTest}, off the {@code build} gate.
  */
+@DisplayName("ApiKeySeederIT: 실제 PostgreSQL 에서 API 키 시더의 재실행 멱등성과 양방향 키 로테이션을 검증하는 통합테스트")
 @SpringBootTest(properties = {"reputation-pool.auth.api-key=bootstrap-key", "grpc.server.port=0"})
 @Import(ApiKeySeederIT.Containers.class)
 class ApiKeySeederIT {
@@ -48,6 +50,7 @@ class ApiKeySeederIT {
     }
 
     @Test
+    @DisplayName("같은 키로 재시드하면 멱등하게 유지되고, 새 키로 로테이션 후 되돌리면 → 새 키 활성·이전 키 폐기가 양방향으로 반영된다")
     void reconcilesIdempotentlyAndRotatesBothWays() throws Exception {
         // The app's own startup seeder already activated "bootstrap-key" for the default tenant.
         assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("bootstrap-key")))

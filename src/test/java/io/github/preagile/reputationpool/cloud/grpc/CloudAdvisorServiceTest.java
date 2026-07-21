@@ -38,6 +38,7 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -47,6 +48,7 @@ import org.junit.jupiter.api.Test;
  * to tenant B: B cannot acquire it, and B cannot renew A's lease. Docker-free (in-process transport,
  * in-memory per-tenant pools), so it runs in the {@code build} gate.
  */
+@DisplayName("ReputationAdvisorService: 요청을 호출자의 테넌트 풀로 라우팅해 테넌트 간 리소스·리스를 격리하는 gRPC 어드바이저")
 class CloudAdvisorServiceTest {
 
     private static final Metadata.Key<String> TENANT_HEADER =
@@ -124,6 +126,7 @@ class CloudAdvisorServiceTest {
     }
 
     @Test
+    @DisplayName("한 테넌트가 등록한 리소스는 → 그 테넌트만 리스할 수 있고, 다른 테넌트의 풀에는 보이지 않아 리스가 거절된다")
     void resourceRegisteredByOneTenantIsInvisibleToAnother() {
         ResourceId proxy = ResourceId.newBuilder()
                 .setKind(ResourceKind.PROXY)
@@ -143,6 +146,7 @@ class CloudAdvisorServiceTest {
     }
 
     @Test
+    @DisplayName("다른 테넌트가 발급받은 리스를 넘겨 갱신을 시도하면 → 내 리스 레지스트리에 없으므로 갱신이 거절된다")
     void oneTenantCannotRenewAnothersLease() {
         ResourceId proxy = ResourceId.newBuilder()
                 .setKind(ResourceKind.PROXY)

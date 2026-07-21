@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -45,6 +46,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
             "reputation-pool.admin.jwt-secret=0123456789abcdef0123456789abcdef",
             "grpc.server.port=0"
         })
+@DisplayName("ControlPlaneIT: 실제 PostgreSQL 위에서 REST 컨트롤 플레인의 인증·테넌트/API키 CRUD·대시보드 조회를 HTTP 로 종단 검증하는 통합테스트")
 @Import(ControlPlaneIT.Containers.class)
 class ControlPlaneIT {
 
@@ -64,12 +66,14 @@ class ControlPlaneIT {
     private TenantResolver resolver;
 
     @Test
+    @DisplayName("토큰 없이 보호된 엔드포인트를 호출하면 → 401 Unauthorized 로 차단한다")
     void protectedEndpoint_withoutToken_is401() {
         ResponseEntity<String> response = rest.getForEntity("/api/tenants", String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
+    @DisplayName("테넌트를 생성·조회·목록하면 성공하고, 같은 id 를 중복 생성하면 → 409 Conflict 로 거부한다")
     void tenantCrud_andDuplicateIsConflict() {
         HttpHeaders auth = authHeaders();
 
@@ -94,6 +98,7 @@ class ControlPlaneIT {
     }
 
     @Test
+    @DisplayName("API 키를 발급하면 원문 토큰이 resolver 로 테넌트에 매핑되고 목록엔 마스킹만 노출되며, 폐기하면 → 즉시 매핑이 사라지고 재폐기는 404 다")
     void apiKeyLifecycle_issueResolveRevoke() {
         HttpHeaders auth = authHeaders();
         rest.exchange("/api/tenants", HttpMethod.POST, json(Map.of("id", "keyco"), auth), Map.class);
@@ -133,6 +138,7 @@ class ControlPlaneIT {
     }
 
     @Test
+    @DisplayName("토큰을 가지고 대시보드 읽기 모델(풀 스냅샷·이벤트)을 호출하면 → 200 으로 조회된다")
     void readModel_isReachableWithToken() {
         HttpHeaders auth = authHeaders();
 
@@ -149,6 +155,7 @@ class ControlPlaneIT {
 
     @Test
     @SuppressWarnings("unchecked")
+    @DisplayName("리소스를 수동 영구 차단하면 개요에 BLOCKLISTED 로 나타나고, 차단 해제하면 → 개요에서 완전히 사라진다")
     void manualBlockThenUnblock() {
         HttpHeaders auth = authHeaders();
 
