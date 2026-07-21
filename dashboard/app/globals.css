@@ -183,6 +183,22 @@ body {
   animation: rp-scale-out var(--motion-fast) var(--ease-std);
 }
 
+/* 우측 시트(Drawer) — 화면 오른쪽에서 슬라이드 인. 오버뷰 리소스 미리보기(#52 P4). */
+@keyframes rp-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes rp-drawer-out {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+.rp-anim-drawer[data-state="open"] {
+  animation: rp-drawer-in var(--motion-slow) var(--ease-out);
+}
+.rp-anim-drawer[data-state="closed"] {
+  animation: rp-drawer-out var(--motion-fast) var(--ease-std);
+}
+
 /* 모션 감소 선호 시 전역 무력화(스켈레톤 맥동 등 포함). 접근성 필수. */
 @media (prefers-reduced-motion: reduce) {
   *,
