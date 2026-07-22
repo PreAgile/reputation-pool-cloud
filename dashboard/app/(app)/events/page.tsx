@@ -116,28 +116,40 @@ function KindBadge({ kind }: { kind: string }) {
 
 export default function EventsPage() {
   const [events, setEvents] = useState<AuditEventRecord[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [firstError, setFirstError] = useState<string | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [paused, setPaused] = useState(false);
+  // 과거 페이지를 하나라도 로드하면 true → 라이브 폴링을 멈추고 "라이브로" 복귀를 제공한다.
+  const [viewingHistory, setViewingHistory] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  // 필터(전부 클라이언트측 — 서버는 page/size만 지원).
+  // 필터(전부 클라이언트측 — 서버는 cursor/limit만 지원).
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [kindFilter, setKindFilter] = useState<ResourceKind | "ALL">("ALL");
   const [query, setQuery] = useState("");
 
   // 최초 성공 로드 여부: 폴링 실패를 조용히 넘길지(직전 데이터 유지) 판단.
   const loadedRef = useRef(false);
+  // 요청 세대(run id): 진행 중이던 응답이 그새 바뀐 모드(과거 보기 등)의 목록을 덮어쓰지 못하게 한다.
+  // dispatch 시점에 ++로 자기 세대를 잡고, 응답 반영 직전에 여전히 최신 세대일 때만 상태를 바꾼다.
+  const reqSeq = useRef(0);
 
-  const load = useCallback(async () => {
+  // 최신 페이지(커서 없음)를 불러 목록을 통째로 교체한다. 폴링·최초 로드·"라이브로" 복귀가 공유.
+  const loadLatest = useCallback(async () => {
+    const my = ++reqSeq.current;
     try {
-      const res = await api<AuditEventPage>(`/events?page=0&size=${PAGE_SIZE}`);
+      const res = await api<AuditEventPage>(`/events?limit=${PAGE_SIZE}`);
+      if (my !== reqSeq.current) return; // 더 보기/라이브로 전환 등으로 뒤처진 응답 → 폐기
       loadedRef.current = true;
       setEvents(res.events);
+      setNextCursor(res.nextCursor);
       setLastUpdated(new Date());
       setFirstError(null);
       setPollWarning(null);
     } catch (e) {
+      if (my !== reqSeq.current) return; // 뒤처진 실패도 현재 상태를 건드리지 않는다
       const msg = e instanceof Error ? e.message : "불러오지 못했습니다";
       // 첫 로드 실패는 에러 화면, 이후 폴링 실패는 직전 데이터 유지 + 작은 경고.
       if (loadedRef.current) setPollWarning(msg);
@@ -145,13 +157,48 @@ export default function EventsPage() {
     }
   }, []);
 
+  // "더 보기": nextCursor 로 과거 페이지를 이어받아 seq 로 dedup 후 append. 과거를 보는 순간 폴링 정지.
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    const my = ++reqSeq.current; // 이 전환 이후 도착하는 이전 loadLatest 응답을 무효화
+    setViewingHistory(true);
+    setLoadingMore(true);
+    try {
+      const res = await api<AuditEventPage>(
+        `/events?cursor=${encodeURIComponent(nextCursor)}&limit=${PAGE_SIZE}`,
+      );
+      if (my === reqSeq.current) {
+        setEvents((prev) => {
+          const seen = new Set((prev ?? []).map((e) => e.seq));
+          const merged = [...(prev ?? [])];
+          for (const ev of res.events) if (!seen.has(ev.seq)) merged.push(ev);
+          return merged;
+        });
+        setNextCursor(res.nextCursor);
+        setPollWarning(null);
+      }
+    } catch (e) {
+      if (my === reqSeq.current) {
+        setPollWarning(e instanceof Error ? e.message : "더 불러오지 못했습니다");
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, loadingMore]);
+
+  // "라이브로": 목록을 최신으로 초기화하고 폴링을 재개한다.
+  const backToLive = useCallback(() => {
+    setViewingHistory(false);
+    void loadLatest();
+  }, [loadLatest]);
+
   // 최초 1회 즉시 로드.
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadLatest();
+  }, [loadLatest]);
 
-  // 폴링: 일시정지가 아니고 탭이 보일 때만 첫 페이지를 주기 갱신(usePoll이 백그라운드 탭을 건너뛴다).
-  usePoll(() => void load(), POLL_MS, !paused);
+  // 폴링: 일시정지/과거보기가 아니고 탭이 보일 때만 최신 페이지를 주기 갱신(usePoll이 백그라운드 탭을 건너뛴다).
+  usePoll(() => void loadLatest(), POLL_MS, !paused && !viewingHistory);
 
   const rows = useMemo(() => {
     if (!events) return [];
@@ -186,19 +233,29 @@ export default function EventsPage() {
             <span
               className={cn(
                 "size-1.5 rounded-full",
-                paused ? "bg-muted" : "bg-ok motion-safe:animate-pulse",
+                paused || viewingHistory ? "bg-muted" : "bg-ok motion-safe:animate-pulse",
               )}
             />
             <span className="font-bold text-ink">
-              {paused ? "일시정지됨" : `실시간 · ${POLL_SECONDS}초마다`}
+              {viewingHistory
+                ? "과거 보기 · 실시간 정지"
+                : paused
+                  ? "일시정지됨"
+                  : `실시간 · ${POLL_SECONDS}초마다`}
             </span>
-            {lastUpdated && (
+            {lastUpdated && !viewingHistory && (
               <span className="tnum text-muted">· {fmtClock(lastUpdated)} 갱신</span>
             )}
           </div>
-          <Button variant="ghost" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
-            {paused ? "재개" : "일시정지"}
-          </Button>
+          {viewingHistory ? (
+            <Button variant="ghost" onClick={backToLive}>
+              라이브로
+            </Button>
+          ) : (
+            <Button variant="ghost" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
+              {paused ? "재개" : "일시정지"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -330,6 +387,17 @@ export default function EventsPage() {
               </table>
             </div>
           </Card>
+
+          {/* 과거 페이지 이어보기: nextCursor 가 있으면 노출. 누르면 폴링이 멈추고 "라이브로"가 나타난다. */}
+          <div className="mt-4 flex items-center justify-center">
+            {nextCursor ? (
+              <Button variant="ghost" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? "불러오는 중…" : "더 보기"}
+              </Button>
+            ) : (
+              viewingHistory && <span className="text-xs text-muted">더 이상 과거 이벤트가 없습니다.</span>
+            )}
+          </div>
         </>
       )}
     </div>

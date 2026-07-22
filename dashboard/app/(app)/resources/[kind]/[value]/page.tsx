@@ -106,7 +106,7 @@ export default function ResourceDetailPage() {
     api<ScoreHistory>(`${base}/score-history?hours=${range.hours}`)
       .then(setHistory)
       .catch(() => setHistory({ contexts: [] }));
-    api<AuditEventPage>("/events?page=0&size=100")
+    api<AuditEventPage>("/events?limit=100")
       .then((p) => setEvents(p.events))
       .catch(() => setEvents([]));
   }, [base, range.hours]);

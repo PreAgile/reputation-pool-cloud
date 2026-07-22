@@ -2,15 +2,25 @@ package io.github.preagile.reputationpool.cloud.web;
 
 import io.github.preagile.reputationpool.cloud.readmodel.AuditEventReader;
 import io.github.preagile.reputationpool.cloud.readmodel.AuditEventReader.AuditEventPage;
+import io.github.preagile.reputationpool.cloud.readmodel.AuditEventReader.AuditEventRecord;
+import java.util.List;
 import java.util.Objects;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Paginated read of the audit trail for the dashboard (issue #11), newest first. Requires a valid
- * admin token like the rest of {@code /api/**}.
+ * Keyset-paginated read of the audit trail for the dashboard (issue #11/#30), newest first. Requires a
+ * valid admin token like the rest of {@code /api/**}.
+ *
+ * <p>{@code GET /api/events?cursor=&limit=} returns the latest {@code limit} events when {@code cursor}
+ * is absent, otherwise the page immediately older than {@code cursor}. The response carries a
+ * {@code nextCursor} (opaque, URL-safe) to fetch the next older page, or {@code null} on the last page.
+ * The cursor is decoded via {@link Cursors}; a malformed cursor is a 400. This replaces the earlier
+ * {@code page/size} offset paging (see {@link AuditEventReader} for why keyset).
  *
  * <p><b>Caveat:</b> {@code audit_event} has no tenant column yet (the trail is fed by the single
  * shared pool via one broadcaster), so events are currently global rather than tenant-scoped — the
@@ -28,8 +38,26 @@ public class EventController {
     }
 
     @GetMapping
-    public AuditEventPage list(
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
-        return reader.page(page, size);
+    public EventsResponse list(
+            @RequestParam(required = false) String cursor, @RequestParam(defaultValue = "50") int limit) {
+        Long beforeSeq = decodeCursor(cursor);
+        AuditEventPage page = reader.page(beforeSeq, limit);
+        String nextCursor = page.nextCursor() == null ? null : Cursors.encode(page.nextCursor());
+        return new EventsResponse(page.events(), nextCursor);
     }
+
+    /** {@code null}/blank cursor → start at the latest; a malformed cursor → 400. */
+    private static Long decodeCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return null;
+        }
+        try {
+            return Cursors.decode(cursor);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid cursor");
+        }
+    }
+
+    /** Wire shape: the page's events plus an opaque {@code nextCursor} ({@code null} on the last page). */
+    public record EventsResponse(List<AuditEventRecord> events, String nextCursor) {}
 }

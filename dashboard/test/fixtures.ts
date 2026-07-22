@@ -122,9 +122,7 @@ export const eventsFixture: AuditEventPage = {
       cause: null,
     },
   ],
-  page: 0,
-  size: 50,
-  hasMore: false,
+  nextCursor: null,
 };
 
 export const usageFixture: UsageSummary = {

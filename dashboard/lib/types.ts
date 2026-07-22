@@ -80,11 +80,13 @@ export interface AuditEventRecord {
   cause: string | null;
 }
 
+/**
+ * 이벤트 페이지 응답(#30 keyset 페이지네이션). `nextCursor` 는 더 과거 페이지를 부를 불투명 커서로,
+ * 마지막 페이지면 null(= 더 없음). 백엔드 EventController.EventsResponse 와 1:1.
+ */
 export interface AuditEventPage {
   events: AuditEventRecord[];
-  page: number;
-  size: number;
-  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 export interface UsageSummary {
