@@ -13,11 +13,13 @@ import net.devh.boot.grpc.server.service.GrpcService;
  * live in the base class; cloud supplies only the framework registration and, for multi-tenancy, the
  * per-call pool routing.
  *
- * <p><b>Per-tenant routing (#9b).</b> Instead of a single injected pool, cloud overrides the base's
+ * <p><b>Per-tenant routing (#9b, #29).</b> Instead of a single injected pool, cloud overrides the base's
  * {@code pool()} hook to resolve the pool for the tenant the auth interceptor put on the gRPC context
- * ({@link TenantContext#TENANT_ID}). Every decode/encode/error path in the base is reused unchanged; the
- * only cloud-specific behavior is "which tenant's pool does this call act on". The subscribe-events
- * broadcaster is still shared (cross-tenant event-stream isolation is a deferred follow-up).
+ * ({@link TenantContext#TENANT_ID}), and the {@code subscriptionPoolId()} hook so a {@code SubscribeEvents}
+ * stream is scoped to that same tenant — now that emits fan out through {@code broadcaster.forPool(tenantId)}
+ * (#29), a subscriber receives only its own tenant's events. Every decode/encode/error path in the base is
+ * reused unchanged; the only cloud-specific behavior is which tenant a call acts on and which tenant's
+ * stream a subscription joins.
  */
 @GrpcService
 public class ReputationAdvisorService extends io.github.preagile.reputationpool.grpc.ReputationAdvisorService {
@@ -42,5 +44,21 @@ public class ReputationAdvisorService extends io.github.preagile.reputationpool.
             throw new IllegalStateException("no authenticated tenant on the gRPC context");
         }
         return registry.poolFor(tenantId);
+    }
+
+    /**
+     * Scopes a {@code SubscribeEvents} stream to the authenticated tenant's pool, so the base subscribes
+     * the observer under that tenant and it receives only that tenant's events (paired with the emit-side
+     * {@code broadcaster.forPool(tenantId)} wiring, #29). Same guard as {@link #pool()}: a served call
+     * always carries a tenant, so a missing one is a wiring fault surfaced as a runtime error rather than
+     * silently joining some other tenant's — or the default — stream.
+     */
+    @Override
+    protected String subscriptionPoolId() {
+        String tenantId = TenantContext.TENANT_ID.get();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new IllegalStateException("no authenticated tenant on the gRPC context");
+        }
+        return tenantId;
     }
 }

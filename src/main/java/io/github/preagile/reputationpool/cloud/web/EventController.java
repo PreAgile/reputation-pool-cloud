@@ -6,6 +6,8 @@ import io.github.preagile.reputationpool.cloud.readmodel.AuditEventReader.AuditE
 import java.util.List;
 import java.util.Objects;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -22,10 +24,12 @@ import org.springframework.web.server.ResponseStatusException;
  * The cursor is decoded via {@link Cursors}; a malformed cursor is a 400. This replaces the earlier
  * {@code page/size} offset paging (see {@link AuditEventReader} for why keyset).
  *
- * <p><b>Caveat:</b> {@code audit_event} has no tenant column yet (the trail is fed by the single
- * shared pool via one broadcaster), so events are currently global rather than tenant-scoped — the
- * same interim limitation as the pool read model. Per-tenant event isolation is follow-up work; the
- * endpoint does not filter by a tenant it cannot yet distinguish.
+ * <p>The page is scoped to the server-decided tenant on the validated admin JWT ({@link AdminTenant}),
+ * never a request parameter (security.md) — the same rule {@link PoolController} follows. The trail is
+ * now fed per tenant via {@code PostgresAuditTrail.forPool(tenantId)} (#29), so the reader filters by
+ * {@code pool_id} and one tenant never sees another's events in this durable audit feed. The live gRPC
+ * {@code SubscribeEvents} stream is tenant-isolated the same way (#29), scoped by the advisor service's
+ * {@code subscriptionPoolId()} override.
  */
 @RestController
 @RequestMapping("/api/events")
@@ -39,9 +43,11 @@ public class EventController {
 
     @GetMapping
     public EventsResponse list(
-            @RequestParam(required = false) String cursor, @RequestParam(defaultValue = "50") int limit) {
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "50") int limit) {
         Long beforeSeq = decodeCursor(cursor);
-        AuditEventPage page = reader.page(beforeSeq, limit);
+        AuditEventPage page = reader.page(AdminTenant.of(jwt), beforeSeq, limit);
         String nextCursor = page.nextCursor() == null ? null : Cursors.encode(page.nextCursor());
         return new EventsResponse(page.events(), nextCursor);
     }
