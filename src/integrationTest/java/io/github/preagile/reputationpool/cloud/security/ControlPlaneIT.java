@@ -148,7 +148,7 @@ class ControlPlaneIT {
         assertThat(pools.getBody()).containsKey("summary").containsKey("resources");
 
         ResponseEntity<Map> events =
-                rest.exchange("/api/events?page=0&size=10", HttpMethod.GET, new HttpEntity<>(auth), Map.class);
+                rest.exchange("/api/events?limit=10", HttpMethod.GET, new HttpEntity<>(auth), Map.class);
         assertThat(events.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(events.getBody()).containsKey("events");
     }
