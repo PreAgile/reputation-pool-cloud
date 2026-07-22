@@ -52,8 +52,8 @@ export function LoginForm({ initialLocale }: { initialLocale: LoginLocale }) {
     setError(null);
     setBusy(true);
     try {
-      // 자동완성·복사 붙여넣기로 끼어드는 앞뒤 공백을 제거한다(가장 흔한 "비밀번호 틀림" 오인 원인).
-      await login(username.trim(), password.trim());
+      // 아이디만 앞뒤 공백을 제거한다(자동완성 흔한 오인). 비밀번호는 공백도 유효 문자일 수 있어 원문 유지.
+      await login(username.trim(), password);
       router.push("/overview");
     } catch (err) {
       if (err instanceof ApiError) {
