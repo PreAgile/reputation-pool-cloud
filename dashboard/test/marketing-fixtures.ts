@@ -279,7 +279,5 @@ export const marketingEventsFixture: AuditEventPage = {
     until,
     cause,
   })),
-  page: 0,
-  size: 50,
-  hasMore: true,
+  nextCursor: null,
 };

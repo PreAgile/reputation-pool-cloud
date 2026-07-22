@@ -274,7 +274,7 @@ export default function EventsPage() {
             tone="error"
             title="이벤트를 불러오지 못했습니다"
             description={firstError}
-            action={{ label: "다시 시도", onClick: () => void load() }}
+            action={{ label: "다시 시도", onClick: () => void loadLatest() }}
           />
         </Card>
       )}
