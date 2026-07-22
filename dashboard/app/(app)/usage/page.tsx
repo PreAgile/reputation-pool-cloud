@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -16,6 +16,7 @@ import type { UsageSummary } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   DateRangePicker,
   RANGE_PRESETS,
@@ -61,11 +62,16 @@ export default function UsagePage() {
   // 일별 리스 창(프리셋). 백엔드가 최근 30일을 주므로 기본 30일, 24h/7d 는 클라이언트에서 좁힌다.
   const [range, setRange] = useState<RangePreset>(RANGE_PRESETS[2]);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setError(null);
     api<UsageSummary>("/usage")
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : "불러오지 못했습니다"));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // dailyLeases → 시각 오름차순 바 차트 행 + 선택 창 합계. 창은 최신 날짜 기준 최근 range.days 일.
   const { chartRows, windowTotal } = useMemo(() => {
@@ -87,7 +93,14 @@ export default function UsagePage() {
     return (
       <div className="mx-auto max-w-5xl">
         <PageHeader />
-        <Card className="p-4 text-sm text-block">불러오지 못했습니다 · {error}</Card>
+        <Card>
+          <EmptyState
+            tone="error"
+            title="사용량을 불러오지 못했습니다"
+            description={error}
+            action={{ label: "다시 시도", onClick: load }}
+          />
+        </Card>
       </div>
     );
   }
@@ -154,9 +167,10 @@ export default function UsagePage() {
               </ResponsiveContainer>
             </div>
           ) : (
-            <div className="flex h-40 items-center justify-center text-sm text-muted">
-              아직 임대 기록이 없습니다.
-            </div>
+            <EmptyState
+              title="아직 임대 기록이 없습니다"
+              description="선택한 기간에 리소스 임대가 없었습니다. 기간을 넓히거나 트래픽이 쌓이면 여기에 일별 추이가 그려집니다."
+            />
           )}
         </Card>
       </section>

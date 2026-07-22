@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import type { ApiKeySummary, IssuedApiKey } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import {
   DropdownMenu,
@@ -228,7 +229,16 @@ export default function KeysPage() {
         </Card>
       )}
 
-      {error && <Card className="mb-4 p-4 text-sm text-block">요청 실패 · {error}</Card>}
+      {error && (
+        <Card className="mb-4">
+          <EmptyState
+            tone="error"
+            title="요청을 처리하지 못했습니다"
+            description={error}
+            action={{ label: "다시 시도", onClick: () => tenantId && void load(tenantId) }}
+          />
+        </Card>
+      )}
 
       {!error && keys === null && <div className="text-sm text-muted">불러오는 중…</div>}
 
@@ -284,8 +294,12 @@ export default function KeysPage() {
                 })}
                 {keys.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-muted">
-                      발급된 API 키가 없습니다.
+                    <td colSpan={5} className="p-0">
+                      <EmptyState
+                        title="발급된 API 키가 없습니다"
+                        description="수집기가 풀 API 를 호출하려면 API 키가 필요합니다. 첫 키를 발급해 보세요."
+                        action={{ label: "새 키 발급", onClick: () => setFormOpen(true) }}
+                      />
                     </td>
                   </tr>
                 )}

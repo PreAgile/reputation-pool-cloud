@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 
 /** 팔레트에서 이동할 수 있는 6개 화면(사이드바 내비와 1:1). */
 const SCREENS: { href: string; label: string; hint: string }[] = [
-  { href: "/", label: "풀 오버뷰", hint: "등록 리소스 평판 상태" },
+  { href: "/overview", label: "풀 오버뷰", hint: "등록 리소스 평판 상태" },
   { href: "/events", label: "라이브 이벤트", hint: "실시간 감사 이벤트" },
   { href: "/keys", label: "API 키", hint: "키 발급·폐기" },
   { href: "/usage", label: "사용량", hint: "임대·풀 규모" },

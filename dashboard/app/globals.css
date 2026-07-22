@@ -33,6 +33,11 @@
   --block-ink: #bd2130;    /* on block/12 ≈5.3 */
   /* muted-ink: 중립 배지(폐기됨/반납 등) text on bg-muted/12 틴트 전용. 라이트는 muted 그대로 AA 통과. */
   --muted-ink: #5f6b7a;    /* on muted/12 (light) ≥4.5 */
+  /* code: 랜딩 코드 스니펫·터미널 블록. 라이트/다크 공통으로 짙은 "터미널" 배경(코드가 어디서나 같게 보이게).
+     ink(#e6edf3) on bg(#0f1720) ≈ 15:1, 주석(muted #8b98a5)도 ≈ 6:1 로 AA 통과. */
+  --code-bg: #0f1720;
+  --code-ink: #e6edf3;
+  --code-muted: #8b98a5;
 }
 .dark {
   --bg: #17191d;
@@ -58,6 +63,10 @@
   --block-ink: #f47983;    /* on block/12 ≈5.1 */
   /* 다크 muted(#8b95a1)는 muted/12 틴트 위 4.3으로 미달 → 배지 텍스트만 살짝 밝게 올려 AA 통과. */
   --muted-ink: #9aa4b0;    /* on muted/12 (dark) ≈5.3 */
+  /* code: 다크에서도 동일 터미널 톤(살짝 더 어둡게). */
+  --code-bg: #0d1117;
+  --code-ink: #e6edf3;
+  --code-muted: #8b98a5;
 }
 
 /* 토큰 → Tailwind 유틸(bg-surface, text-ink, text-accent, border-line …). 테마 전환은 CSS 변수로. */
@@ -68,6 +77,9 @@
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-muted-ink: var(--muted-ink);
+  --color-code-bg: var(--code-bg);
+  --color-code-ink: var(--code-ink);
+  --color-code-muted: var(--code-muted);
   --color-line: var(--line);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
@@ -80,8 +92,10 @@
   --color-cool-ink: var(--cool-ink);
   --color-recover-ink: var(--recover-ink);
   --color-block-ink: var(--block-ink);
-  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
-    "Apple SD Gothic Neo", "Segoe UI", Roboto, sans-serif;
+  /* --font-pretendard 는 next/font/local(app/fonts.ts)이 <html> 에 주입한다. 뒤의 이름들은
+     폰트 로드 전/실패 시 폴백. 이제 한글도 시스템 폰트가 아니라 Pretendard 로 렌더된다. */
+  --font-sans: var(--font-pretendard), "Pretendard Variable", Pretendard, -apple-system,
+    BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius-toss: 14px;
 }
@@ -103,6 +117,39 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ── 한국어 타이포 (lang="ko" 서브트리 스코프) ──
+   랜딩 래퍼(components/marketing/landing.tsx)가 lang={locale} 를 달아 ko 서브트리에만 적용된다.
+   lang 속성 기반이라 SSR 에서도 안전하고, 영문 `/` 페이지 레이아웃은 건드리지 않는다.
+   `:lang(ko)` = (0,1,0)+요소 → Tailwind 단일 클래스(leading-*, tracking-*)를 이긴다. */
+:lang(ko) {
+  /* 어절(띄어쓰기) 단위로만 줄바꿈 — 한글 단어 중간이 끊기지 않는다. */
+  word-break: keep-all;
+  /* 그래도 넘치는 긴 토큰(URL·코드)만 마지막 수단으로 분해. */
+  overflow-wrap: break-word;
+}
+/* 한글 글자는 라틴보다 세로로 커서 제목 leading 을 살짝 키우고, 자간은 과하게 좁히지 않는다
+   (tracking-tight -0.025em 는 한글에서 답답해 보인다). */
+:lang(ko) h1 {
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+:lang(ko) h2 {
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+:lang(ko) h3 {
+  line-height: 1.42;
+  letter-spacing: -0.005em;
+}
+/* 본문·리드 문단은 한글 가독성에 맞춘 넉넉한 행간(1.5→1.72). 다만 코드/모노는 제외. */
+:lang(ko) p {
+  line-height: 1.72;
+}
+/* 인라인 코드가 어절 취급돼 통째로 다음 줄로 밀리며 빈 공간을 만들지 않게, 필요 시 분해 허용. */
+:lang(ko) code {
+  word-break: break-all;
 }
 
 /* ── 모션 토큰 (#54 P2) ──
@@ -197,6 +244,31 @@ body {
 }
 .rp-anim-drawer[data-state="closed"] {
   animation: rp-drawer-out var(--motion-fast) var(--ease-std);
+}
+
+/* 실시간 상태 점(pulse) — 점 + 바깥으로 확장·소멸하는 링(신호 감지 느낌). #54 P2 마이크로 인터랙션.
+   링 색은 currentColor 상속 → 상태색(text-ok 등) 위에 얹으면 그 색으로 퍼진다. */
+@keyframes rp-ping {
+  0% { transform: scale(1); opacity: 0.55; }
+  70%, 100% { transform: scale(2.4); opacity: 0; }
+}
+.rp-live-dot {
+  position: relative;
+}
+.rp-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: rp-ping 1.8s var(--ease-out) infinite;
+}
+
+/* 카드/행 hover 전환 통일 — 색만 부드럽게(레이아웃 흔들림 없이). 상호작용 있는 카드/행에 얹는다. */
+.rp-hover {
+  transition:
+    background-color var(--motion-fast) var(--ease-std),
+    border-color var(--motion-fast) var(--ease-std);
 }
 
 /* 모션 감소 선호 시 전역 무력화(스켈레톤 맥동 등 포함). 접근성 필수. */

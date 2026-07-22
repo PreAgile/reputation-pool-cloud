@@ -31,34 +31,31 @@ describe("풀 오버뷰 화면 (integration + MSW)", () => {
     expect(screen.getByText("proxy-good")).toBeInTheDocument();
     expect(screen.getByText("acct-cool")).toBeInTheDocument();
 
-    // 상태 배지(BLOCKLISTED → "차단")가 최소 하나 렌더된다.
-    expect(screen.getAllByText("차단").length).toBeGreaterThan(0);
+    // 상태 배지(BLOCKLISTED → "Blocked")가 최소 하나 렌더된다.
+    expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
 
     // 심각도 정렬: BLOCKLISTED(proxy-bad)가 HEALTHY(proxy-good)보다 위.
-    // 값 셀은 미리보기 드로어 트리거(button)다(#52 P4).
-    const rows = screen.getAllByRole("button", { name: /미리보기/ });
-    const texts = rows.map((r) => r.textContent ?? "");
+    // 값 셀은 상세로 가는 링크(/resources/…)다.
+    const resourceLinks = screen
+      .getAllByRole("link")
+      .filter((a) => a.getAttribute("href")?.startsWith("/resources/"));
+    const texts = resourceLinks.map((r) => r.textContent ?? "");
     const badIdx = texts.findIndex((t) => t.includes("proxy-bad"));
     const goodIdx = texts.findIndex((t) => t.includes("proxy-good"));
     expect(badIdx).toBeGreaterThanOrEqual(0);
     expect(badIdx).toBeLessThan(goodIdx);
   });
 
-  it("값을 클릭하면 미리보기 드로어가 열리고 전체 상세 링크를 제공한다", async () => {
-    const user = userEvent.setup();
+  it("리소스 값이 상세 페이지로 가는 링크이고, 드로어는 열리지 않는다", async () => {
     render(<OverviewPage />, { wrapper: ToastProvider });
     await screen.findByText("proxy-bad");
 
-    // 드로어는 처음엔 닫혀 있다.
+    // 값은 곧바로 상세로 가는 링크다(드로어 없음).
+    const link = screen.getByRole("link", { name: "proxy-bad" });
+    expect(link).toHaveAttribute("href", "/resources/proxy/proxy-bad");
+
+    // 미리보기 드로어(dialog)는 어디에도 없다.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "proxy-bad 미리보기" }));
-
-    // 드로어(dialog)가 열리고, 리스트를 벗어나지 않는 상세 요약 + 전체 상세 링크를 보여준다.
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toBeInTheDocument();
-    const detail = screen.getByRole("link", { name: /전체 상세 보기/ });
-    expect(detail).toHaveAttribute("href", "/resources/proxy/proxy-bad");
   });
 
   it("로딩 중 스켈레톤을 보여주고 데이터 도착 후 감춘다", async () => {
@@ -95,5 +92,37 @@ describe("풀 오버뷰 화면 (integration + MSW)", () => {
     await user.click(await screen.findByRole("menuitem", { name: "영구 차단" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("영구 차단했습니다");
+  });
+
+  it("score 헤더를 두 번 누르면 내림차순으로 정렬해 높은 score를 위로 올린다", async () => {
+    const user = userEvent.setup();
+    render(<OverviewPage />, { wrapper: ToastProvider });
+    await screen.findByText("proxy-bad");
+
+    // score 헤더 클릭 → 오름차순, 다시 클릭 → 내림차순(높은 score 먼저).
+    const scoreHeader = screen.getByRole("button", { name: "score 기준 정렬" });
+    await user.click(scoreHeader);
+    await user.click(scoreHeader);
+
+    const texts = screen
+      .getAllByRole("link")
+      .filter((a) => a.getAttribute("href")?.startsWith("/resources/"))
+      .map((r) => r.textContent ?? "");
+    const goodIdx = texts.findIndex((t) => t.includes("proxy-good")); // score 42
+    const badIdx = texts.findIndex((t) => t.includes("proxy-bad")); // score -80
+    expect(goodIdx).toBeGreaterThanOrEqual(0);
+    expect(goodIdx).toBeLessThan(badIdx);
+  });
+
+  it("라이브 인디케이터를 일시정지하면 상태 문구와 버튼이 바뀐다", async () => {
+    const user = userEvent.setup();
+    render(<OverviewPage />, { wrapper: ToastProvider });
+    await screen.findByText("proxy-bad");
+
+    expect(screen.getByText("실시간")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "일시정지" }));
+
+    expect(screen.getByText("일시정지됨")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "재개" })).toBeInTheDocument();
   });
 });

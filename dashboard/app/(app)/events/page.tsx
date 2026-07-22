@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import type { AuditEventPage, AuditEventRecord, ResourceKind } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { usePoll } from "@/lib/use-poll";
 
 /** 첫 페이지(최근 50건)를 다시 불러오는 폴링 주기. */
@@ -18,10 +19,10 @@ const PAGE_SIZE = 50;
  * dot + 텍스트로 유형을 구분한다. 백엔드 PoolEvent 6종과 1:1.
  */
 const EVENT_META: Record<string, { label: string; cls: string }> = {
-  RESOURCE_COOLED: { label: "냉각 진입", cls: "text-cool-ink bg-cool/12" },
-  RESOURCE_RECOVERED: { label: "회복", cls: "text-recover-ink bg-recover/12" },
-  RESOURCE_BLOCKLISTED: { label: "차단", cls: "text-block-ink bg-block/12" },
-  RESOURCE_UNBLOCKED: { label: "차단 해제", cls: "text-ok-ink bg-ok/12" },
+  RESOURCE_COOLED: { label: "Cooldown", cls: "text-cool-ink bg-cool/12" },
+  RESOURCE_RECOVERED: { label: "Recovered", cls: "text-recover-ink bg-recover/12" },
+  RESOURCE_BLOCKLISTED: { label: "Blocked", cls: "text-block-ink bg-block/12" },
+  RESOURCE_UNBLOCKED: { label: "Unblocked", cls: "text-ok-ink bg-ok/12" },
   RESOURCE_LEASED: { label: "임대", cls: "text-accent bg-accent-soft" },
   LEASE_RELEASED: { label: "반납", cls: "text-muted-ink bg-muted/12" },
 };
@@ -268,7 +269,14 @@ export default function EventsPage() {
 
       {/* 첫 로드 실패 */}
       {firstError && (
-        <Card className="p-4 text-sm text-block">불러오지 못했습니다 · {firstError}</Card>
+        <Card>
+          <EmptyState
+            tone="error"
+            title="이벤트를 불러오지 못했습니다"
+            description={firstError}
+            action={{ label: "다시 시도", onClick: () => void loadLatest() }}
+          />
+        </Card>
       )}
 
       {/* 첫 로드 중 */}
@@ -376,10 +384,18 @@ export default function EventsPage() {
                   ))}
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                        {events.length === 0
-                          ? "아직 기록된 이벤트가 없습니다."
-                          : "조건에 맞는 이벤트가 없습니다."}
+                      <td colSpan={7} className="p-0">
+                        {events.length === 0 ? (
+                          <EmptyState
+                            title="아직 기록된 이벤트가 없습니다"
+                            description="풀에서 임대·냉각·차단 등이 발생하면 여기에 실시간으로 쌓입니다."
+                          />
+                        ) : (
+                          <EmptyState
+                            title="조건에 맞는 이벤트가 없습니다"
+                            description="필터·검색어를 바꾸면 더 많은 이벤트를 볼 수 있습니다."
+                          />
+                        )}
                       </td>
                     </tr>
                   )}

@@ -20,5 +20,16 @@ export default defineConfig({
   projects: [
     { name: "e2e", testMatch: "e2e/**/*.spec.ts", use: { ...devices["Desktop Chrome"] } },
     { name: "visual", testMatch: "visual/**/*.spec.ts", use: { ...devices["Desktop Chrome"] } },
+    // shots: 마케팅 랜딩(#16)용 실제 대시보드 스크린샷을 public/marketing/ 에 저장(비교 아님).
+    // 레티나(deviceScaleFactor=2) · 모션 감소 · 넓은 뷰포트로 결정론적 캡처.
+    {
+      name: "shots",
+      testMatch: "scripts/marketing-shots.ts",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 960 },
+        deviceScaleFactor: 2,
+      },
+    },
   ],
 });

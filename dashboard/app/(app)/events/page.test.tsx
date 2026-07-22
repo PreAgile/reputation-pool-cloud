@@ -51,7 +51,7 @@ describe("라이브 이벤트 화면 (integration + MSW)", () => {
     // 배지·리소스 값은 표 안으로 스코프(같은 라벨이 유형 select 옵션에도 있어 중복 방지).
     const table = await screen.findByRole("table");
     expect(within(table).getByText("임대")).toBeInTheDocument();
-    expect(within(table).getByText("냉각 진입")).toBeInTheDocument();
+    expect(within(table).getByText("Cooldown")).toBeInTheDocument();
     expect(within(table).getByText("proxy-good")).toBeInTheDocument();
     expect(within(table).getByText("acct-cool")).toBeInTheDocument();
 
