@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppShell } from "./app-shell";
@@ -12,8 +12,21 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ logout: vi.fn() }) }));
 vi.mock("next-themes", () => ({ useTheme: () => ({ resolvedTheme: "light", setTheme: vi.fn() }) }));
 
+/** HealthPill 의 fetch("/actuator/health") 를 기본 UP 로 스텁(실네트워크 차단). 개별 테스트가 재정의. */
+function stubHealth(status: string) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ status }) })),
+  );
+}
+
 beforeEach(() => {
   window.localStorage.clear();
+  stubHealth("UP");
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 function renderShell() {
@@ -93,5 +106,24 @@ describe("AppShell — 상단바", () => {
   it("a11y: 펼침 상태에서 critical/serious 위반이 없다", async () => {
     renderShell();
     expect(await seriousViolations(document.body)).toEqual([]);
+  });
+});
+
+describe("AppShell — 시스템 상태 pill", () => {
+  it("헬스가 UP 이면 정상 상태를 보인다", async () => {
+    renderShell();
+    expect(await screen.findByText("시스템 정상")).toBeInTheDocument();
+  });
+
+  it("헬스가 UP 이 아니면 이상 상태를 보인다", async () => {
+    stubHealth("DOWN");
+    renderShell();
+    expect(await screen.findByText("시스템 이상")).toBeInTheDocument();
+  });
+
+  it("헬스 조회에 실패하면 확인 불가 상태를 보인다", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("network"))));
+    renderShell();
+    expect(await screen.findByText("상태 확인 불가")).toBeInTheDocument();
   });
 });

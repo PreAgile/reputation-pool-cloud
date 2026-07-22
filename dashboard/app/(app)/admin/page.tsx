@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import type { Tenant } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 
 /** ISO-8601 → 한국 로케일 표기. 파싱 실패 시 원문 그대로. */
@@ -191,7 +192,16 @@ export default function AdminPage() {
         </Card>
       )}
 
-      {error && <Card className="mb-4 p-4 text-sm text-block">요청 실패 · {error}</Card>}
+      {error && (
+        <Card className="mb-4">
+          <EmptyState
+            tone="error"
+            title="테넌트를 불러오지 못했습니다"
+            description={error}
+            action={{ label: "다시 시도", onClick: () => void load() }}
+          />
+        </Card>
+      )}
 
       {!error && tenants === null && <div className="text-sm text-muted">불러오는 중…</div>}
 
@@ -220,8 +230,12 @@ export default function AdminPage() {
                 ))}
                 {tenants.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-muted">
-                      등록된 테넌트가 없습니다.
+                    <td colSpan={4} className="p-0">
+                      <EmptyState
+                        title="등록된 테넌트가 없습니다"
+                        description="첫 테넌트를 만들면 여기에 표시됩니다."
+                        action={{ label: "새 테넌트", onClick: () => setFormOpen(true) }}
+                      />
                     </td>
                   </tr>
                 )}

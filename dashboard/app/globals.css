@@ -246,6 +246,31 @@ body {
   animation: rp-drawer-out var(--motion-fast) var(--ease-std);
 }
 
+/* 실시간 상태 점(pulse) — 점 + 바깥으로 확장·소멸하는 링(신호 감지 느낌). #54 P2 마이크로 인터랙션.
+   링 색은 currentColor 상속 → 상태색(text-ok 등) 위에 얹으면 그 색으로 퍼진다. */
+@keyframes rp-ping {
+  0% { transform: scale(1); opacity: 0.55; }
+  70%, 100% { transform: scale(2.4); opacity: 0; }
+}
+.rp-live-dot {
+  position: relative;
+}
+.rp-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: rp-ping 1.8s var(--ease-out) infinite;
+}
+
+/* 카드/행 hover 전환 통일 — 색만 부드럽게(레이아웃 흔들림 없이). 상호작용 있는 카드/행에 얹는다. */
+.rp-hover {
+  transition:
+    background-color var(--motion-fast) var(--ease-std),
+    border-color var(--motion-fast) var(--ease-std);
+}
+
 /* 모션 감소 선호 시 전역 무력화(스켈레톤 맥동 등 포함). 접근성 필수. */
 @media (prefers-reduced-motion: reduce) {
   *,

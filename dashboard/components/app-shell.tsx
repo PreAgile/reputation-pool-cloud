@@ -67,6 +67,66 @@ const NAV: NavItem[] = [
   },
 ];
 
+type Health = { status: string } | "error" | null;
+
+/**
+ * 상단바 시스템 상태 pill — 백엔드 {@code /actuator/health}(public, /api 밖)를 same-origin 으로
+ * 폴링(30초)한다. dev 는 next 의 /actuator rewrite, prod 는 Caddy(#15)가 app 으로 라우팅.
+ * status=UP 이면 ok 색 + 실시간 pulse dot(rp-live-dot), 그 외/조회 실패는 block 색으로 표시.
+ */
+function HealthPill() {
+  const [health, setHealth] = useState<Health>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const check = () => {
+      fetch("/actuator/health")
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((h: { status?: string }) => {
+          if (alive) setHealth({ status: h.status ?? "UNKNOWN" });
+        })
+        .catch(() => {
+          if (alive) setHealth("error");
+        });
+    };
+    check();
+    const id = window.setInterval(check, 30_000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  const loading = health === null;
+  const ok = health !== null && health !== "error" && health.status === "UP";
+  const label = loading
+    ? "상태 확인 중"
+    : ok
+      ? "시스템 정상"
+      : health === "error"
+        ? "상태 확인 불가"
+        : "시스템 이상";
+  const rawStatus = health && health !== "error" ? health.status : undefined;
+
+  return (
+    <span
+      title={rawStatus ? `/actuator/health · ${rawStatus}` : "/actuator/health"}
+      className={cn(
+        "hidden shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold sm:inline-flex",
+        loading ? "text-muted" : ok ? "bg-ok/12 text-ok-ink" : "bg-block/12 text-block-ink",
+      )}
+    >
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          loading ? "bg-muted" : ok ? "rp-live-dot bg-ok text-ok" : "bg-current",
+        )}
+      />
+      {label}
+    </span>
+  );
+}
+
 function SearchIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -169,7 +229,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen">
         <aside
           className={cn(
-            "flex shrink-0 flex-col gap-1 overflow-hidden border-r border-line bg-surface px-3 py-4 transition-[width] ease-out",
+            // sticky top-0 h-screen: 긴 본문에서도 사이드바가 뷰포트에 고정돼 하단 "접기"가 항상 보인다
+            // (예전엔 flex-stretch 로 페이지 전체 높이만큼 늘어나 mt-auto 접기 버튼이 스크롤 밖으로 밀렸다).
+            "sticky top-0 flex h-screen shrink-0 flex-col gap-1 overflow-x-hidden overflow-y-auto border-r border-line bg-surface px-3 py-4 transition-[width] ease-out",
             collapsed ? "w-16" : "w-60",
           )}
           style={{ transitionDuration: "var(--motion-slow)" }}
@@ -223,7 +285,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </kbd>
               </button>
             </div>
-            <UserMenu />
+            <div className="flex shrink-0 items-center gap-3">
+              <HealthPill />
+              <UserMenu />
+            </div>
           </header>
           <main className="p-6">{children}</main>
         </div>

@@ -6,6 +6,9 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
+  ReferenceDot,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -13,7 +16,14 @@ import {
   type TooltipProps,
 } from "recharts";
 import { api } from "@/lib/api";
-import type { AuditEventPage, AuditEventRecord, ResourceDetail, ScoreHistory } from "@/lib/types";
+import type {
+  AuditEventPage,
+  AuditEventRecord,
+  CellView,
+  ResourceDetail,
+  ResourceState,
+  ScoreHistory,
+} from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -34,9 +44,41 @@ type ChartRow = { t: number } & Record<string, number>;
 /** 첫 라인은 토스 블루(accent), 나머지는 기능색 토큰을 순환(다크모드는 CSS 변수가 알아서 대응). */
 const LINE_TOKENS = ["var(--accent)", "var(--recover)", "var(--cool)", "var(--ok)", "var(--block)"];
 
+/**
+ * 곡선 위에 마킹할 상태 전이 감사 이벤트만 화이트리스트로 고른다.
+ * (LEASED/RELEASED 같은 상시 이벤트는 잡음이라 제외 — 격리/냉각/회복만 곡선 판독에 의미가 있다.)
+ */
+const ANNOTATIONS: Record<string, { label: string; color: string }> = {
+  RESOURCE_COOLED: { label: "쿨다운 진입", color: "var(--cool)" },
+  RESOURCE_RECOVERED: { label: "회복", color: "var(--recover)" },
+  RESOURCE_BLOCKLISTED: { label: "차단", color: "var(--block)" },
+  RESOURCE_UNBLOCKED: { label: "차단 해제", color: "var(--ok)" },
+};
+
+/**
+ * y축(0~1) 임계 구간 밴드. 낮은 점수대는 쿨다운을 유발하는 위험 구간, 높은 점수대는 양호 구간.
+ * fillOpacity 를 아주 낮게 둬서 곡선 판독을 방해하지 않고 라이트/다크 모두 은은하게 깔린다.
+ */
+const SCORE_BANDS: { y1: number; y2: number; color: string }[] = [
+  { y1: 0, y2: 0.4, color: "var(--block)" }, // 위험(쿨다운 유발 구간)
+  { y1: 0.4, y2: 0.7, color: "var(--cool)" }, // 주의
+  { y1: 0.7, y2: 1, color: "var(--ok)" }, // 양호
+];
+
 function fmtClock(iso: string | number): string {
   const d = typeof iso === "number" ? new Date(iso) : new Date(iso);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+/** 툴팁·주석 호버용: 여러 날 범위(7d/30d)에서도 모호하지 않게 날짜+시각을 함께 표기. */
+function fmtStamp(t: number): string {
+  return new Date(t).toLocaleString([], {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function fmtDateTime(iso: string | null): string {
@@ -51,20 +93,44 @@ function fmtDateTime(iso: string | null): string {
   });
 }
 
-/** Toss형 툴팁: surface 카드 + 라인색 점. 다크/라이트 토큰으로 자동 대응. */
+/**
+ * Toss형 툴팁: surface 카드 + 라인색 점. 다크/라이트 토큰으로 자동 대응.
+ * 여러 컨텍스트를 점수 내림차순으로 정렬해 크로스헤어 위치의 서열을 한눈에 읽게 한다.
+ */
 function ChartTooltip({ active, payload, label }: TooltipProps<number, string>) {
   if (!active || !payload?.length) return null;
+  const rows = [...payload]
+    .filter((p) => p.value != null)
+    .sort((a, b) => Number(b.value) - Number(a.value));
   return (
-    <div className="rounded-[10px] border border-line bg-surface px-3 py-2 text-xs shadow-md">
-      <div className="mb-1 font-semibold text-muted tnum">{fmtClock(label as number)}</div>
-      {payload.map((p) => (
-        <div key={String(p.dataKey)} className="flex items-center gap-2">
-          <span className="size-2 rounded-full" style={{ background: p.color }} />
-          <span className="text-ink">{String(p.dataKey)}</span>
-          <span className="ml-auto font-mono tnum text-ink">{Number(p.value).toFixed(3)}</span>
-        </div>
-      ))}
+    <div className="min-w-[132px] rounded-[10px] border border-line bg-surface px-3 py-2 text-xs shadow-md">
+      <div className="mb-1.5 font-semibold text-muted tnum">{fmtStamp(label as number)}</div>
+      <div className="flex flex-col gap-1">
+        {rows.map((p) => (
+          <div key={String(p.dataKey)} className="flex items-center gap-2">
+            <span className="size-2 shrink-0 rounded-full" style={{ background: p.color }} />
+            <span className="truncate text-ink">{String(p.dataKey)}</span>
+            <span className="ml-auto font-mono tnum text-ink">{Number(p.value).toFixed(3)}</span>
+          </div>
+        ))}
+      </div>
     </div>
+  );
+}
+
+/**
+ * 곡선 위 이벤트 주석 마커: 세로 ReferenceLine 상단에 얹는 색점.
+ * 넓은 투명 히트영역 + SVG {@code <title>} 로 호버 시 어떤 이벤트인지 네이티브 툴팁으로 보여준다.
+ */
+function EventMarker(props: { cx: number; cy: number; color: string; title: string }) {
+  const { cx, cy, color, title } = props;
+  return (
+    <g style={{ cursor: "help" }}>
+      <title>{title}</title>
+      {/* 히트영역: 작은 점만으로는 호버가 어려워 투명 원을 넓게 깐다. */}
+      <circle cx={cx} cy={cy} r={9} fill="transparent" />
+      <circle cx={cx} cy={cy} r={4.5} fill={color} stroke="var(--surface)" strokeWidth={1.5} />
+    </g>
   );
 }
 
@@ -179,6 +245,57 @@ export default function ResourceDetailPage() {
       .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
   }, [events, detail]);
 
+  // 곡선 주석: 상태 전이 이벤트(냉각/회복/차단/해제)만, 현재 곡선의 시간 도메인 안에 드는 것만 남긴다.
+  // (곡선 x축이 [dataMin, dataMax] 라 범위 밖 이벤트는 마킹해도 보이지 않는다.)
+  const annotations = useMemo(() => {
+    if (chartRows.length === 0) return [] as { key: string; t: number; label: string; color: string; title: string }[];
+    const first = chartRows[0].t;
+    const last = chartRows[chartRows.length - 1].t;
+    return timeline
+      .filter((e) => ANNOTATIONS[e.eventType])
+      .map((e) => {
+        const t = new Date(e.occurredAt).getTime();
+        const meta = ANNOTATIONS[e.eventType];
+        const parts = [meta.label, fmtStamp(t)];
+        if (e.context) parts.push(e.context);
+        if (e.cause) parts.push(e.cause);
+        return { key: `${e.seq}`, t, label: meta.label, color: meta.color, title: parts.join(" · ") };
+      })
+      .filter((a) => a.t >= first && a.t <= last);
+  }, [timeline, chartRows]);
+
+  // 주석 범례: 곡선에 실제로 찍힌 이벤트 종류만(중복 제거, 정의 순서 유지).
+  const annotationKinds = useMemo(() => {
+    const seen = new Set(annotations.map((a) => a.label));
+    return Object.values(ANNOTATIONS).filter((m) => seen.has(m.label));
+  }, [annotations]);
+
+  // 헤더 요약 스탯: 대표(최저) 셀·최악 상태·건강 분포·추세를 셀/곡선 데이터에서 계산.
+  const stats = useMemo(() => {
+    const cells = detail?.cells ?? [];
+    const RANK: Record<ResourceState, number> = { HEALTHY: 0, RECOVERING: 1, COOLING: 2, BLOCKLISTED: 3 };
+    // 대표 셀 = 최저 점수(오버뷰의 "score = 최저" 의미와 일치). 없으면 null.
+    const worstCell = cells.reduce<CellView | null>(
+      (acc, c) => (acc === null || c.score < acc.score ? c : acc),
+      null,
+    );
+    // 최악 상태(차단이면 무조건 BLOCKLISTED). 배지로 노출.
+    const worstState: ResourceState = detail?.blocked
+      ? "BLOCKLISTED"
+      : cells.reduce<ResourceState>((acc, c) => (RANK[c.state] > RANK[acc] ? c.state : acc), "HEALTHY");
+    const healthy = cells.filter((c) => c.state === "HEALTHY").length;
+    const attention = cells.length - healthy;
+    // 추세: 대표 셀 컨텍스트 곡선의 (마지막 - 처음) Δ. 곡선이 없으면 null.
+    let trend: number | null = null;
+    if (worstCell && history) {
+      const series = history.contexts.find((c) => c.context === worstCell.context);
+      if (series && series.points.length >= 2) {
+        trend = series.points[series.points.length - 1].score - series.points[0].score;
+      }
+    }
+    return { worstCell, worstState, healthy, attention, contexts: cells.length, trend };
+  }, [detail, history]);
+
   if (error) {
     return (
       <div className="mx-auto max-w-5xl">
@@ -235,8 +352,67 @@ export default function ResourceDetailPage() {
           )}
         </div>
       </div>
-      {actionError && <div className="mb-4 text-sm text-block">요청 실패 · {actionError}</div>}
-      {!actionError && <div className="mb-6" />}
+      {actionError && <div className="mb-3 text-sm text-block">요청 실패 · {actionError}</div>}
+
+      {/* 요약 스탯 행: 대표 점수(+추세) · 컨텍스트 분포 · 격리 상태 · 최근 판정. 셀/곡선 데이터로 계산. */}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatBox label="대표 점수" hint="가장 낮은 컨텍스트 점수">
+          {stats.worstCell ? (
+            <div className="flex items-baseline gap-2">
+              <span className="tnum font-mono text-2xl font-extrabold text-ink">
+                {stats.worstCell.score.toFixed(2)}
+              </span>
+              <TrendChip delta={stats.trend} />
+            </div>
+          ) : (
+            <span className="text-2xl font-extrabold text-muted">—</span>
+          )}
+        </StatBox>
+
+        <StatBox label="컨텍스트" hint="이 리소스의 컨텍스트 셀 수">
+          <div className="flex items-baseline gap-2">
+            <span className="tnum text-2xl font-extrabold text-ink">{stats.contexts}</span>
+            <span className="text-xs font-semibold text-muted">
+              정상 {stats.healthy} · 주의 {stats.attention}
+            </span>
+          </div>
+        </StatBox>
+
+        <StatBox label="격리 상태" hint="수동 차단 여부 / 최악 상태">
+          <div className="flex flex-col items-start gap-1">
+            <StatusBadge state={stats.worstState} />
+            <span className="text-xs font-semibold text-muted">
+              {detail.blocked
+                ? detail.blockPermanent
+                  ? "영구 차단"
+                  : `해제 예정 ${fmtDateTime(detail.blockedUntil)}`
+                : "격리 없음"}
+            </span>
+          </div>
+        </StatBox>
+
+        <StatBox label="최근 판정" hint="대표 컨텍스트의 연속 성공/실패">
+          {stats.worstCell ? (
+            stats.worstCell.consecutiveFailures > 0 ? (
+              <div className="flex items-baseline gap-2">
+                <span className="tnum text-2xl font-extrabold text-block-ink">
+                  {stats.worstCell.consecutiveFailures}
+                </span>
+                <span className="text-xs font-semibold text-muted">연속 실패</span>
+              </div>
+            ) : (
+              <div className="flex items-baseline gap-2">
+                <span className="tnum text-2xl font-extrabold text-ok-ink">
+                  {stats.worstCell.consecutiveSuccesses}
+                </span>
+                <span className="text-xs font-semibold text-muted">연속 성공</span>
+              </div>
+            )
+          ) : (
+            <span className="text-2xl font-extrabold text-muted">—</span>
+          )}
+        </StatBox>
+      </div>
 
       {/* 곡선/셀/타임라인을 세로 스택 대신 탭으로(방향키·활성 칩 전환은 Radix Tabs 기본). */}
       <Tabs defaultValue="curve">
@@ -257,6 +433,18 @@ export default function ResourceDetailPage() {
               <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartRows} margin={{ top: 8, right: 16, bottom: 22, left: 4 }}>
+                    {/* 임계 구간 밴드(라인 뒤에 은은하게). 위험/주의/양호 점수대. */}
+                    {SCORE_BANDS.map((b) => (
+                      <ReferenceArea
+                        key={b.y1}
+                        y1={b.y1}
+                        y2={b.y2}
+                        fill={b.color}
+                        fillOpacity={0.05}
+                        stroke="none"
+                        ifOverflow="hidden"
+                      />
+                    ))}
                     <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" vertical={false} />
                     <XAxis
                       dataKey="t"
@@ -289,7 +477,10 @@ export default function ResourceDetailPage() {
                         style: { textAnchor: "middle", fill: "var(--muted)", fontSize: 11, fontWeight: 600 },
                       }}
                     />
-                    <Tooltip content={<ChartTooltip />} />
+                    <Tooltip
+                      content={<ChartTooltip />}
+                      cursor={{ stroke: "var(--accent)", strokeWidth: 1, strokeDasharray: "4 4", strokeOpacity: 0.5 }}
+                    />
                     {contexts.map((ctx, i) => (
                       <Line
                         key={ctx}
@@ -302,6 +493,29 @@ export default function ResourceDetailPage() {
                         activeDot={{ r: 3 }}
                         connectNulls
                         isAnimationActive={false}
+                      />
+                    ))}
+                    {/* 이벤트 주석: 세로 가이드(정렬) + 상단 마커(호버 툴팁). 라인 위에 얹혀 곡선과 x축 정렬. */}
+                    {annotations.map((a) => (
+                      <ReferenceLine
+                        key={`l-${a.key}`}
+                        x={a.t}
+                        stroke={a.color}
+                        strokeDasharray="4 3"
+                        strokeOpacity={0.65}
+                        ifOverflow="hidden"
+                      />
+                    ))}
+                    {annotations.map((a) => (
+                      <ReferenceDot
+                        key={`d-${a.key}`}
+                        x={a.t}
+                        y={1}
+                        r={0}
+                        ifOverflow="hidden"
+                        shape={(p: { cx?: number; cy?: number }) => (
+                          <EventMarker cx={p.cx ?? 0} cy={p.cy ?? 0} color={a.color} title={a.title} />
+                        )}
                       />
                     ))}
                   </LineChart>
@@ -321,6 +535,21 @@ export default function ResourceDetailPage() {
                       style={{ background: LINE_TOKENS[i % LINE_TOKENS.length] }}
                     />
                     {ctx}
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* 주석 범례: 곡선에 실제로 찍힌 이벤트 종류만 노출(마커 색과 일치). */}
+            {hasCurve && annotationKinds.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 pl-1 text-xs">
+                <span className="font-semibold text-muted">이벤트</span>
+                {annotationKinds.map((m) => (
+                  <span key={m.label} className="flex items-center gap-1.5 text-muted">
+                    <span
+                      className="size-2 rounded-full ring-2 ring-surface"
+                      style={{ background: m.color }}
+                    />
+                    {m.label}
                   </span>
                 ))}
               </div>
@@ -400,6 +629,31 @@ export default function ResourceDetailPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/** 요약 스탯 한 칸: 라벨(작게) + 값(children). surface-2 박스로 카드와 톤 분리. */
+function StatBox({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-[12px] border border-line bg-surface-2 px-3.5 py-3" title={hint}>
+      <div className="mb-1.5 text-xs font-semibold text-muted">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+/** 추세 칩: 대표 컨텍스트 곡선의 Δ. 상승은 ok, 하락은 block 색. 거의 평탄하거나 데이터 없으면 표시 안 함. */
+function TrendChip({ delta }: { delta: number | null }) {
+  if (delta === null || Math.abs(delta) < 0.005) return null;
+  const up = delta > 0;
+  return (
+    <span
+      className={`tnum inline-flex items-center gap-0.5 text-xs font-bold ${up ? "text-ok-ink" : "text-block-ink"}`}
+      title="선택 기간 동안의 점수 변화(대표 컨텍스트)"
+    >
+      <span aria-hidden>{up ? "▲" : "▼"}</span>
+      {Math.abs(delta).toFixed(2)}
+    </span>
   );
 }
 

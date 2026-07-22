@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import type { AuditEventPage, AuditEventRecord, ResourceKind } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { usePoll } from "@/lib/use-poll";
 
 /** 첫 페이지(최근 50건)를 다시 불러오는 폴링 주기. */
@@ -211,7 +212,14 @@ export default function EventsPage() {
 
       {/* 첫 로드 실패 */}
       {firstError && (
-        <Card className="p-4 text-sm text-block">불러오지 못했습니다 · {firstError}</Card>
+        <Card>
+          <EmptyState
+            tone="error"
+            title="이벤트를 불러오지 못했습니다"
+            description={firstError}
+            action={{ label: "다시 시도", onClick: () => void load() }}
+          />
+        </Card>
       )}
 
       {/* 첫 로드 중 */}
@@ -319,10 +327,18 @@ export default function EventsPage() {
                   ))}
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                        {events.length === 0
-                          ? "아직 기록된 이벤트가 없습니다."
-                          : "조건에 맞는 이벤트가 없습니다."}
+                      <td colSpan={7} className="p-0">
+                        {events.length === 0 ? (
+                          <EmptyState
+                            title="아직 기록된 이벤트가 없습니다"
+                            description="풀에서 임대·냉각·차단 등이 발생하면 여기에 실시간으로 쌓입니다."
+                          />
+                        ) : (
+                          <EmptyState
+                            title="조건에 맞는 이벤트가 없습니다"
+                            description="필터·검색어를 바꾸면 더 많은 이벤트를 볼 수 있습니다."
+                          />
+                        )}
                       </td>
                     </tr>
                   )}

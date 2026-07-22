@@ -49,6 +49,23 @@ describe("리소스 상세 화면 (integration + MSW)", () => {
     expect(within(table).getByText("42.000")).toBeInTheDocument();
   });
 
+  it("헤더 요약 스탯 행에 대표 점수·컨텍스트 분포·격리 상태를 보여준다", async () => {
+    render(<ResourceDetailPage />, { wrapper: ToastProvider });
+    await screen.findByRole("heading", { name: "proxy-good" });
+
+    // 대표 점수 = 최저 셀 점수(eu-west -10) → 소수 둘째 자리. 라벨과 값 모두 노출.
+    expect(screen.getByText("대표 점수")).toBeInTheDocument();
+    expect(screen.getByText("-10.00")).toBeInTheDocument();
+
+    // 컨텍스트: 총 2개, 정상 1 · 주의 1(eu-west COOLING).
+    expect(screen.getByText("컨텍스트")).toBeInTheDocument();
+    expect(screen.getByText("정상 1 · 주의 1")).toBeInTheDocument();
+
+    // 격리 상태: 차단 아님(격리 없음) + 최악 상태 배지(Cooldown).
+    expect(screen.getByText("격리 상태")).toBeInTheDocument();
+    expect(screen.getByText("격리 없음")).toBeInTheDocument();
+  });
+
   it("감사 타임라인 탭은 이 리소스(PROXY/proxy-good) 이벤트만 남긴다", async () => {
     const user = userEvent.setup();
     render(<ResourceDetailPage />, { wrapper: ToastProvider });

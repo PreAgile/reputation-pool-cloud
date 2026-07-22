@@ -206,4 +206,36 @@ FROM (
 ) AS all_events
 ORDER BY occurred_at;
 
+-- ---------------------------------------------------------------------------
+-- 6. usage_meter — 대시보드 /usage 의 일별 임대 미터 (최근 30일, backdate)
+--    /usage 는 이 테이블을 UsageMeterReader 가 JDBC 로 직독하므로(오버뷰/상세와 달리
+--    인메모리 풀 경유 아님) 이 INSERT 는 백엔드 재시작 없이 즉시 반영된다.
+--    metric='lease' 를 일자별로 채운다. metric='pool_size' 는 러닝 백엔드의 롤업이
+--    유지하므로 손대지 않는다(없을 때만 위 registered_resource 수로 보강).
+--    값 설계(결정적·재현 가능): 완만한 우상향 추세 + 주말 저조 + 소폭 노이즈.
+-- ---------------------------------------------------------------------------
+DELETE FROM usage_meter WHERE tenant_id = 'default' AND metric = 'lease';
+
+INSERT INTO usage_meter (tenant_id, metric, period_start, value, updated_at)
+SELECT
+    'default',
+    'lease',
+    (CURRENT_DATE - (29 - d)) AS period_start,
+    GREATEST(1, ROUND(
+        (35 + d * 4.5)                                   -- 30일에 걸친 완만한 우상향
+        * CASE WHEN EXTRACT(dow FROM (CURRENT_DATE - (29 - d))) IN (0, 6)
+               THEN 0.55 ELSE 1.0 END                    -- 주말(일/토) 저조
+        + (((d * 7) % 13) - 6)                            -- ±6 결정적 노이즈
+    ))::bigint AS value,
+    now()
+FROM generate_series(0, 29) AS d;
+
+-- pool_size 미터가 아직 없으면(백엔드 롤업 이전 상태) 리소스 수로 1건 보강.
+INSERT INTO usage_meter (tenant_id, metric, period_start, value, updated_at)
+SELECT 'default', 'pool_size', CURRENT_DATE,
+       (SELECT count(*) FROM registered_resource WHERE pool_id = 'default'), now()
+WHERE NOT EXISTS (
+    SELECT 1 FROM usage_meter WHERE tenant_id = 'default' AND metric = 'pool_size'
+);
+
 COMMIT;

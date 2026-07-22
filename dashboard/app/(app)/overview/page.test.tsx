@@ -93,4 +93,36 @@ describe("풀 오버뷰 화면 (integration + MSW)", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("영구 차단했습니다");
   });
+
+  it("score 헤더를 두 번 누르면 내림차순으로 정렬해 높은 score를 위로 올린다", async () => {
+    const user = userEvent.setup();
+    render(<OverviewPage />, { wrapper: ToastProvider });
+    await screen.findByText("proxy-bad");
+
+    // score 헤더 클릭 → 오름차순, 다시 클릭 → 내림차순(높은 score 먼저).
+    const scoreHeader = screen.getByRole("button", { name: "score 기준 정렬" });
+    await user.click(scoreHeader);
+    await user.click(scoreHeader);
+
+    const texts = screen
+      .getAllByRole("link")
+      .filter((a) => a.getAttribute("href")?.startsWith("/resources/"))
+      .map((r) => r.textContent ?? "");
+    const goodIdx = texts.findIndex((t) => t.includes("proxy-good")); // score 42
+    const badIdx = texts.findIndex((t) => t.includes("proxy-bad")); // score -80
+    expect(goodIdx).toBeGreaterThanOrEqual(0);
+    expect(goodIdx).toBeLessThan(badIdx);
+  });
+
+  it("라이브 인디케이터를 일시정지하면 상태 문구와 버튼이 바뀐다", async () => {
+    const user = userEvent.setup();
+    render(<OverviewPage />, { wrapper: ToastProvider });
+    await screen.findByText("proxy-bad");
+
+    expect(screen.getByText("실시간")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "일시정지" }));
+
+    expect(screen.getByText("일시정지됨")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "재개" })).toBeInTheDocument();
+  });
 });
