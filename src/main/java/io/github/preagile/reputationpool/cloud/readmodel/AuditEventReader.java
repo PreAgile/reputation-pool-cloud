@@ -87,17 +87,33 @@ public final class AuditEventReader {
         }
     }
 
-    /** Latest-page vs before-cursor query, both fetching one probe row past {@code limit}. */
+    /**
+     * Latest-page vs before-cursor query, both fetching one probe row past {@code limit}. Closes the
+     * statement if binding fails before it is handed to the caller's try-with-resources, so a throw
+     * here never orphans it (idiom cleanup — the caller's connection-close would also reclaim it).
+     */
     private static PreparedStatement prepare(Connection connection, Long beforeSeq, int limit) throws SQLException {
-        if (beforeSeq == null) {
-            PreparedStatement statement = connection.prepareStatement(SELECT_LATEST);
-            statement.setInt(1, limit + 1);
+        PreparedStatement statement = null;
+        try {
+            if (beforeSeq == null) {
+                statement = connection.prepareStatement(SELECT_LATEST);
+                statement.setInt(1, limit + 1);
+            } else {
+                statement = connection.prepareStatement(SELECT_BEFORE);
+                statement.setLong(1, beforeSeq);
+                statement.setInt(2, limit + 1);
+            }
             return statement;
+        } catch (SQLException e) {
+            if (statement != null) {
+                try {
+                    statement.close();
+                } catch (SQLException closeEx) {
+                    e.addSuppressed(closeEx);
+                }
+            }
+            throw e;
         }
-        PreparedStatement statement = connection.prepareStatement(SELECT_BEFORE);
-        statement.setLong(1, beforeSeq);
-        statement.setInt(2, limit + 1);
-        return statement;
     }
 
     private static AuditEventRecord map(ResultSet rows) throws SQLException {

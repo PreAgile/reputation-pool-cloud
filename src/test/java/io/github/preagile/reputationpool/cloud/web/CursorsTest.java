@@ -55,4 +55,11 @@ class CursorsTest {
     void decode_blank_throws() {
         assertThatThrownBy(() -> Cursors.decode("  ")).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    @DisplayName("상한(100자)을 넘는 초장문 커서를 decode 하면 → decode 이전에 IllegalArgumentException")
+    void decode_tooLong_throws() {
+        String tooLong = "A".repeat(101);
+        assertThatThrownBy(() -> Cursors.decode(tooLong)).isInstanceOf(IllegalArgumentException.class);
+    }
 }

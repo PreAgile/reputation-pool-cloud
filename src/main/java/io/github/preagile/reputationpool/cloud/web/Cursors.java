@@ -18,6 +18,13 @@ final class Cursors {
     private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final Base64.Decoder DECODER = Base64.getUrlDecoder();
 
+    /**
+     * Upper bound on the wire token length. A {@code long}'s Base64 form is ~13 chars, so 100 is
+     * generous headroom while making {@link #decode(String)} self-defensive: it rejects absurd input
+     * before allocating, independent of the servlet container's own request-line limit.
+     */
+    private static final int MAX_CURSOR_LENGTH = 100;
+
     private Cursors() {}
 
     /** Opaque, URL-safe token for a {@code seq}. */
@@ -33,6 +40,9 @@ final class Cursors {
     static long decode(String cursor) {
         if (cursor == null || cursor.isBlank()) {
             throw new IllegalArgumentException("cursor must not be blank");
+        }
+        if (cursor.length() > MAX_CURSOR_LENGTH) {
+            throw new IllegalArgumentException("cursor is too long");
         }
         final byte[] decoded;
         try {

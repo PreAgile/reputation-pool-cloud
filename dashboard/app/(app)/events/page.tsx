@@ -132,11 +132,16 @@ export default function EventsPage() {
 
   // 최초 성공 로드 여부: 폴링 실패를 조용히 넘길지(직전 데이터 유지) 판단.
   const loadedRef = useRef(false);
+  // 요청 세대(run id): 진행 중이던 응답이 그새 바뀐 모드(과거 보기 등)의 목록을 덮어쓰지 못하게 한다.
+  // dispatch 시점에 ++로 자기 세대를 잡고, 응답 반영 직전에 여전히 최신 세대일 때만 상태를 바꾼다.
+  const reqSeq = useRef(0);
 
   // 최신 페이지(커서 없음)를 불러 목록을 통째로 교체한다. 폴링·최초 로드·"라이브로" 복귀가 공유.
   const loadLatest = useCallback(async () => {
+    const my = ++reqSeq.current;
     try {
       const res = await api<AuditEventPage>(`/events?limit=${PAGE_SIZE}`);
+      if (my !== reqSeq.current) return; // 더 보기/라이브로 전환 등으로 뒤처진 응답 → 폐기
       loadedRef.current = true;
       setEvents(res.events);
       setNextCursor(res.nextCursor);
@@ -144,6 +149,7 @@ export default function EventsPage() {
       setFirstError(null);
       setPollWarning(null);
     } catch (e) {
+      if (my !== reqSeq.current) return; // 뒤처진 실패도 현재 상태를 건드리지 않는다
       const msg = e instanceof Error ? e.message : "불러오지 못했습니다";
       // 첫 로드 실패는 에러 화면, 이후 폴링 실패는 직전 데이터 유지 + 작은 경고.
       if (loadedRef.current) setPollWarning(msg);
@@ -154,22 +160,27 @@ export default function EventsPage() {
   // "더 보기": nextCursor 로 과거 페이지를 이어받아 seq 로 dedup 후 append. 과거를 보는 순간 폴링 정지.
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
+    const my = ++reqSeq.current; // 이 전환 이후 도착하는 이전 loadLatest 응답을 무효화
     setViewingHistory(true);
     setLoadingMore(true);
     try {
       const res = await api<AuditEventPage>(
         `/events?cursor=${encodeURIComponent(nextCursor)}&limit=${PAGE_SIZE}`,
       );
-      setEvents((prev) => {
-        const seen = new Set((prev ?? []).map((e) => e.seq));
-        const merged = [...(prev ?? [])];
-        for (const ev of res.events) if (!seen.has(ev.seq)) merged.push(ev);
-        return merged;
-      });
-      setNextCursor(res.nextCursor);
-      setPollWarning(null);
+      if (my === reqSeq.current) {
+        setEvents((prev) => {
+          const seen = new Set((prev ?? []).map((e) => e.seq));
+          const merged = [...(prev ?? [])];
+          for (const ev of res.events) if (!seen.has(ev.seq)) merged.push(ev);
+          return merged;
+        });
+        setNextCursor(res.nextCursor);
+        setPollWarning(null);
+      }
     } catch (e) {
-      setPollWarning(e instanceof Error ? e.message : "더 불러오지 못했습니다");
+      if (my === reqSeq.current) {
+        setPollWarning(e instanceof Error ? e.message : "더 불러오지 못했습니다");
+      }
     } finally {
       setLoadingMore(false);
     }

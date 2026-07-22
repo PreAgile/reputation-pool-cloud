@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
@@ -125,5 +125,63 @@ describe("라이브 이벤트 화면 (integration + MSW)", () => {
     await screen.findByText(/실시간 ·/);
     expect(screen.queryByText("acct-cool")).not.toBeInTheDocument();
     expect(screen.getByText("proxy-live")).toBeInTheDocument();
+  });
+
+  // 회귀 방지(#73 리뷰): 더 보기 전환 시점에 이미 날아간 폴링 loadLatest 응답이
+  // 늦게 도착해 과거 목록/커서를 최신 페이지로 되돌리면 안 된다(요청 세대 가드).
+  it("더 보기 도중 늦게 도착한 폴링 응답이 과거 목록을 덮어쓰지 않는다", async () => {
+    const user = userEvent.setup();
+    const page1: AuditEventPage = {
+      events: [
+        {
+          seq: 5,
+          eventType: "RESOURCE_LEASED",
+          resourceKind: "PROXY",
+          resourceValue: "proxy-live",
+          context: "us-east",
+          occurredAt: "2026-07-18T08:33:00Z",
+          until: null,
+          cause: null,
+        },
+      ],
+      nextCursor: "Y3Vyc29yLTQ",
+    };
+    let latestCalls = 0;
+    let releaseStalePoll!: () => void;
+    const staleGate = new Promise<void>((resolve) => {
+      releaseStalePoll = resolve;
+    });
+    server.use(
+      http.get("*/api/events", async ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.get("cursor")) {
+          return HttpResponse.json(eventsFixture); // 더 보기 → 과거(acct-cool), 즉시
+        }
+        latestCalls += 1;
+        if (latestCalls >= 2) await staleGate; // 2번째(폴링) 최신 응답은 풀어줄 때까지 매달림
+        return HttpResponse.json(page1);
+      }),
+    );
+
+    render(<EventsPage />);
+    await screen.findByText("proxy-live"); // 최초 로드 완료(latestCalls=1)
+
+    // usePoll의 visibilitychange tick으로 폴링 loadLatest를 즉시 한 번 발화 → in-flight(매달림).
+    fireEvent(document, new Event("visibilitychange")); // latestCalls=2, 게이트에서 대기
+    await Promise.resolve();
+
+    // 폴링 응답 도착 전에 더 보기 → 과거 append + 과거 보기 전환.
+    await user.click(screen.getByRole("button", { name: "더 보기" }));
+    await screen.findByText("acct-cool");
+    expect(screen.getByText("과거 보기 · 실시간 정지")).toBeInTheDocument();
+
+    // 매달렸던 폴링 응답을 이제 풀어준다 — 가드가 없으면 목록을 최신으로 되돌렸을 것.
+    releaseStalePoll();
+    await new Promise((resolve) => setTimeout(resolve, 50)); // 늦은 응답이 반영을 시도할 틈
+
+    // 과거 항목이 그대로 유지되고 과거 보기 라벨도 유지되어야 한다.
+    expect(screen.getByText("acct-cool")).toBeInTheDocument();
+    expect(screen.getByText("proxy-live")).toBeInTheDocument();
+    expect(screen.getByText("과거 보기 · 실시간 정지")).toBeInTheDocument();
   });
 });
