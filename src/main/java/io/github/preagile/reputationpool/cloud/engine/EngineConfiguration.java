@@ -35,10 +35,12 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * {@code CompositeEventSink} are cloud-side ports of the (unconsumed) server module's classes. Pool
  * events fan out to both the live gRPC stream and the durable audit trail.
  *
- * <p><b>Per-tenant isolation (#9b).</b> There is no single pool or single store bean any more: the
+ * <p><b>Per-tenant isolation (#9b, #29).</b> There is no single pool or single store bean any more: the
  * {@link PerTenantPoolRegistry} owns one pool + one tenant-scoped store per tenant, created lazily. The
- * {@code clock}, the fan-out event sink, and the audit trail are shared across tenants; pool state and
- * its persisted rows are not.
+ * {@code clock} and the global fan-out sink (alerting + metrics, which aggregate across tenants) are
+ * shared; pool state, its persisted rows, and — since #29 — each tenant's event stream and audit
+ * history (the broadcaster's and audit trail's {@code forPool(tenantId)} views, the stream paired with
+ * cloud's {@code subscriptionPoolId()} subscription-scope override) are not.
  */
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
@@ -78,24 +80,24 @@ public class EngineConfiguration {
     }
 
     /**
-     * The sink every tenant's pool emits through: the same {@code AdvisorServer.assemble} fan-out to
-     * the live gRPC {@link EventBroadcaster} and the durable audit trail, now with the state-transition
-     * {@link AlertingEventSink} joined beside them (issue #45). Shared across tenants (event-stream and
-     * audit isolation are a deferred follow-up), so each per-tenant pool is handed this one sink.
+     * The <em>tenant-agnostic</em> slice of every pool's fan-out: the state-transition
+     * {@link AlertingEventSink} and the {@link MetricsEventSink} (issue #45), which are deliberately
+     * global — alerts and Micrometer counters aggregate across every tenant. The two tenant-scoped
+     * delegates that used to live here — the gRPC {@link EventBroadcaster} and the durable
+     * {@link PostgresAuditTrail} — are no longer in this shared bundle: the {@link PerTenantPoolRegistry}
+     * now joins their per-tenant {@code forPool(tenantId)} views instead (issue #29), so one tenant's
+     * events never reach another's subscriber or audit history. (Live-stream isolation is completed by
+     * cloud's {@code subscriptionPoolId()} override scoping each subscription to its tenant.)
      *
      * <p>Including the alerting sink unconditionally is safe: it forwards only BLOCKLISTED transitions,
      * alerting is opt-in (a no-op until a webhook is configured), and the notifier never blocks or throws
      * — plus {@code CompositeEventSink} already isolates each delegate's failures from the others. The
-     * {@link MetricsEventSink} joins beside it (issue #45): it only increments Micrometer counters, which
-     * the actuator exposes at {@code /actuator/prometheus}, and is likewise non-blocking and failure-safe.
+     * {@link MetricsEventSink} is likewise non-blocking and failure-safe: it only increments Micrometer
+     * counters, which the actuator exposes at {@code /actuator/prometheus}.
      */
     @Bean
-    EventSink poolEventSink(
-            EventBroadcaster broadcaster,
-            PostgresAuditTrail auditTrail,
-            AlertingEventSink alertingEventSink,
-            MetricsEventSink metricsEventSink) {
-        return new CompositeEventSink(List.of(broadcaster, auditTrail, alertingEventSink, metricsEventSink));
+    EventSink poolEventSink(AlertingEventSink alertingEventSink, MetricsEventSink metricsEventSink) {
+        return new CompositeEventSink(List.of(alertingEventSink, metricsEventSink));
     }
 
     /**
@@ -118,12 +120,21 @@ public class EngineConfiguration {
     @Bean
     PerTenantPoolRegistry tenantPoolRegistry(
             Clock clock,
+            EventBroadcaster broadcaster,
+            PostgresAuditTrail auditTrail,
             EventSink poolEventSink,
             ReputationPoolProperties props,
             TenantRepository tenantRepository,
             Function<String, ResourceStore> resourceStoreFactory,
             io.github.preagile.reputationpool.cloud.metering.MeterRecorder meterRecorder) {
         return new PerTenantPoolRegistry(
-                clock, poolEventSink, props, tenantRepository, resourceStoreFactory, meterRecorder);
+                clock,
+                broadcaster,
+                auditTrail,
+                poolEventSink,
+                props,
+                tenantRepository,
+                resourceStoreFactory,
+                meterRecorder);
     }
 }

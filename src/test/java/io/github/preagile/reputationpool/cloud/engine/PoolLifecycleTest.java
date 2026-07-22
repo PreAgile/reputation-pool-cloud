@@ -2,6 +2,7 @@ package io.github.preagile.reputationpool.cloud.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.Mockito.mock;
 
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.tenant.Tenant;
@@ -14,6 +15,8 @@ import io.github.preagile.reputationpool.core.engine.ReputationEngine;
 import io.github.preagile.reputationpool.core.pool.ResourcePool;
 import io.github.preagile.reputationpool.core.pool.WeightedRandomSelectionStrategy;
 import io.github.preagile.reputationpool.core.port.ResourceStore;
+import io.github.preagile.reputationpool.grpc.EventBroadcaster;
+import io.github.preagile.reputationpool.persistence.PostgresAuditTrail;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -25,6 +28,8 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import javax.sql.DataSource;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -46,6 +51,18 @@ class PoolLifecycleTest {
     private final Function<String, ResourceStore> storeFactory =
             tenantId -> stores.computeIfAbsent(tenantId, id -> new RecordingStore());
 
+    // The per-tenant event stream + audit trail the registry joins via forPool(tenantId). Both are real
+    // upstream types but harmless here: the broadcaster has no subscribers, and the trail is backed by a
+    // mock DataSource so its background writer just drops what it drains — no database, still Docker-free.
+    // Only pool state (restore/checkpoint) is under test, so audit persistence is deliberately inert.
+    private final EventBroadcaster broadcaster = new EventBroadcaster();
+    private final PostgresAuditTrail auditTrail = new PostgresAuditTrail(mock(DataSource.class));
+
+    @AfterEach
+    void closeAuditTrail() {
+        auditTrail.close();
+    }
+
     private ReputationPoolProperties propsWithRetention(Duration retention) {
         return new ReputationPoolProperties(
                 Duration.ofSeconds(30),
@@ -59,6 +76,8 @@ class PoolLifecycleTest {
     private PerTenantPoolRegistry registry(TenantRepository repository) {
         return new PerTenantPoolRegistry(
                 clock,
+                broadcaster,
+                auditTrail,
                 event -> {},
                 propsWithRetention(Duration.ZERO),
                 repository,

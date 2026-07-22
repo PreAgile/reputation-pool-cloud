@@ -20,10 +20,16 @@ repositories {
 }
 
 // grpc-inprocess (test only) — the gRPC runtime + stubs come transitively from reputation-pool-grpc,
-// whose baseline this matches.
-val grpcVersion = "1.63.0"
+// whose baseline this matches (0.4.0/0.5.0 moved that baseline to 1.82.2; keeping this in lockstep avoids
+// a split grpc-core/grpc-api on the test classpath, which surfaces as NoClassDefFoundError at server build).
+val grpcVersion = "1.82.2"
 
 dependencies {
+    // Align every io.grpc module to one version. reputation-pool-grpc 0.4.0 api-depends on grpc-stub/
+    // grpc-protobuf 1.82.2 (pulling grpc-api up), while net.devh:grpc-spring-boot-starter brings grpc-core/
+    // netty/context/util at its own baseline — and grpc's modules must move in lockstep or the split
+    // surfaces as AbstractMethodError/NoClassDefFoundError when the server bootstraps. The BOM pins them all.
+    implementation(platform("io.grpc:grpc-bom:$grpcVersion"))
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     // Renders the Micrometer meters (issue #45) in Prometheus text format at /actuator/prometheus, so an
@@ -39,13 +45,17 @@ dependencies {
     // security filter chain here only covers the HTTP control plane (port 8083).
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
-    // 0.3.1 introduces per-pool namespacing: the PostgresResourceStore(dataSource, clock, poolId)
-    // constructor and the gRPC service's protected pool() routing hook that per-tenant isolation needs.
-    implementation("io.github.preagile:reputation-pool-core:0.3.1")
-    implementation("io.github.preagile:reputation-pool-persistence:0.3.1")
+    // 0.5.0 completes the per-pool event scope this module consumes for #29: PostgresAuditTrail.forPool
+    // (per-tenant audit rows) + the V5 audit_event_pool_seq_idx(pool_id, seq) index behind the keyset read
+    // (both from 0.4.0), plus EventBroadcaster.forPool (per-tenant live stream) paired with the base
+    // ReputationAdvisorService's new protected subscriptionPoolId() seam (0.5.0) that cloud overrides to
+    // scope each SubscribeEvents subscription to its tenant. Builds on 0.3.1's per-pool snapshot
+    // namespacing (PostgresResourceStore(dataSource, clock, poolId) and the protected pool() routing hook).
+    implementation("io.github.preagile:reputation-pool-core:0.5.0")
+    implementation("io.github.preagile:reputation-pool-persistence:0.5.0")
     // The gRPC contract + adapter (proto stubs, mapping, broadcaster, advisor service base). Brings
     // grpc-protobuf/grpc-stub/protobuf-java transitively, so cloud adds no codegen of its own.
-    implementation("io.github.preagile:reputation-pool-grpc:0.3.1")
+    implementation("io.github.preagile:reputation-pool-grpc:0.5.0")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     // MockMvc security helpers (SecurityMockMvcRequestPostProcessors, etc.) for the control-plane slice test.
