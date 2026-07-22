@@ -39,13 +39,13 @@ describe("리소스 상세 화면 (integration + MSW)", () => {
     expect(screen.getByRole("heading", { name: /평판 곡선/ })).toBeInTheDocument();
     expect(screen.queryByText("샘플 아직 없음")).not.toBeInTheDocument();
 
-    // 셀 탭으로 전환하면 us-east(정상)·eu-west(냉각) 두 행 + score 가 나온다.
+    // 셀 탭으로 전환하면 us-east(Healthy)·eu-west(Cooldown) 두 행 + score 가 나온다.
     await user.click(screen.getByRole("tab", { name: "컨텍스트별 셀" }));
     const table = await screen.findByRole("table");
     expect(within(table).getByText("us-east")).toBeInTheDocument();
     expect(within(table).getByText("eu-west")).toBeInTheDocument();
-    expect(within(table).getByText("정상")).toBeInTheDocument();
-    expect(within(table).getByText("냉각")).toBeInTheDocument();
+    expect(within(table).getByText("Healthy")).toBeInTheDocument();
+    expect(within(table).getByText("Cooldown")).toBeInTheDocument();
     expect(within(table).getByText("42.000")).toBeInTheDocument();
   });
 

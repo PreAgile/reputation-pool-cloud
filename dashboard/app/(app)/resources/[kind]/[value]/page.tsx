@@ -256,7 +256,7 @@ export default function ResourceDetailPage() {
             {hasCurve ? (
               <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartRows} margin={{ top: 8, right: 12, bottom: 4, left: -12 }}>
+                  <LineChart data={chartRows} margin={{ top: 8, right: 16, bottom: 22, left: 4 }}>
                     <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" vertical={false} />
                     <XAxis
                       dataKey="t"
@@ -267,12 +267,27 @@ export default function ResourceDetailPage() {
                       tick={{ fill: "var(--muted)", fontSize: 11 }}
                       stroke="var(--line)"
                       minTickGap={40}
+                      label={{
+                        value: "시각",
+                        position: "insideBottom",
+                        offset: -8,
+                        style: { fill: "var(--muted)", fontSize: 11, fontWeight: 600 },
+                      }}
                     />
                     <YAxis
-                      domain={["auto", "auto"]}
+                      domain={[0, 1]}
+                      ticks={[0, 0.25, 0.5, 0.75, 1]}
+                      tickFormatter={(v) => (v as number).toFixed(2)}
                       tick={{ fill: "var(--muted)", fontSize: 11 }}
                       stroke="var(--line)"
-                      width={48}
+                      width={64}
+                      label={{
+                        value: "평판 점수 (0–1)",
+                        angle: -90,
+                        position: "insideLeft",
+                        offset: 12,
+                        style: { textAnchor: "middle", fill: "var(--muted)", fontSize: 11, fontWeight: 600 },
+                      }}
                     />
                     <Tooltip content={<ChartTooltip />} />
                     {contexts.map((ctx, i) => (
@@ -328,7 +343,7 @@ export default function ResourceDetailPage() {
                     <th className="px-4 py-2.5 text-right font-bold" title="점수 계산에 쓰는 최근 판정 개수">
                       평가 표본
                     </th>
-                    <th className="px-4 py-2.5 font-bold" title="냉각(COOLING)이 풀리는 시각">냉각 해제 시각</th>
+                    <th className="px-4 py-2.5 font-bold" title="Cooldown(COOLING)이 풀리는 시각">Cooldown 해제 시각</th>
                   </tr>
                 </thead>
                 <tbody>

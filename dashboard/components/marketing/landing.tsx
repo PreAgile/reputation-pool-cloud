@@ -19,7 +19,7 @@ import { getDict, type Locale } from "./i18n";
 export function Landing({ locale }: { locale: Locale }) {
   const dict = getDict(locale);
   return (
-    <div className="min-h-screen bg-bg">
+    <div lang={locale} className="min-h-screen bg-bg">
       <MarketingNav nav={dict.nav} locale={locale} />
       <main>
         <Hero dict={dict} locale={locale} />

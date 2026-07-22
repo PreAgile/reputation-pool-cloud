@@ -16,7 +16,9 @@ describe("랜딩 페이지 한국어 (/ko, #16)", () => {
       screen.getByRole("heading", { level: 1, name: /프록시·계정 풀을 위한 평판 API\./ }),
     ).toBeInTheDocument();
     expect(screen.getByText(/쿨다운, 차단 목록, 리스 로직을 직접 짜지 마세요\./)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /평판, 냉각, 격리 — 해결했습니다\./ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /나쁜 리소스는 잠시 빼두고, 좋은 것만 골라 씁니다\./ }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /실제 자동화 인프라를 위해 만들어졌습니다\./ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /세 번의 호출\. 나머지는 엔진이 합니다\./ })).toBeInTheDocument();
   });

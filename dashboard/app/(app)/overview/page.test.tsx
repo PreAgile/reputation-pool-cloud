@@ -31,34 +31,31 @@ describe("풀 오버뷰 화면 (integration + MSW)", () => {
     expect(screen.getByText("proxy-good")).toBeInTheDocument();
     expect(screen.getByText("acct-cool")).toBeInTheDocument();
 
-    // 상태 배지(BLOCKLISTED → "차단")가 최소 하나 렌더된다.
-    expect(screen.getAllByText("차단").length).toBeGreaterThan(0);
+    // 상태 배지(BLOCKLISTED → "Blocked")가 최소 하나 렌더된다.
+    expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
 
     // 심각도 정렬: BLOCKLISTED(proxy-bad)가 HEALTHY(proxy-good)보다 위.
-    // 값 셀은 미리보기 드로어 트리거(button)다(#52 P4).
-    const rows = screen.getAllByRole("button", { name: /미리보기/ });
-    const texts = rows.map((r) => r.textContent ?? "");
+    // 값 셀은 상세로 가는 링크(/resources/…)다.
+    const resourceLinks = screen
+      .getAllByRole("link")
+      .filter((a) => a.getAttribute("href")?.startsWith("/resources/"));
+    const texts = resourceLinks.map((r) => r.textContent ?? "");
     const badIdx = texts.findIndex((t) => t.includes("proxy-bad"));
     const goodIdx = texts.findIndex((t) => t.includes("proxy-good"));
     expect(badIdx).toBeGreaterThanOrEqual(0);
     expect(badIdx).toBeLessThan(goodIdx);
   });
 
-  it("값을 클릭하면 미리보기 드로어가 열리고 전체 상세 링크를 제공한다", async () => {
-    const user = userEvent.setup();
+  it("리소스 값이 상세 페이지로 가는 링크이고, 드로어는 열리지 않는다", async () => {
     render(<OverviewPage />, { wrapper: ToastProvider });
     await screen.findByText("proxy-bad");
 
-    // 드로어는 처음엔 닫혀 있다.
+    // 값은 곧바로 상세로 가는 링크다(드로어 없음).
+    const link = screen.getByRole("link", { name: "proxy-bad" });
+    expect(link).toHaveAttribute("href", "/resources/proxy/proxy-bad");
+
+    // 미리보기 드로어(dialog)는 어디에도 없다.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "proxy-bad 미리보기" }));
-
-    // 드로어(dialog)가 열리고, 리스트를 벗어나지 않는 상세 요약 + 전체 상세 링크를 보여준다.
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toBeInTheDocument();
-    const detail = screen.getByRole("link", { name: /전체 상세 보기/ });
-    expect(detail).toHaveAttribute("href", "/resources/proxy/proxy-bad");
   });
 
   it("로딩 중 스켈레톤을 보여주고 데이터 도착 후 감춘다", async () => {

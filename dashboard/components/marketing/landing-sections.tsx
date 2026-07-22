@@ -80,7 +80,8 @@ export function Hero({ dict, locale }: SectionProps) {
           <h1 className="mt-5 text-balance text-4xl font-bold leading-[1.04] tracking-tight text-ink sm:text-5xl lg:text-[54px]">
             {h.title}
           </h1>
-          <p className="mt-5 max-w-[34ch] text-pretty text-lg leading-relaxed text-muted">
+          {/* ch 단위는 라틴 기준 — 한글은 글자폭이 넓어 같은 ch 가 더 좁게 줄바꿈된다. ko 는 넉넉히. */}
+          <p className={cn("mt-5 text-pretty text-lg leading-relaxed text-muted", locale === "ko" ? "max-w-[26rem]" : "max-w-[34ch]")}>
             {h.bodyLead} <b className="font-semibold text-ink">{h.bodyBold}</b> {h.bodyTail}
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
@@ -167,7 +168,7 @@ export function Features({ dict, locale }: SectionProps) {
         <span className="font-mono text-[12.5px] font-semibold uppercase tracking-[0.06em] text-accent">
           {dict.features.label}
         </span>
-        <h2 className="mt-3 max-w-[16ch] text-balance text-3xl font-bold leading-tight tracking-tight text-ink sm:text-[38px]">
+        <h2 className={cn("mt-3 text-balance text-3xl font-bold leading-tight tracking-tight text-ink sm:text-[38px]", locale === "ko" ? "max-w-[24ch]" : "max-w-[16ch]")}>
           {dict.features.heading}
         </h2>
 

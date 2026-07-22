@@ -18,7 +18,7 @@ describe("랜딩 페이지 (#16)", () => {
     expect(screen.getByText(/Stop hand-rolling cooldowns/)).toBeInTheDocument();
 
     expect(
-      screen.getByRole("heading", { name: /Reputation, cooling, and isolation — solved\./ }),
+      screen.getByRole("heading", { name: /Bad resources step aside — you just use the healthy ones\./ }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: /Built for real automation infrastructure\./ }),
