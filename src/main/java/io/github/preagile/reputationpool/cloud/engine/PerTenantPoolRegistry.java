@@ -12,6 +12,8 @@ import io.github.preagile.reputationpool.core.pool.WeightedRandomSelectionStrate
 import io.github.preagile.reputationpool.core.port.EventSink;
 import io.github.preagile.reputationpool.core.port.ResourceStore;
 import io.github.preagile.reputationpool.grpc.CompositeEventSink;
+import io.github.preagile.reputationpool.grpc.EventBroadcaster;
+import io.github.preagile.reputationpool.persistence.PostgresAuditTrail;
 import java.time.Clock;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -29,12 +31,14 @@ import java.util.random.RandomGenerator;
  * {@link SinglePoolTenantRegistry} shared one pool across every tenant, which was correct only for a
  * single tenant.
  *
- * <p><b>What is per-tenant vs shared.</b> Each tenant gets its own pool (isolated in-memory state) and
- * its own store (isolated persisted rows, keyed by {@code pool_id}). The {@code clock}, the pool
- * {@code EventSink} (the gRPC broadcaster + audit trail fan-out), and the audit trail itself are
- * <em>shared</em> — event-stream isolation (so one tenant's subscriber never sees another's events) is
- * deliberately deferred to a follow-up, as is per-tenant audit. Only pool state and lease decisions are
- * isolated here.
+ * <p><b>What is per-tenant vs shared.</b> Each tenant gets its own pool (isolated in-memory state), its
+ * own store (isolated persisted rows, keyed by {@code pool_id}), and — since #29 — its own event stream
+ * and audit history: {@link #build} joins the broadcaster's and audit trail's {@code forPool(tenantId)}
+ * views into the tenant's sink, so one tenant's live gRPC subscriber never sees another's events (paired
+ * with cloud's {@code subscriptionPoolId()} override on the advisor service, which scopes each
+ * subscription to its tenant) and one tenant's audit rows are written under its own {@code pool_id}. The
+ * {@code clock} and the global fan-out sink (alerting + metrics, which aggregate across tenants) are the
+ * only <em>shared</em> pieces.
  *
  * <p><b>The store seam.</b> Stores are made by an injected {@code storeFactory} (tenant id &rarr;
  * store), so the composition root owns the concrete {@code PostgresResourceStore(dataSource, clock,
@@ -57,6 +61,8 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
     private final ConcurrentHashMap<String, ManagedPool> pools = new ConcurrentHashMap<>();
 
     private final Clock clock;
+    private final EventBroadcaster broadcaster;
+    private final PostgresAuditTrail auditTrail;
     private final EventSink sharedSink;
     private final ReputationPoolProperties properties;
     private final TenantRepository tenantRepository;
@@ -65,12 +71,16 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
 
     public PerTenantPoolRegistry(
             Clock clock,
+            EventBroadcaster broadcaster,
+            PostgresAuditTrail auditTrail,
             EventSink sharedSink,
             ReputationPoolProperties properties,
             TenantRepository tenantRepository,
             Function<String, ResourceStore> storeFactory,
             MeterRecorder meterRecorder) {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.broadcaster = Objects.requireNonNull(broadcaster, "broadcaster must not be null");
+        this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
         this.sharedSink = Objects.requireNonNull(sharedSink, "sharedSink must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.tenantRepository = Objects.requireNonNull(tenantRepository, "tenantRepository must not be null");
@@ -122,11 +132,16 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
                 properties.engine().windowSize(),
                 properties.engine().coolAfter(),
                 properties.engine().recoverAfter());
-        // Fan out to the shared sink (gRPC stream + audit) plus a tenant-bound metering sink, so this
-        // tenant's granted leases are counted against this tenant (issue #10) without a tenant field on
-        // the event — the tenant is fixed by which pool emitted it.
-        EventSink tenantSink =
-                new CompositeEventSink(List.of(sharedSink, new TenantMeteringSink(tenantId, meterRecorder)));
+        // Fan out to this tenant's own event stream and audit history (the broadcaster's and audit
+        // trail's forPool(tenantId) views, #29), the global fan-out sink (alerting + metrics), and a
+        // tenant-bound metering sink. The tenant is fixed by which pool emitted — no tenant field on the
+        // event — so a live gRPC subscriber (scoped by the advisor service's subscriptionPoolId() override)
+        // only sees its own tenant's events and audit rows land under its pool_id.
+        EventSink tenantSink = new CompositeEventSink(List.of(
+                broadcaster.forPool(tenantId),
+                auditTrail.forPool(tenantId),
+                sharedSink,
+                new TenantMeteringSink(tenantId, meterRecorder)));
         ResourcePool pool = new ResourcePool(
                 engine,
                 new WeightedRandomSelectionStrategy(),
