@@ -135,4 +135,33 @@ class ControlPlaneSecurityTest {
                         .content("{\"username\":\"admin\",\"password\":\"wrong\"}"))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    @DisplayName("자기 테넌트(default) 단건 조회는 → 200 으로 허용한다")
+    void getOwnTenant_is200() throws Exception {
+        org.mockito.Mockito.when(tenants.findById("default"))
+                .thenReturn(java.util.Optional.of(new io.github.preagile.reputationpool.cloud.tenant.Tenant(
+                        "default", "default", "active", java.time.Instant.now())));
+        String token = tokenService
+                .issueToken("admin", "s3cret-password")
+                .orElseThrow()
+                .token();
+
+        mvc.perform(get("/api/tenants/default").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("다른 테넌트 단건 조회는 → 404 가 아니라 403 으로 거부한다(존재 비노출)")
+    void getOtherTenant_is403() throws Exception {
+        String token = tokenService
+                .issueToken("admin", "s3cret-password")
+                .orElseThrow()
+                .token();
+
+        mvc.perform(get("/api/tenants/other").header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        // 스코프 검사가 존재 검사보다 먼저이므로 repository 는 건드리지 않는다.
+        org.mockito.Mockito.verify(tenants, org.mockito.Mockito.never()).findById(org.mockito.ArgumentMatchers.any());
+    }
 }
