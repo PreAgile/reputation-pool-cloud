@@ -7,6 +7,8 @@ import static org.mockito.Mockito.mock;
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.tenant.Tenant;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
+import io.github.preagile.reputationpool.core.domain.Context;
+import io.github.preagile.reputationpool.core.domain.Outcome;
 import io.github.preagile.reputationpool.core.domain.PoolSnapshot;
 import io.github.preagile.reputationpool.core.domain.ResourceId;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
@@ -70,7 +72,8 @@ class PoolLifecycleTest {
                 new ReputationPoolProperties.Engine(10, 2, 2),
                 new ReputationPoolProperties.Audit(Duration.ofHours(1), retention),
                 new ReputationPoolProperties.Metering(Duration.ofMinutes(1)),
-                new ReputationPoolProperties.Score(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofHours(1)));
+                new ReputationPoolProperties.Score(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofHours(1)),
+                new ReputationPoolProperties.Limits(100_000, 500_000));
     }
 
     private PerTenantPoolRegistry registry(TenantRepository repository) {
@@ -86,7 +89,16 @@ class PoolLifecycleTest {
     }
 
     private PoolLifecycle lifecycle(PerTenantPoolRegistry registry, Duration retention, AuditPurger purger) {
-        return new PoolLifecycle(registry, purger, clock, propsWithRetention(retention));
+        return lifecycle(
+                registry,
+                retention,
+                purger,
+                new GlobalResourceBudget(new ReputationPoolProperties.Limits(100_000, 500_000)));
+    }
+
+    private PoolLifecycle lifecycle(
+            PerTenantPoolRegistry registry, Duration retention, AuditPurger purger, GlobalResourceBudget budget) {
+        return new PoolLifecycle(registry, purger, clock, propsWithRetention(retention), budget);
     }
 
     private static TenantRepository tenants(String... ids) {
@@ -142,6 +154,35 @@ class PoolLifecycleTest {
 
             assertThat(lifecycle.isRunning()).isTrue();
             assertThat(registry.poolFor("good").snapshot().registered()).containsExactly(proxy("g1"));
+        }
+
+        @Test
+        @DisplayName("각 테넌트 스토어에 리소스·셀이 든 스냅샷이 있으면 → start 후 전역 예산 카운터에 복원분 합계가 반영된다")
+        void start_accountsRestoredResourcesAndCellsIntoTheGlobalBudget() {
+            // 재시작 복원분이 예산 카운터에 반영돼야 OOM 방벽이 재시작마다 리셋되지 않는다.
+            PerTenantPoolRegistry registry = registry(tenants("tenant-a", "tenant-b"));
+            stores.put("tenant-a", RecordingStore.loadedWith(snapshotWith(2, 3)));
+            stores.put("tenant-b", RecordingStore.loadedWith(snapshotWith(1, 4)));
+            GlobalResourceBudget budget =
+                    new GlobalResourceBudget(new ReputationPoolProperties.Limits(100_000, 500_000));
+
+            lifecycle(registry, Duration.ZERO, cutoff -> 0, budget).start();
+
+            assertThat(budget.resourceCount()).isEqualTo(3); // 2 + 1
+            assertThat(budget.cellCount()).isEqualTo(7); // 3 + 4
+        }
+
+        @Test
+        @DisplayName("한도를 초과하는 스냅샷을 복원하면 → 복원분은 그대로 반영되고 이후 신규 예약은 전부 거부된다")
+        void start_restoringBeyondCeiling_refusesAllSubsequentReservations() {
+            PerTenantPoolRegistry registry = registry(tenants("tenant-a"));
+            stores.put("tenant-a", RecordingStore.loadedWith(snapshotWith(5, 0)));
+            GlobalResourceBudget budget = new GlobalResourceBudget(new ReputationPoolProperties.Limits(3, 10));
+
+            lifecycle(registry, Duration.ZERO, cutoff -> 0, budget).start();
+
+            assertThat(budget.resourceCount()).isEqualTo(5); // 상한(3)을 넘겨도 복원분은 그대로 반영
+            assertThat(budget.tryReserveResource()).isFalse(); // 이미 초과이므로 신규는 거부
         }
     }
 
@@ -222,15 +263,36 @@ class PoolLifecycleTest {
         }
     }
 
-    private PoolSnapshot snapshotWith(ResourceId resource) {
-        ResourcePool pool = new ResourcePool(
+    private ResourcePool newPool() {
+        return new ResourcePool(
                 new ReputationEngine(new AdaptiveCooldownPolicy(), 10, 2, 2),
                 new WeightedRandomSelectionStrategy(),
                 event -> {},
                 clock,
                 new Random(42),
                 Duration.ofSeconds(30));
+    }
+
+    private PoolSnapshot snapshotWith(ResourceId resource) {
+        ResourcePool pool = newPool();
         pool.register(resource);
+        return pool.snapshot();
+    }
+
+    /**
+     * Builds a snapshot carrying exactly {@code resources} registered resources and {@code cells}
+     * reputation cells. Cells are created with {@code report(...)} (not {@code acquire}, which persists
+     * none) on distinct {@code (resource × GLOBAL)} keys, so each report yields one distinct cell; those
+     * reported ids are separate from the registered ids, keeping the two counts independent.
+     */
+    private PoolSnapshot snapshotWith(int resources, int cells) {
+        ResourcePool pool = newPool();
+        for (int i = 0; i < resources; i++) {
+            pool.register(proxy("r" + i));
+        }
+        for (int i = 0; i < cells; i++) {
+            pool.report(proxy("c" + i), Context.GLOBAL, new Outcome.Success(Duration.ZERO));
+        }
         return pool.snapshot();
     }
 
