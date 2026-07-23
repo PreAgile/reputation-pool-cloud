@@ -2,6 +2,7 @@ package io.github.preagile.reputationpool.cloud.engine;
 
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.engine.PerTenantPoolRegistry.ManagedPool;
+import io.github.preagile.reputationpool.core.domain.PoolSnapshot;
 import java.time.Clock;
 import java.time.Duration;
 import org.slf4j.Logger;
@@ -42,34 +43,58 @@ public class PoolLifecycle implements SmartLifecycle {
     private final AuditPurger auditPurger;
     private final Clock clock;
     private final ReputationPoolProperties properties;
+    private final GlobalResourceBudget budget;
 
     private volatile boolean running = false;
 
     public PoolLifecycle(
-            PerTenantPoolRegistry registry, AuditPurger auditPurger, Clock clock, ReputationPoolProperties properties) {
+            PerTenantPoolRegistry registry,
+            AuditPurger auditPurger,
+            Clock clock,
+            ReputationPoolProperties properties,
+            GlobalResourceBudget budget) {
         this.registry = registry;
         this.auditPurger = auditPurger;
         this.clock = clock;
         this.properties = properties;
+        this.budget = budget;
     }
 
     /**
      * Rehydrates every known tenant's pool from its last checkpoint, before any traffic. Each tenant is
      * built (materializing its pool + store) and restored independently, so one tenant's failed load
      * never blocks the rest. A tenant with no saved snapshot is a first run — nothing to restore.
+     *
+     * <p>The resources and cells restored across all tenants are then folded into the
+     * {@link GlobalResourceBudget} in one pass, so the OOM guard resumes from the real occupancy rather
+     * than zero — otherwise a restart would restore the previous state into the heap yet let the process
+     * admit a full ceiling's worth of new resources on top. The tally reuses the {@code PoolSnapshot} each
+     * {@code load()} already returned (never re-snapshotting the pool), and is applied once after the loop.
      */
     @Override
     public void start() {
+        long restoredResources = 0;
+        long restoredCells = 0;
         for (String tenantId : registry.knownTenantIds()) {
             try {
                 ManagedPool managed = registry.manage(tenantId);
-                managed.store().load().ifPresent(managed.pool()::restore);
+                var loaded = managed.store().load();
+                if (loaded.isPresent()) {
+                    PoolSnapshot snapshot = loaded.get();
+                    managed.pool().restore(snapshot);
+                    restoredResources += snapshot.registered().size();
+                    restoredCells += snapshot.cells().size();
+                }
             } catch (RuntimeException e) {
                 log.warn("restore failed for tenant {}; continuing with the other tenants", tenantId, e);
             }
         }
+        budget.accountForExisting(restoredResources, restoredCells);
         running = true;
-        log.info("reputation pools restored and running");
+        log.info(
+                "reputation pools restored and running; accounted {} resources and {} cells into the global budget",
+                restoredResources,
+                restoredCells);
     }
 
     /** Orderly shutdown: one final checkpoint of the now-stable state so a planned restart loses nothing. */

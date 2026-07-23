@@ -93,6 +93,39 @@ class GlobalResourceBudgetTest {
     }
 
     @Test
+    @DisplayName("복원분을 카운터에 반영하면 → 남은 예산(한도-복원분)만큼만 신규 예약이 허용된다")
+    void accountForExistingConsumesBudgetSoOnlyTheRemainderIsReservable() {
+        var budget = new GlobalResourceBudget(new ReputationPoolProperties.Limits(5, 5));
+
+        budget.accountForExisting(3, 4);
+
+        assertThat(budget.resourceCount()).isEqualTo(3);
+        assertThat(budget.cellCount()).isEqualTo(4);
+        // 리소스: 한도 5 중 3이 복원분으로 찼으니 남은 2개만 통과한다.
+        assertThat(budget.tryReserveResource()).isTrue();
+        assertThat(budget.tryReserveResource()).isTrue();
+        assertThat(budget.tryReserveResource()).isFalse();
+        // 셀: 한도 5 중 4가 복원분으로 찼으니 남은 1개만 통과한다.
+        assertThat(budget.tryReserveCell()).isTrue();
+        assertThat(budget.tryReserveCell()).isFalse();
+    }
+
+    @Test
+    @DisplayName("한도를 초과하는 복원분을 반영하면 → 카운트는 그대로 반영되고 이후 신규 예약은 전부 거부된다")
+    void accountForExistingBeyondCeilingReflectsCountAndRefusesNewReservations() {
+        var budget = new GlobalResourceBudget(new ReputationPoolProperties.Limits(2, 2));
+
+        // 복원분은 이미 힙에 있으므로 상한을 넘겨도 그대로 반영한다 — 거부 대상이 아니다.
+        budget.accountForExisting(10, 10);
+
+        assertThat(budget.resourceCount()).isEqualTo(10);
+        assertThat(budget.cellCount()).isEqualTo(10);
+        // 이미 상한을 넘었으므로 이후 신규 예약은 리소스·셀 모두 거부된다.
+        assertThat(budget.tryReserveResource()).isFalse();
+        assertThat(budget.tryReserveCell()).isFalse();
+    }
+
+    @Test
     @DisplayName("여러 스레드가 마지막 남은 예산 한 자리를 동시에 다투면 → 정확히 예산만큼만 성공한다")
     void concurrentReservationsNeverExceedTheBudget() throws InterruptedException {
         long max = 20;

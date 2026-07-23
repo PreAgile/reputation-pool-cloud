@@ -37,6 +37,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * traffic through unconditionally until the ceiling is actually reached, and only the excess is refused.
  * Reservation is one atomic compare-and-set loop, so two threads racing for the last unit of budget can
  * never both succeed.
+ *
+ * <p><b>Scope is one JVM process, not the whole deployment.</b> "Global" here means "across every tenant
+ * in <em>this</em> process", not "across the whole service". The counters are plain {@link AtomicLong}s
+ * on this process's heap and this is a single Spring bean (one per {@code ApplicationContext} = one per
+ * JVM), so they coordinate the threads of one process only — another process, even on the same host, has
+ * its own independent instance that cannot see these. This is correct <em>because the deployment is
+ * currently single-instance</em> (one {@code app} container in {@code compose.yaml}); with that topology
+ * "this JVM" and "the whole service" are the same thing. If the service is ever scaled to multiple
+ * instances, each would enforce the configured ceiling <em>independently</em>, so the effective budget
+ * would multiply by the instance count (e.g. 3 instances → up to 3× the intended ceiling) — the same
+ * instance-local-state limitation issue #85 raises for the pool as a whole. A true cross-instance budget
+ * would need external state (Redis/Postgres) or tenant sharding; that is deferred to #85, and this class
+ * must not be assumed correct under horizontal scale-out until then.
  */
 public final class GlobalResourceBudget {
 
@@ -75,6 +88,23 @@ public final class GlobalResourceBudget {
      */
     public boolean tryReserveCell() {
         return tryReserve(cellCount, maxCells);
+    }
+
+    /**
+     * Folds the resource/cell counts of already-existing state — the pools rehydrated from their last
+     * checkpoint on restart — into the running totals, so the budget resumes from the real occupancy
+     * instead of zero. Without this, a restart would restore (say) 100 resources into the heap while the
+     * counters started at 0, letting the process admit a full ceiling's worth of new resources on top —
+     * the OOM guard would silently reset on every restart.
+     *
+     * <p>The restored amount is added <em>unconditionally</em>, even past the ceiling: those resources
+     * and cells are already on the heap, so refusing them here would be meaningless — the point is to make
+     * the counters honest so subsequent <em>new</em> reservations are naturally refused until usage falls
+     * back under the ceiling. Call once, after restore and before serving traffic.
+     */
+    public void accountForExisting(long resources, long cells) {
+        resourceCount.addAndGet(resources);
+        cellCount.addAndGet(cells);
     }
 
     /** The current global registered-resource count, summed across every tenant. For tests/observability. */
