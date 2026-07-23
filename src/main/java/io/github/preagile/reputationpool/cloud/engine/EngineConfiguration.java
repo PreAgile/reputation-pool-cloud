@@ -117,6 +117,17 @@ public class EngineConfiguration {
      * this registry; the control plane (#11) creates tenants via
      * {@link TenantPoolRegistry#onboard(String)}.
      */
+    /**
+     * The shared-JVM global resource budget (issue #84): one counter pair for the whole process, so the
+     * gRPC seam can admit or refuse a call before it grows any tenant's registered-resource or
+     * reputation-cell count past the configured ceiling. See {@link GlobalResourceBudget}'s javadoc for
+     * why this is one global running total rather than a per-tenant quota.
+     */
+    @Bean
+    GlobalResourceBudget globalResourceBudget(ReputationPoolProperties props) {
+        return new GlobalResourceBudget(props.limits());
+    }
+
     @Bean
     PerTenantPoolRegistry tenantPoolRegistry(
             Clock clock,

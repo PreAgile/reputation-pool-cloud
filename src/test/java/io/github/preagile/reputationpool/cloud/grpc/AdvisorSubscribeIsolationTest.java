@@ -2,6 +2,8 @@ package io.github.preagile.reputationpool.cloud.grpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
+import io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget;
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
 import io.github.preagile.reputationpool.core.domain.PoolEvent;
@@ -87,9 +89,13 @@ class AdvisorSubscribeIsolationTest {
         }
     };
 
+    /** subscribeEvents never routes through register()/report(), so any budget works here. */
+    private final GlobalResourceBudget budget =
+            new GlobalResourceBudget(new ReputationPoolProperties.Limits(1_000, 1_000));
+
     @BeforeEach
     void startServer() throws Exception {
-        ReputationAdvisorService service = new ReputationAdvisorService(registry, broadcaster);
+        ReputationAdvisorService service = new ReputationAdvisorService(registry, broadcaster, budget);
         String name = InProcessServerBuilder.generateName();
         server = InProcessServerBuilder.forName(name)
                 .directExecutor()
