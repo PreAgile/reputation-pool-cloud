@@ -9,7 +9,7 @@ import java.time.Instant;
  *
  * @param id the stable tenant identifier, also the {@code api_key.tenant_id} and pool namespace key
  * @param name human-readable label
- * @param status lifecycle state (e.g. {@code active})
+ * @param status lifecycle state (see {@link TenantStatus})
  * @param createdAt when the tenant was created
  */
-public record Tenant(String id, String name, String status, Instant createdAt) {}
+public record Tenant(String id, String name, TenantStatus status, Instant createdAt) {}

@@ -62,6 +62,11 @@ class AdvisorSubscribeIsolationTest {
         public void onboard(String tenantId) {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public void evict(String tenantId) {
+            throw new UnsupportedOperationException();
+        }
     };
 
     /** The one broadcaster wired into both the service (subscription registry) and the per-tenant emit views. */

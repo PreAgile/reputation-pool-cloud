@@ -80,8 +80,16 @@ class EngineWiringIT {
     @Test
     @DisplayName("두 테넌트가 각자 체크포인트를 저장하면 → 한쪽 저장이 다른 쪽 행을 지우지 않고 pool_id 로 격리된다")
     void twoTenantsCheckpointWithoutErasingEachOther() {
-        tenantRepository.create(new Tenant("tenant-a", "Tenant A", "active", Instant.parse("2026-07-17T00:00:00Z")));
-        tenantRepository.create(new Tenant("tenant-b", "Tenant B", "active", Instant.parse("2026-07-17T00:00:00Z")));
+        tenantRepository.create(new Tenant(
+                "tenant-a",
+                "Tenant A",
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                Instant.parse("2026-07-17T00:00:00Z")));
+        tenantRepository.create(new Tenant(
+                "tenant-b",
+                "Tenant B",
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                Instant.parse("2026-07-17T00:00:00Z")));
 
         ResourceId proxyA = new ResourceId(ResourceKind.PROXY, "a-proxy");
         ResourceId proxyB = new ResourceId(ResourceKind.ACCOUNT, "b-account");

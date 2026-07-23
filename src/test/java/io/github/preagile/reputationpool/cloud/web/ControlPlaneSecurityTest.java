@@ -76,6 +76,9 @@ class ControlPlaneSecurityTest {
     @MockitoBean
     private TenantPoolRegistry registry;
 
+    @MockitoBean
+    private io.github.preagile.reputationpool.cloud.tenant.TenantLifecycleService tenantLifecycleService;
+
     // Required only so SecurityConfiguration's ApiKeyManagementService bean can be constructed.
     @MockitoBean
     private DataSource dataSource;
@@ -141,7 +144,10 @@ class ControlPlaneSecurityTest {
     void getOwnTenant_is200() throws Exception {
         org.mockito.Mockito.when(tenants.findById("default"))
                 .thenReturn(java.util.Optional.of(new io.github.preagile.reputationpool.cloud.tenant.Tenant(
-                        "default", "default", "active", java.time.Instant.now())));
+                        "default",
+                        "default",
+                        io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                        java.time.Instant.now())));
         String token = tokenService
                 .issueToken("admin", "s3cret-password")
                 .orElseThrow()

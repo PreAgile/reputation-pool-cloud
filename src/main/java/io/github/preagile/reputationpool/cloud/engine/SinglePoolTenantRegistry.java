@@ -26,4 +26,10 @@ public final class SinglePoolTenantRegistry implements TenantPoolRegistry {
     public void onboard(String tenantId) {
         // No-op: the single shared pool already serves every tenant. #9b makes this create a pool.
     }
+
+    @Override
+    public void evict(String tenantId) {
+        // No-op: there are no per-tenant pools to drop under the single shared pool. The real
+        // per-tenant registry removes the tenant's pool; here every tenant shares one pool that must stay.
+    }
 }

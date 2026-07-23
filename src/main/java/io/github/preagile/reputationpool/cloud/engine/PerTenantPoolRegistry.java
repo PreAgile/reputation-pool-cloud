@@ -98,6 +98,16 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
         manage(tenantId);
     }
 
+    @Override
+    public void evict(String tenantId) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        // Remove the pool+store pair so subsequent poolFor/manage calls will not resurrect it during a
+        // delete. Dropping the reference is enough — the pool holds only in-memory state and the store is
+        // a thin JDBC adapter with no resources to release; the durable rows are removed separately by the
+        // lifecycle's DB cascade.
+        pools.remove(tenantId);
+    }
+
     /** Builds (idempotently) and returns the managed pool+store pair for {@code tenantId}. */
     public ManagedPool manage(String tenantId) {
         Objects.requireNonNull(tenantId, "tenantId must not be null");

@@ -122,7 +122,11 @@ class ApiKeyControlPlaneScopeTest {
     @DisplayName("토큰 테넌트(default)와 같은 테넌트로 키를 발급하면 → 201 로 정상 발급한다(해피패스 보존)")
     void issueForOwnTenant_is201() throws Exception {
         when(tenants.findById("default"))
-                .thenReturn(Optional.of(new Tenant("default", "default", "active", Instant.now())));
+                .thenReturn(Optional.of(new Tenant(
+                        "default",
+                        "default",
+                        io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                        Instant.now())));
         when(apiKeys.issue("default", null))
                 .thenReturn(new IssuedApiKey("id-1", "rp_rawtoken", null, "rp_rawtok", Instant.now()));
         mvc.perform(post("/api/tenants/default/api-keys").header("Authorization", bearer()))
@@ -133,7 +137,11 @@ class ApiKeyControlPlaneScopeTest {
     @DisplayName("토큰 테넌트(default)와 같은 테넌트의 키 목록을 조회하면 → 200 으로 반환한다(해피패스 보존)")
     void listForOwnTenant_is200() throws Exception {
         when(tenants.findById("default"))
-                .thenReturn(Optional.of(new Tenant("default", "default", "active", Instant.now())));
+                .thenReturn(Optional.of(new Tenant(
+                        "default",
+                        "default",
+                        io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                        Instant.now())));
         when(apiKeys.list("default")).thenReturn(List.of());
         mvc.perform(get("/api/tenants/default/api-keys").header("Authorization", bearer()))
                 .andExpect(status().isOk());

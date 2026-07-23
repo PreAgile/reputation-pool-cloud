@@ -21,4 +21,11 @@ public interface TenantPoolRegistry {
 
     /** Ensures a pool exists for a tenant created at runtime. Idempotent. */
     void onboard(String tenantId);
+
+    /**
+     * Drops the tenant's in-memory pool so no further traffic can be routed to it — the first step of a
+     * tenant delete (issue #83), run before the tenant's durable rows are removed. Idempotent: evicting
+     * an unknown or never-built tenant is a no-op.
+     */
+    void evict(String tenantId);
 }

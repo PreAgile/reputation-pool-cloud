@@ -18,4 +18,16 @@ public interface TenantRepository {
     List<Tenant> findAll();
 
     Optional<Tenant> findById(String id);
+
+    /** Sets a tenant's lifecycle status (suspend/reactivate). No-op if the id is unknown. */
+    void updateStatus(String id, TenantStatus status);
+
+    /**
+     * Hard-deletes every row scoped to {@code id} — the cloud-owned tables ({@code api_key},
+     * {@code usage_meter}, {@code score_sample}) and the upstream pool tables (keyed by
+     * {@code pool_id = id}) — and leaves the {@code tenant} row as a {@code DELETED} tombstone, all in
+     * one transaction. Either the whole cascade commits or none of it does (no partial deletion), so a
+     * failure mid-way rolls back rather than stranding a half-deleted tenant.
+     */
+    void deleteTenantData(String id);
 }

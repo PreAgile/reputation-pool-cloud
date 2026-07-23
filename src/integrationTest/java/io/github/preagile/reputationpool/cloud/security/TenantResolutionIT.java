@@ -2,6 +2,8 @@ package io.github.preagile.reputationpool.cloud.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
+import io.github.preagile.reputationpool.cloud.tenant.TenantStatus;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import javax.sql.DataSource;
@@ -45,6 +47,9 @@ class TenantResolutionIT {
     @Autowired
     private DataSource dataSource;
 
+    @Autowired
+    private TenantRepository tenants;
+
     @Test
     @DisplayName("시작 시 시드된 env API 키를 조회하면 → default 테넌트로 해석된다")
     void seededEnvKeyResolvesToDefaultTenant() {
@@ -56,6 +61,24 @@ class TenantResolutionIT {
     @DisplayName("등록되지 않은 키를 조회하면 → 어떤 테넌트로도 해석되지 않는다(fail closed)")
     void unknownKeyResolvesToNothing() {
         assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("not-a-key"))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("테넌트를 정지하면 → 유효·미폐기 키여도 해석되지 않고(gRPC 차단), 재활성화하면 → 다시 해석된다(#83)")
+    void suspendingTenantBlocksKeyResolutionAndReactivatingRestoresIt() {
+        // default 테넌트의 시드 키는 처음엔 해석된다(active).
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("integration-key")))
+                .contains("default");
+
+        // 정지하면 키가 유효·미폐기여도 status='active' 조건에서 걸러져 아무 테넌트로도 해석되지 않는다.
+        tenants.updateStatus("default", TenantStatus.SUSPENDED);
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("integration-key")))
+                .isEmpty();
+
+        // 재활성화하면 접근이 복구된다.
+        tenants.updateStatus("default", TenantStatus.ACTIVE);
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("integration-key")))
+                .contains("default");
     }
 
     @Test

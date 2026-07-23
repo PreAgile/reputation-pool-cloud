@@ -1,5 +1,6 @@
 package io.github.preagile.reputationpool.cloud.tenant;
 
+import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
 import javax.sql.DataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,5 +16,10 @@ public class TenantConfiguration {
     @Bean
     TenantRepository tenantRepository(DataSource dataSource) {
         return new JdbcTenantRepository(dataSource);
+    }
+
+    @Bean
+    TenantLifecycleService tenantLifecycleService(TenantRepository tenantRepository, TenantPoolRegistry registry) {
+        return new TenantLifecycleService(tenantRepository, registry);
     }
 }
