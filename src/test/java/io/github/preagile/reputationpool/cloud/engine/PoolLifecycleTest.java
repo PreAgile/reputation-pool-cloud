@@ -70,7 +70,8 @@ class PoolLifecycleTest {
                 new ReputationPoolProperties.Engine(10, 2, 2),
                 new ReputationPoolProperties.Audit(Duration.ofHours(1), retention),
                 new ReputationPoolProperties.Metering(Duration.ofMinutes(1)),
-                new ReputationPoolProperties.Score(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofHours(1)));
+                new ReputationPoolProperties.Score(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofHours(1)),
+                new ReputationPoolProperties.Limits(100_000, 500_000));
     }
 
     private PerTenantPoolRegistry registry(TenantRepository repository) {

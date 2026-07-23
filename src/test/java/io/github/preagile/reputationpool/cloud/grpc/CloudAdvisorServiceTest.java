@@ -2,6 +2,8 @@ package io.github.preagile.reputationpool.cloud.grpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
+import io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget;
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
 import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
@@ -94,9 +96,13 @@ class CloudAdvisorServiceTest {
         }
     };
 
+    /** Generous enough that no test here ever trips the global budget — that is AdvisorGlobalBudgetTest's job. */
+    private final GlobalResourceBudget budget =
+            new GlobalResourceBudget(new ReputationPoolProperties.Limits(1_000, 1_000));
+
     @BeforeEach
     void startServer() throws Exception {
-        ReputationAdvisorService service = new ReputationAdvisorService(registry, new EventBroadcaster());
+        ReputationAdvisorService service = new ReputationAdvisorService(registry, new EventBroadcaster(), budget);
         String name = InProcessServerBuilder.generateName();
         server = InProcessServerBuilder.forName(name)
                 .directExecutor()

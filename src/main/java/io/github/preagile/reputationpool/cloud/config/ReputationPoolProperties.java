@@ -15,6 +15,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param audit audit-trail retention configuration
  * @param metering usage-metering rollup configuration
  * @param score reputation-score time-series sampling configuration
+ * @param limits the shared-JVM global resource budget (issue #84)
  */
 @ConfigurationProperties("reputation-pool")
 public record ReputationPoolProperties(
@@ -23,7 +24,8 @@ public record ReputationPoolProperties(
         @DefaultValue Engine engine,
         @DefaultValue Audit audit,
         @DefaultValue Metering metering,
-        @DefaultValue Score score) {
+        @DefaultValue Score score,
+        @DefaultValue Limits limits) {
 
     /**
      * Reputation-engine tuning. Defaults mirror the L1 adapter demos and the reference server: window
@@ -82,6 +84,51 @@ public record ReputationPoolProperties(
         /** Whether age-based purging is turned on (a positive retention was configured). */
         public boolean purgeEnabled() {
             return retention != null && !retention.isZero() && !retention.isNegative();
+        }
+    }
+
+    /**
+     * The shared-JVM global resource budget (issue #84). The pool is in-memory and every tenant shares
+     * one JVM ({@link io.github.preagile.reputationpool.cloud.engine.PerTenantPoolRegistry}), so an
+     * unbounded tenant can grow registered resources or reputation cells until the shared heap OOMs and
+     * every tenant goes down together (blast radius = all tenants).
+     *
+     * <p><b>Deliberately global, not per-tenant.</b> This is the sum across <em>every</em> tenant, not a
+     * per-tenant ceiling: the requirement is that a single active tenant can use 100% of the JVM's
+     * capacity, and several tenants share it dynamically as they show up — a fixed per-tenant cap would
+     * throttle a lone tenant even when nothing else is competing for the budget. There is intentionally
+     * no per-tenant field here; {@link io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget}
+     * only ever checks the running grand total against these two numbers.
+     *
+     * <p><b>These defaults are an unmeasured hypothesis, not a validated capacity figure</b> — no
+     * production load test backs {@code 100_000} / {@code 500_000} yet. They exist so the budget is on by
+     * default rather than unset, and are meant to be tuned once real per-resource/per-cell memory
+     * footprint is observed in production (mirroring how {@link Engine}'s defaults mirror the reference
+     * rather than a measured optimum).
+     *
+     * @param maxResources the global ceiling on registered resources summed across every tenant
+     * @param maxCells the global ceiling on reputation cells ({@code resource × context} pairs) summed
+     *     across every tenant
+     */
+    public record Limits(
+            @DefaultValue("100000") long maxResources,
+            @DefaultValue("500000") long maxCells) {
+
+        /**
+         * Fail fast on misconfiguration, the same posture as {@link
+         * io.github.preagile.reputationpool.cloud.security.LoginThrottleProperties}: a non-positive
+         * budget is never a valid ceiling (zero or negative would refuse every tenant instantly), so
+         * reject it at boot rather than silently self-DoS-ing every tenant on the first call.
+         *
+         * @throws IllegalArgumentException if {@code maxResources} or {@code maxCells} is not positive
+         */
+        public Limits {
+            if (maxResources <= 0) {
+                throw new IllegalArgumentException("limits.max-resources must be > 0, but was " + maxResources);
+            }
+            if (maxCells <= 0) {
+                throw new IllegalArgumentException("limits.max-cells must be > 0, but was " + maxCells);
+            }
         }
     }
 }
