@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,6 +47,7 @@ public class TenantController {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
+    // 운영자 전역 행위 — 대상 테넌트가 아직 존재하지 않으므로 토큰 스코프로 좁힐 수 없다. per-tenant 스코프/역할 분리는 #31.
     @PostMapping
     public ResponseEntity<Tenant> create(@RequestBody CreateTenantRequest request) {
         String id = request.id() == null ? "" : request.id().trim();
@@ -75,13 +78,16 @@ public class TenantController {
         return ResponseEntity.created(URI.create("/api/tenants/" + id)).body(tenant);
     }
 
+    // 운영자 전역 행위 — 여러 테넌트를 한 번에 다루므로 단일 토큰 스코프로 좁힐 수 없다. per-tenant 스코프/역할 분리는 #31.
     @GetMapping
     public List<Tenant> list() {
         return tenants.findAll();
     }
 
     @GetMapping("/{id}")
-    public Tenant get(@PathVariable String id) {
+    public Tenant get(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
+        // 스코프 검사를 존재 검사(404)보다 먼저 — 타 테넌트를 겨냥하면 존재 여부와 무관하게 403 (issue #82, 존재 비노출).
+        AdminTenant.requireScope(jwt, id);
         return tenants.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant not found"));
     }

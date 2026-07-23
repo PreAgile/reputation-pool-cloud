@@ -73,10 +73,11 @@ class ControlPlaneIT {
     }
 
     @Test
-    @DisplayName("테넌트를 생성·조회·목록하면 성공하고, 같은 id 를 중복 생성하면 → 409 Conflict 로 거부한다")
-    void tenantCrud_andDuplicateIsConflict() {
+    @DisplayName("테넌트 생성·목록은 운영자 전역 행위로 되고 중복은 409, 단건 조회는 토큰 테넌트로 스코프되어 자기 테넌트는 200·타 테넌트는 403 이다(#82)")
+    void tenantCrud_andScopedSingleGet() {
         HttpHeaders auth = authHeaders();
 
+        // create·list 는 운영자 전역 행위(#31) — 토큰 테넌트(default)와 다른 acme 도 만들 수 있다.
         ResponseEntity<Map> created = rest.exchange(
                 "/api/tenants", HttpMethod.POST, json(Map.of("id", "acme", "name", "ACME Inc"), auth), Map.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -86,37 +87,46 @@ class ControlPlaneIT {
                 rest.exchange("/api/tenants", HttpMethod.POST, json(Map.of("id", "acme"), auth), Map.class);
         assertThat(duplicate.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
 
-        ResponseEntity<Map> fetched =
-                rest.exchange("/api/tenants/acme", HttpMethod.GET, new HttpEntity<>(auth), Map.class);
-        assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(fetched.getBody()).containsEntry("id", "acme");
-
         ResponseEntity<List> all = rest.exchange("/api/tenants", HttpMethod.GET, new HttpEntity<>(auth), List.class);
         assertThat(all.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(all.getBody())
                 .anySatisfy(t -> assertThat(((Map<?, ?>) t).get("id")).isEqualTo("acme"));
+
+        // #82: 단건 조회는 토큰 테넌트로 스코프된다. 토큰의 default 테넌트가 존재하도록 보장(이미 있으면 409, 둘 다 OK).
+        ensureTenantExists(auth, "default");
+
+        ResponseEntity<Map> own =
+                rest.exchange("/api/tenants/default", HttpMethod.GET, new HttpEntity<>(auth), Map.class);
+        assertThat(own.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(own.getBody()).containsEntry("id", "default");
+
+        // 토큰 스코프 밖(acme)은 존재하더라도 404 가 아니라 403 — 존재 비노출.
+        ResponseEntity<Map> other =
+                rest.exchange("/api/tenants/acme", HttpMethod.GET, new HttpEntity<>(auth), Map.class);
+        assertThat(other.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
     @DisplayName("API 키를 발급하면 원문 토큰이 resolver 로 테넌트에 매핑되고 목록엔 마스킹만 노출되며, 폐기하면 → 즉시 매핑이 사라지고 재폐기는 404 다")
     void apiKeyLifecycle_issueResolveRevoke() {
         HttpHeaders auth = authHeaders();
-        rest.exchange("/api/tenants", HttpMethod.POST, json(Map.of("id", "keyco"), auth), Map.class);
+        // 키 발급/목록/폐기는 토큰 테넌트로 스코프된다(#82) — 토큰의 default 테넌트로만 다룬다.
+        ensureTenantExists(auth, "default");
 
         // Issue: the raw token is returned exactly once.
         ResponseEntity<Map> issued = rest.exchange(
-                "/api/tenants/keyco/api-keys", HttpMethod.POST, json(Map.of("label", "ci"), auth), Map.class);
+                "/api/tenants/default/api-keys", HttpMethod.POST, json(Map.of("label", "ci"), auth), Map.class);
         assertThat(issued.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         String rawToken = (String) issued.getBody().get("rawToken");
         String keyId = (String) issued.getBody().get("id");
         assertThat(rawToken).startsWith("rp_");
 
         // The gRPC plane's resolver accepts it, mapped to its tenant.
-        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256(rawToken))).contains("keyco");
+        assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256(rawToken))).contains("default");
 
         // Listing never leaks the raw token; it shows the masked prefix.
         ResponseEntity<List> listed =
-                rest.exchange("/api/tenants/keyco/api-keys", HttpMethod.GET, new HttpEntity<>(auth), List.class);
+                rest.exchange("/api/tenants/default/api-keys", HttpMethod.GET, new HttpEntity<>(auth), List.class);
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(listed.getBody()).anySatisfy(k -> {
             @SuppressWarnings("unchecked")
@@ -127,14 +137,26 @@ class ControlPlaneIT {
 
         // Revoke: immediate — the same token no longer resolves.
         ResponseEntity<Void> revoked = rest.exchange(
-                "/api/tenants/keyco/api-keys/" + keyId, HttpMethod.DELETE, new HttpEntity<>(auth), Void.class);
+                "/api/tenants/default/api-keys/" + keyId, HttpMethod.DELETE, new HttpEntity<>(auth), Void.class);
         assertThat(revoked.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256(rawToken))).isEmpty();
 
         // Revoking again (or an unknown id) is a 404.
         ResponseEntity<Map> revokeAgain = rest.exchange(
-                "/api/tenants/keyco/api-keys/" + keyId, HttpMethod.DELETE, new HttpEntity<>(auth), Map.class);
+                "/api/tenants/default/api-keys/" + keyId, HttpMethod.DELETE, new HttpEntity<>(auth), Map.class);
         assertThat(revokeAgain.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("토큰 테넌트(default)와 다른 테넌트의 키 발급을 시도하면 → 존재 여부와 무관하게 403 으로 거부한다(#82 종단 회귀)")
+    void apiKeyIssueForOtherTenant_is403() {
+        HttpHeaders auth = authHeaders();
+        // otherco 는 존재하는 타 테넌트지만, 토큰 스코프 밖이므로 404 가 아니라 403 이어야 한다.
+        ensureTenantExists(auth, "otherco");
+
+        ResponseEntity<Map> issued = rest.exchange(
+                "/api/tenants/otherco/api-keys", HttpMethod.POST, json(Map.of("label", "x"), auth), Map.class);
+        assertThat(issued.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
@@ -207,6 +229,17 @@ class ControlPlaneIT {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
         return headers;
+    }
+
+    /**
+     * Ensures a tenant row exists (tenant creation is an operator-global action, #31). Tolerates 409 so
+     * the shared-context IT can call it across methods without ordering coupling — 201 (created) and 409
+     * (already there) both mean "exists".
+     */
+    private void ensureTenantExists(HttpHeaders auth, String id) {
+        ResponseEntity<Map> created =
+                rest.exchange("/api/tenants", HttpMethod.POST, json(Map.of("id", id), auth), Map.class);
+        assertThat(created.getStatusCode()).isIn(HttpStatus.CREATED, HttpStatus.CONFLICT);
     }
 
     private static HttpEntity<Map<String, Object>> json(Map<String, Object> body, HttpHeaders headers) {
