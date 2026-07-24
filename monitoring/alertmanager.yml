@@ -1,0 +1,39 @@
+# Alertmanager 라우팅 설정 (#76). Prometheus 는 monitoring/alerts.yml 의 SLO 룰을 평가만 하고, firing
+# 알림을 여기로 넘겨(monitoring/prometheus.yml 의 alerting.alertmanagers) grouping/dedup/silence/정비창을
+# 맡긴다. 하이브리드 원칙: 즉시성이 중요한 도메인 이벤트(ResourceBlocklisted)는 여전히 in-app
+# WebhookAlertNotifier(#45)가 담당하고, SLO성 알림은 전부 이 경로로 온다. 역할 분담은
+# monitoring/README.md "알림 라우팅" 참고.
+#
+# 기본은 무통합(zero integrations) blackhole 이다 — 이 레포의 관례(AlertProperties.enabled 기본
+# false, REPUTATION_POOL_ALERTS_ENABLED 기본 false)를 그대로 따른다: 실제 webhook URL 을 주입하지
+# 않으면 `docker compose up` 이 시크릿 없이도 성공하고, 알림은 receiver 에 도달만 하고 아무 데도
+# 나가지 않는다(라우팅 자체는 동작하므로 amtool 로 합성 알림을 주입해 도달을 확인할 수 있다).
+#
+# 실제 webhook 을 붙이는 방법 (운영자):
+#   1. REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL 환경변수(호스트 shell 또는 .env)에 실제 webhook URL 을 설정.
+#   2. compose.yaml 의 alertmanager 서비스가 Compose Spec 의 `secrets: <name>: environment:` 소스로
+#      그 값을 파일(/run/secrets/alertmanager_webhook_url)로 자동 마운트한다 — 커스텀 entrypoint/
+#      envsubst 렌더링이 필요 없다.
+#   3. 아래 url_file 이 그 경로를 가리키므로, alertmanager 프로세스가 시작할 때(그리고 SIGHUP/리로드 시)
+#      파일에서 URL 을 읽는다. 이 파일(alertmanager.yml) 자체에는 시크릿이 전혀 담기지 않는다.
+#   4. 변수가 비어 있으면(로컬 기본) secrets 값은 빈 문자열이 되고, url_file 이 가리키는 파일은
+#      비어 있거나 존재하되 빈 내용이 된다 — Alertmanager 는 그룹핑까지는 하되 POST 는 실패(빈 URL)
+#      하며 로그에만 남고 앱에는 아무 영향이 없다. 즉 "설정 없으면 완전 no-op" 관례를 지킨다.
+#
+# (docker-config-secrets: `environment:` 소스는 Compose Spec 의 최신 기능이며 docker compose v2.24+
+# 에서 지원된다. 커스텀 entrypoint/envsubst 방식은 검토했으나 이 방식이 더 단순해 채택했다 — 이유는
+# PR 본문 참고.)
+route:
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default'
+
+receivers:
+  - name: 'default'
+    # 기본은 무통합(zero integrations) — 완전히 무해한 blackhole. webhook_configs 를 여기 추가하려면
+    # 위 안내대로 REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL 을 설정하고 아래 주석을 해제한다.
+    # webhook_configs:
+    #   - url_file: /run/secrets/alertmanager_webhook_url
+    #     send_resolved: true
