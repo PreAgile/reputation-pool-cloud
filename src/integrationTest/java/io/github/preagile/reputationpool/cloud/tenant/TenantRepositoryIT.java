@@ -83,7 +83,9 @@ class TenantRepositoryIT {
 
         // deleteTenantData executes all ten scoped DELETEs against the real schema in one transaction —
         // its success alone proves every table/column (incl. the upstream pool_id tables) is valid SQL.
-        repository.deleteTenantData("delco");
+        assertThat(repository.deleteTenantData(
+                        "delco", io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE))
+                .isTrue();
 
         assertThat(rowCount("SELECT count(*) FROM api_key WHERE tenant_id = 'delco'"))
                 .isZero();

@@ -84,9 +84,24 @@ class ApiKeyControlPlaneScopeTest {
                         .token();
     }
 
+    /**
+     * TenantStatusFilter(#83)가 모든 인증된 요청마다 호출 토큰(default)의 상태를 확인하므로, 아래 각
+     * "타 테넌트" 테스트가 실제로는 그 필터가 아니라 컨트롤러의 requireScope 로직을 검증하도록 default를
+     * active로 스텁해 필터를 통과시킨다.
+     */
+    private void callerTenantIsActive() {
+        when(tenants.findById("default"))
+                .thenReturn(Optional.of(new Tenant(
+                        "default",
+                        "default",
+                        io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                        Instant.now())));
+    }
+
     @Test
     @DisplayName("토큰 테넌트(default)와 다른 테넌트로 키 발급을 시도하면 → 403 으로 거부하고 발급 서비스를 호출하지 않는다")
     void issueForOtherTenant_is403() throws Exception {
+        callerTenantIsActive();
         mvc.perform(post("/api/tenants/other/api-keys").header("Authorization", bearer()))
                 .andExpect(status().isForbidden());
         verify(apiKeys, never()).issue(any(), any());
@@ -95,6 +110,7 @@ class ApiKeyControlPlaneScopeTest {
     @Test
     @DisplayName("토큰 테넌트(default)와 다른 테넌트의 키 목록을 조회하면 → 403 으로 거부한다")
     void listForOtherTenant_is403() throws Exception {
+        callerTenantIsActive();
         mvc.perform(get("/api/tenants/other/api-keys").header("Authorization", bearer()))
                 .andExpect(status().isForbidden());
         verify(apiKeys, never()).list(any());
@@ -103,6 +119,7 @@ class ApiKeyControlPlaneScopeTest {
     @Test
     @DisplayName("토큰 테넌트(default)와 다른 테넌트의 키 폐기를 시도하면 → 403 으로 거부한다")
     void revokeForOtherTenant_is403() throws Exception {
+        callerTenantIsActive();
         mvc.perform(delete("/api/tenants/other/api-keys/some-key").header("Authorization", bearer()))
                 .andExpect(status().isForbidden());
         verify(apiKeys, never()).revoke(any(), any());
@@ -111,11 +128,13 @@ class ApiKeyControlPlaneScopeTest {
     @Test
     @DisplayName("존재하지 않는 타 테넌트를 겨냥해도 → 404 가 아니라 403 이다(존재 프로빙 차단)")
     void issueForUnknownOtherTenant_is403NotFound() throws Exception {
+        callerTenantIsActive();
         when(tenants.findById("ghost")).thenReturn(Optional.empty());
         mvc.perform(post("/api/tenants/ghost/api-keys").header("Authorization", bearer()))
                 .andExpect(status().isForbidden());
-        // 스코프 검사가 존재 검사보다 먼저이므로 repository 는 건드리지 않는다.
-        verify(tenants, never()).findById(any());
+        // 스코프 검사가 존재 검사보다 먼저이므로 대상(ghost)은 조회하지 않는다 — 필터의 자기 테넌트(default)
+        // 조회와는 별개다.
+        verify(tenants, never()).findById("ghost");
     }
 
     @Test

@@ -86,12 +86,16 @@ class PerTenantPoolRegistryTest {
         }
 
         @Override
-        public void updateStatus(String id, io.github.preagile.reputationpool.cloud.tenant.TenantStatus status) {
+        public boolean compareAndSetStatus(
+                String id,
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus expected,
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus next) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public void deleteTenantData(String id) {
+        public boolean deleteTenantData(
+                String id, io.github.preagile.reputationpool.cloud.tenant.TenantStatus expectedCurrentStatus) {
             throw new UnsupportedOperationException();
         }
     };

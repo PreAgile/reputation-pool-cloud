@@ -71,12 +71,12 @@ class TenantResolutionIT {
                 .contains("default");
 
         // 정지하면 키가 유효·미폐기여도 status='active' 조건에서 걸러져 아무 테넌트로도 해석되지 않는다.
-        tenants.updateStatus("default", TenantStatus.SUSPENDED);
+        tenants.compareAndSetStatus("default", TenantStatus.ACTIVE, TenantStatus.SUSPENDED);
         assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("integration-key")))
                 .isEmpty();
 
         // 재활성화하면 접근이 복구된다.
-        tenants.updateStatus("default", TenantStatus.ACTIVE);
+        tenants.compareAndSetStatus("default", TenantStatus.SUSPENDED, TenantStatus.ACTIVE);
         assertThat(resolver.resolveByKeyHash(ApiKeyHashing.sha256("integration-key")))
                 .contains("default");
     }

@@ -1,5 +1,6 @@
 package io.github.preagile.reputationpool.cloud.tenant;
 
+import io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget;
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
 import javax.sql.DataSource;
 import org.springframework.context.annotation.Bean;
@@ -19,7 +20,8 @@ public class TenantConfiguration {
     }
 
     @Bean
-    TenantLifecycleService tenantLifecycleService(TenantRepository tenantRepository, TenantPoolRegistry registry) {
-        return new TenantLifecycleService(tenantRepository, registry);
+    TenantLifecycleService tenantLifecycleService(
+            TenantRepository tenantRepository, TenantPoolRegistry registry, GlobalResourceBudget budget) {
+        return new TenantLifecycleService(tenantRepository, registry, budget);
     }
 }

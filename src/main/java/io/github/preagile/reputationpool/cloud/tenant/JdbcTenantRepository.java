@@ -21,8 +21,8 @@ public final class JdbcTenantRepository implements TenantRepository {
     private static final String INSERT = "INSERT INTO tenant (id, name, status, created_at) VALUES (?, ?, ?, ?)";
     private static final String SELECT_ALL = "SELECT id, name, status, created_at FROM tenant ORDER BY created_at";
     private static final String SELECT_BY_ID = "SELECT id, name, status, created_at FROM tenant WHERE id = ?";
-    private static final String UPDATE_STATUS = "UPDATE tenant SET status = ? WHERE id = ?";
-    private static final String TOMBSTONE = "UPDATE tenant SET status = 'deleted' WHERE id = ?";
+    private static final String CAS_STATUS = "UPDATE tenant SET status = ? WHERE id = ? AND status = ?";
+    private static final String CAS_TOMBSTONE = "UPDATE tenant SET status = 'deleted' WHERE id = ? AND status = ?";
 
     // Every table scoped to a single tenant. The cloud-owned tables key on tenant_id; the upstream pool
     // tables key on pool_id (= tenant id, per V3/V5). cell_outcome is listed before cell only for clarity
@@ -90,19 +90,20 @@ public final class JdbcTenantRepository implements TenantRepository {
     }
 
     @Override
-    public void updateStatus(String id, TenantStatus status) {
+    public boolean compareAndSetStatus(String id, TenantStatus expected, TenantStatus next) {
         try (Connection connection = dataSource.getConnection();
-                PreparedStatement statement = connection.prepareStatement(UPDATE_STATUS)) {
-            statement.setString(1, status.toDb());
+                PreparedStatement statement = connection.prepareStatement(CAS_STATUS)) {
+            statement.setString(1, next.toDb());
             statement.setString(2, id);
-            statement.executeUpdate();
+            statement.setString(3, expected.toDb());
+            return statement.executeUpdate() > 0;
         } catch (SQLException e) {
             throw new IllegalStateException("tenant status update failed", e);
         }
     }
 
     @Override
-    public void deleteTenantData(String id) {
+    public boolean deleteTenantData(String id, TenantStatus expectedCurrentStatus) {
         Connection connection = null;
         try {
             connection = dataSource.getConnection();
@@ -113,14 +114,22 @@ public final class JdbcTenantRepository implements TenantRepository {
                     statement.executeUpdate();
                 }
             }
-            // Tombstone the tenant row in the same transaction, so the scoped hard-delete and the soft
-            // DELETED marker are atomic: a caller never sees a tenant deleted-but-still-active or
-            // active-but-data-gone.
-            try (PreparedStatement statement = connection.prepareStatement(TOMBSTONE)) {
+            // Tombstone only if the status is still what the caller observed — a concurrent
+            // suspend/reactivate/delete that raced this call must not be silently overwritten.
+            int tombstoned;
+            try (PreparedStatement statement = connection.prepareStatement(CAS_TOMBSTONE)) {
                 statement.setString(1, id);
-                statement.executeUpdate();
+                statement.setString(2, expectedCurrentStatus.toDb());
+                tombstoned = statement.executeUpdate();
+            }
+            if (tombstoned == 0) {
+                // Lost the race: roll back the whole cascade rather than leaving hard-deleted rows under
+                // a status the caller never actually observed committing this transaction.
+                connection.rollback();
+                return false;
             }
             connection.commit();
+            return true;
         } catch (SQLException e) {
             rollbackQuietly(connection);
             throw new IllegalStateException("tenant delete failed", e);

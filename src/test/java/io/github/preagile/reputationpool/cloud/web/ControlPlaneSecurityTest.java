@@ -110,6 +110,14 @@ class ControlPlaneSecurityTest {
     @DisplayName("실제 로그인으로 발급된 유효 토큰으로 호출하면 → 200 으로 허용한다")
     void protectedEndpoint_withValidToken_is200() throws Exception {
         org.mockito.Mockito.when(tenants.findAll()).thenReturn(List.of());
+        // TenantStatusFilter(#83)가 모든 인증된 요청마다 토큰 테넌트의 상태를 확인하므로, active 로 스텁해야
+        // 통과한다 — 안 그러면 컨트롤러에 닿기도 전에 403으로 거부된다.
+        org.mockito.Mockito.when(tenants.findById("default"))
+                .thenReturn(java.util.Optional.of(new io.github.preagile.reputationpool.cloud.tenant.Tenant(
+                        "default",
+                        "default",
+                        io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                        java.time.Instant.now())));
         String token = tokenService
                 .issueToken("admin", "s3cret-password")
                 .orElseThrow()
@@ -160,6 +168,14 @@ class ControlPlaneSecurityTest {
     @Test
     @DisplayName("다른 테넌트 단건 조회는 → 404 가 아니라 403 으로 거부한다(존재 비노출)")
     void getOtherTenant_is403() throws Exception {
+        // TenantStatusFilter(#83)가 요청마다 호출 토큰(default)의 상태를 확인하므로 active 로 스텁 — 그래야
+        // 필터를 통과해 컨트롤러의 requireScope 로직 자체가 검증 대상이 된다.
+        org.mockito.Mockito.when(tenants.findById("default"))
+                .thenReturn(java.util.Optional.of(new io.github.preagile.reputationpool.cloud.tenant.Tenant(
+                        "default",
+                        "default",
+                        io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                        java.time.Instant.now())));
         String token = tokenService
                 .issueToken("admin", "s3cret-password")
                 .orElseThrow()
@@ -167,7 +183,8 @@ class ControlPlaneSecurityTest {
 
         mvc.perform(get("/api/tenants/other").header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden());
-        // 스코프 검사가 존재 검사보다 먼저이므로 repository 는 건드리지 않는다.
-        org.mockito.Mockito.verify(tenants, org.mockito.Mockito.never()).findById(org.mockito.ArgumentMatchers.any());
+        // 스코프 검사가 존재 검사보다 먼저이므로 대상(other) 테넌트는 조회하지 않는다 — 필터가 호출 토큰 자신의
+        // 상태(default)를 확인하는 것과는 별개다.
+        org.mockito.Mockito.verify(tenants, org.mockito.Mockito.never()).findById("other");
     }
 }
