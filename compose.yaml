@@ -113,10 +113,29 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      alertmanager:
+        condition: service_started
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - reputation-pool-prometheus-data:/prometheus
+    restart: unless-stopped
+
+  # 알림 라우팅(#76). alerts.yml 의 SLO 룰이 firing 되면 Prometheus 가 여기로 넘겨(prometheus.yml 의
+  # alerting.alertmanagers) grouping/dedup/silence/정비창을 맡는다. 호스트 포트를 열지 않는 compose
+  # 네트워크 전용 서비스 — Prometheus/Grafana 와 같은 posture. 기본은 monitoring/alertmanager.yml 의
+  # receiver 가 무통합(zero integrations) blackhole 이라 시크릿 없이도 뜬다. 실제 webhook 을 붙이려면
+  # REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL 을 설정하고 monitoring/alertmanager.yml 의 webhook_configs
+  # 주석을 해제한다 — url_file 이 아래 secrets 로 마운트된 파일을 가리키므로 URL 자체는 설정 파일에
+  # 담기지 않는다(monitoring/README.md "알림 라우팅" 참고).
+  alertmanager:
+    image: prom/alertmanager:v0.31.1
+    container_name: reputation-pool-alertmanager
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - reputation-pool-alertmanager-data:/alertmanager
+    secrets:
+      - alertmanager_webhook_url
     restart: unless-stopped
 
   grafana:
@@ -165,4 +184,12 @@ volumes:
   caddy-data:
   reputation-pool-prometheus-data:
   reputation-pool-grafana-data:
+  reputation-pool-alertmanager-data:
   reputation-pool-backups:
+
+# Compose Spec 의 secrets(environment 소스, #76): 커스텀 entrypoint/envsubst 렌더링 없이 호스트 환경
+# 변수 값을 파일로 자동 마운트한다(/run/secrets/<name>). REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL 이
+# 비어 있으면(로컬 기본) 빈 파일이 마운트될 뿐이라 시크릿 없이도 docker compose up 이 성공한다.
+secrets:
+  alertmanager_webhook_url:
+    environment: REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL
