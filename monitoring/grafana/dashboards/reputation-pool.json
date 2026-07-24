@@ -128,6 +128,20 @@
           "legendFormat": "recovered"
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "gRPC 지연 p99 (method 별, s) — 이슈 #78",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum(rate(grpc_server_processing_duration_seconds_bucket[5m])) by (le, method))",
+          "legendFormat": "{{method}}"
+        }
+      ]
     }
   ]
 }

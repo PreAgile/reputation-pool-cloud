@@ -40,6 +40,25 @@ management:
     metrics:
       export:
         enabled: true
+  metrics:
+    distribution:
+      # gRPC data-plane SLI (issue #78): net.devh's GrpcServerMetricAutoConfiguration is already active
+      # (MeterRegistry + micrometer-core's MetricCollectingServerInterceptor are both on the classpath),
+      # so grpc.server.processing.duration is already timing every RPC — it is just missing histogram
+      # buckets, so histogram_quantile() over grpc_server_processing_duration_seconds_bucket returns an
+      # empty vector. This turns the buckets on for that one timer.
+      #
+      # http.server.requests is a companion fix, not new scope: monitoring/alerts.yml's HighRequestLatencyP99
+      # rule already queries http_server_requests_seconds_bucket, but no bucket config existed anywhere in
+      # this repo, so that alert has silently been evaluating to an empty vector (never firing) since it
+      # was added. Same root cause, so it is fixed alongside the gRPC timer.
+      #
+      # Both timers are named explicitly rather than turned on with a wildcard (e.g. `.all: true`): a
+      # wildcard would also add buckets to every other timer Spring Boot auto-instruments (JVM, datasource,
+      # Hikari, Tomcat, etc.), each one growing the scrape payload and cardinality for no SLO that reads them.
+      percentiles-histogram:
+        grpc.server.processing.duration: true
+        http.server.requests: true
 
 server:
   port: ${PORT:8083}

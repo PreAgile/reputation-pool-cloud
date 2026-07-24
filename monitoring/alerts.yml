@@ -43,3 +43,26 @@ groups:
           severity: warning
         annotations:
           summary: "리소스 차단 급증 (분당 10건 초과, 최근 5분)"
+
+      # gRPC 데이터플레인 지연 SLO (#78): Acquire/Report(실제 서빙 경로) p99 가 500ms 를 5분 이상 초과.
+      # net.devh의 GrpcServerMetricAutoConfiguration 이 이미 모든 RPC를 grpc_server_processing_duration_seconds
+      # 로 계측하고 있고, application.yml 의 percentiles-histogram 설정으로 _bucket 시계열이 노출된다.
+      - alert: GrpcLatencyP99
+        expr: >
+          histogram_quantile(0.99, sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report"}[5m])) by (le)) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "gRPC(Acquire/Report) p99 지연 500ms 초과 (최근 5분)"
+
+      # gRPC 에러율 SLO (#78): statusCode 가 OK 가 아닌 비율이 5% 를 5분 이상 초과.
+      - alert: GrpcHighErrorRate
+        expr: >
+          sum(rate(grpc_server_processing_duration_seconds_count{statusCode!="OK"}[5m]))
+          / sum(rate(grpc_server_processing_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "gRPC 에러율 5% 초과 (최근 5분)"
