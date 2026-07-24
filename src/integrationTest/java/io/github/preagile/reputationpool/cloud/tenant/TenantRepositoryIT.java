@@ -2,7 +2,13 @@ package io.github.preagile.reputationpool.cloud.tenant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,14 +43,106 @@ class TenantRepositoryIT {
     @Autowired
     private TenantRepository repository;
 
+    @Autowired
+    private DataSource dataSource;
+
     @Test
     @DisplayName("테넌트를 저장하면 id 로 조회되고 없는 id 는 비며, 목록엔 → 시드된 default 와 방금 만든 acme 가 함께 나온다")
     void createsFindsAndLists() {
-        repository.create(new Tenant("acme", "Acme Corp", "active", Instant.parse("2026-07-17T00:00:00Z")));
+        repository.create(new Tenant(
+                "acme",
+                "Acme Corp",
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                Instant.parse("2026-07-17T00:00:00Z")));
 
         assertThat(repository.findById("acme")).get().extracting(Tenant::name).isEqualTo("Acme Corp");
         assertThat(repository.findById("missing")).isEmpty();
         // "default" is seeded at startup from REPUTATION_POOL_API_KEY; "acme" is the row just created.
         assertThat(repository.findAll()).extracting(Tenant::id).contains("default", "acme");
+    }
+
+    @Test
+    @DisplayName(
+            "테넌트를 삭제하면 → 스코프 데이터(api_key·usage_meter·score_sample 등)가 전부 지워지고 tenant 행은 status='deleted' 툼스톤으로 남는다(#83)")
+    void deleteTenantData_purgesScopedRowsAndTombstonesTheTenant() throws Exception {
+        repository.create(new Tenant(
+                "delco",
+                "Delete Co",
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE,
+                Instant.parse("2026-07-17T00:00:00Z")));
+        seedApiKey("delco");
+        seedUsageMeter("delco");
+        seedScoreSample("delco");
+        // Sanity: the scoped rows exist before delete.
+        assertThat(rowCount("SELECT count(*) FROM api_key WHERE tenant_id = 'delco'"))
+                .isEqualTo(1);
+        assertThat(rowCount("SELECT count(*) FROM usage_meter WHERE tenant_id = 'delco'"))
+                .isEqualTo(1);
+        assertThat(rowCount("SELECT count(*) FROM score_sample WHERE tenant_id = 'delco'"))
+                .isEqualTo(1);
+
+        // deleteTenantData executes all ten scoped DELETEs against the real schema in one transaction —
+        // its success alone proves every table/column (incl. the upstream pool_id tables) is valid SQL.
+        assertThat(repository.deleteTenantData(
+                        "delco", io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE))
+                .isTrue();
+
+        assertThat(rowCount("SELECT count(*) FROM api_key WHERE tenant_id = 'delco'"))
+                .isZero();
+        assertThat(rowCount("SELECT count(*) FROM usage_meter WHERE tenant_id = 'delco'"))
+                .isZero();
+        assertThat(rowCount("SELECT count(*) FROM score_sample WHERE tenant_id = 'delco'"))
+                .isZero();
+        // The tenant row survives as a DELETED tombstone (soft), so the deletion stays auditable.
+        assertThat(repository.findById("delco"))
+                .get()
+                .extracting(Tenant::status)
+                .isEqualTo(io.github.preagile.reputationpool.cloud.tenant.TenantStatus.DELETED);
+        // Another tenant's rows are untouched (isolation): the seeded default still resolves.
+        assertThat(repository.findById("default")).isPresent();
+    }
+
+    private void seedApiKey(String tenantId) throws Exception {
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement s = c.prepareStatement(
+                        "INSERT INTO api_key (key_hash, tenant_id, label, created_at) VALUES (?, ?, ?, ?)")) {
+            s.setBytes(1, ("hash-" + tenantId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            s.setString(2, tenantId);
+            s.setString(3, "seed");
+            s.setTimestamp(4, Timestamp.from(Instant.parse("2026-07-17T00:00:00Z")));
+            s.executeUpdate();
+        }
+    }
+
+    private void seedUsageMeter(String tenantId) throws Exception {
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement s = c.prepareStatement(
+                        "INSERT INTO usage_meter (tenant_id, metric, period_start, value, updated_at)"
+                                + " VALUES (?, 'lease', ?, 1, ?)")) {
+            s.setString(1, tenantId);
+            s.setObject(2, LocalDate.parse("2026-07-17"));
+            s.setTimestamp(3, Timestamp.from(Instant.parse("2026-07-17T00:00:00Z")));
+            s.executeUpdate();
+        }
+    }
+
+    private void seedScoreSample(String tenantId) throws Exception {
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement s = c.prepareStatement(
+                        "INSERT INTO score_sample (tenant_id, resource_kind, resource_value, context, sampled_at, score)"
+                                + " VALUES (?, 'PROXY', 'p1', 'GLOBAL', ?, 0.5)")) {
+            s.setString(1, tenantId);
+            s.setTimestamp(2, Timestamp.from(Instant.parse("2026-07-17T00:00:00Z")));
+            s.executeUpdate();
+        }
+    }
+
+    private long rowCount(String sql) throws Exception {
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement s = c.prepareStatement(sql);
+                ResultSet rs = s.executeQuery()) {
+            rs.next();
+            return rs.getLong(1);
+        }
     }
 }

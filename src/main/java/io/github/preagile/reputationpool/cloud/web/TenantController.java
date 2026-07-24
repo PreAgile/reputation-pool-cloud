@@ -2,7 +2,9 @@ package io.github.preagile.reputationpool.cloud.web;
 
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
 import io.github.preagile.reputationpool.cloud.tenant.Tenant;
+import io.github.preagile.reputationpool.cloud.tenant.TenantLifecycleService;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
+import io.github.preagile.reputationpool.cloud.tenant.TenantStatus;
 import io.github.preagile.reputationpool.cloud.web.dto.CreateTenantRequest;
 import java.net.URI;
 import java.sql.SQLException;
@@ -13,11 +15,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -39,11 +43,14 @@ public class TenantController {
 
     private final TenantRepository tenants;
     private final TenantPoolRegistry registry;
+    private final TenantLifecycleService lifecycle;
     private final Clock clock;
 
-    public TenantController(TenantRepository tenants, TenantPoolRegistry registry, Clock clock) {
+    public TenantController(
+            TenantRepository tenants, TenantPoolRegistry registry, TenantLifecycleService lifecycle, Clock clock) {
         this.tenants = Objects.requireNonNull(tenants, "tenants must not be null");
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
+        this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -65,7 +72,7 @@ public class TenantController {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant already exists");
         }
         String name = request.name() == null || request.name().isBlank() ? id : request.name();
-        Tenant tenant = new Tenant(id, name, "active", clock.instant());
+        Tenant tenant = new Tenant(id, name, TenantStatus.ACTIVE, clock.instant());
         try {
             tenants.create(tenant);
         } catch (RuntimeException e) {
@@ -90,6 +97,30 @@ public class TenantController {
         AdminTenant.requireScope(jwt, id);
         return tenants.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "tenant not found"));
+    }
+
+    // 라이프사이클 전이는 운영자 전역 행위(#83) — create/list 와 같은 결로 토큰 스코프를 걸지 않는다(역할 분리는 #31).
+    // 없는 테넌트는 404, 불법 전이는 409 로 TenantLifecycleService 가 결정한다.
+
+    /** 테넌트를 정지한다(데이터 유지, API 키 접근 차단). */
+    @PostMapping("/{id}/suspend")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void suspend(@PathVariable String id) {
+        lifecycle.suspend(id);
+    }
+
+    /** 정지된 테넌트를 다시 활성화한다. */
+    @PostMapping("/{id}/reactivate")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void reactivate(@PathVariable String id) {
+        lifecycle.reactivate(id);
+    }
+
+    /** 테넌트를 삭제한다: 인메모리 풀 축출 + 스코프 데이터 하드 삭제 + tenant 행 DELETED 툼스톤. */
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable String id) {
+        lifecycle.delete(id);
     }
 
     /** Whether the failure (or any cause) is a PostgreSQL unique-constraint violation (SQLState 23505). */

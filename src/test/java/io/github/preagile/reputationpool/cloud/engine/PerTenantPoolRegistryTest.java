@@ -84,6 +84,20 @@ class PerTenantPoolRegistryTest {
         public Optional<Tenant> findById(String id) {
             return Optional.empty();
         }
+
+        @Override
+        public boolean compareAndSetStatus(
+                String id,
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus expected,
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus next) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean deleteTenantData(
+                String id, io.github.preagile.reputationpool.cloud.tenant.TenantStatus expectedCurrentStatus) {
+            throw new UnsupportedOperationException();
+        }
     };
 
     @Test

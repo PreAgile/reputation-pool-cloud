@@ -79,6 +79,11 @@ class CloudAdvisorServiceTest {
         public void onboard(String tenantId) {
             poolFor(tenantId);
         }
+
+        @Override
+        public void evict(String tenantId) {
+            pools.remove(tenantId);
+        }
     };
 
     private Server server;

@@ -26,11 +26,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * already determined — by checking that one tenant's own pool snapshot — that a call is about to create
  * a genuinely new resource or cell, not re-touch an existing one.
  *
- * <p><b>Monotonic by design.</b> {@code core.pool.ResourcePool} has no operation that removes a
- * registered resource or a reputation cell (register/report/acquire/renew/release/block* only add or
- * mutate existing state — verified against the 0.5.0 source), so these counters only ever go up for the
- * process's lifetime. Reclaiming budget when a tenant is deleted entirely is out of scope here (a
- * separate concern, alongside issue #83).
+ * <p><b>Monotonic within a tenant's lifetime, released on delete.</b> {@code core.pool.ResourcePool} has
+ * no operation that removes a registered resource or a reputation cell (register/report/acquire/renew/
+ * release/block* only add or mutate existing state — verified against the 0.5.0 source), so short of a
+ * tenant being deleted outright, these counters only ever go up. {@link #release} is the counterpart
+ * called by issue #83's {@code TenantLifecycleService} when a tenant is deleted, so its departed usage
+ * stops permanently occupying the shared ceiling — without it, repeated tenant churn would eventually
+ * exhaust the budget for every other tenant even though the heap is actually empty.
  *
  * <p><b>Fail-safe, not fail-closed.</b> This is an availability guard against one tenant starving the
  * shared heap, not an auth boundary: {@link #tryReserveResource()}/{@link #tryReserveCell()} let normal
@@ -105,6 +107,21 @@ public final class GlobalResourceBudget {
     public void accountForExisting(long resources, long cells) {
         resourceCount.addAndGet(resources);
         cellCount.addAndGet(cells);
+    }
+
+    /**
+     * Returns {@code resources}/{@code cells} worth of capacity to the budget — called once when a
+     * tenant is deleted, with the exact counts its pool held just before eviction (issue #83). Floored at
+     * zero per counter so a duplicate or miscounted release can never drive a counter negative and
+     * inflate headroom beyond what the heap actually has.
+     */
+    public void release(long resources, long cells) {
+        releaseOne(resourceCount, resources);
+        releaseOne(cellCount, cells);
+    }
+
+    private static void releaseOne(AtomicLong counter, long amount) {
+        counter.updateAndGet(current -> Math.max(0, current - amount));
     }
 
     /** The current global registered-resource count, summed across every tenant. For tests/observability. */

@@ -137,6 +137,9 @@ class AdvisorGlobalBudgetTest {
 
             @Override
             public void onboard(String id) {}
+
+            @Override
+            public void evict(String id) {}
         };
     }
 
@@ -300,6 +303,9 @@ class AdvisorGlobalBudgetTest {
 
             @Override
             public void onboard(String tenantId) {}
+
+            @Override
+            public void evict(String tenantId) {}
         };
         startServerWith(registry, budget);
 

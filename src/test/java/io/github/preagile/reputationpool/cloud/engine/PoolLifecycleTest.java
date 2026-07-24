@@ -104,7 +104,7 @@ class PoolLifecycleTest {
     private static TenantRepository tenants(String... ids) {
         List<Tenant> list = new ArrayList<>();
         for (String id : ids) {
-            list.add(new Tenant(id, id, "active", NOW));
+            list.add(new Tenant(id, id, io.github.preagile.reputationpool.cloud.tenant.TenantStatus.ACTIVE, NOW));
         }
         return new FakeTenantRepository(list);
     }
@@ -361,6 +361,20 @@ class PoolLifecycleTest {
         @Override
         public Optional<Tenant> findById(String id) {
             return all.stream().filter(t -> t.id().equals(id)).findFirst();
+        }
+
+        @Override
+        public boolean compareAndSetStatus(
+                String id,
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus expected,
+                io.github.preagile.reputationpool.cloud.tenant.TenantStatus next) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean deleteTenantData(
+                String id, io.github.preagile.reputationpool.cloud.tenant.TenantStatus expectedCurrentStatus) {
+            throw new UnsupportedOperationException();
         }
     }
 }

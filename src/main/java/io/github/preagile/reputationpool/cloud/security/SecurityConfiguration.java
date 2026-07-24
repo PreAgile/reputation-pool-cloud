@@ -5,6 +5,7 @@ import com.nimbusds.jose.jwk.OctetSequenceKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
+import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.security.SecureRandom;
 import javax.crypto.SecretKey;
@@ -61,7 +62,11 @@ public class SecurityConfiguration {
 
     @Bean
     SecurityFilterChain controlPlaneSecurity(
-            HttpSecurity http, JwtDecoder jwtDecoder, LoginThrottleFilter loginThrottleFilter) throws Exception {
+            HttpSecurity http,
+            JwtDecoder jwtDecoder,
+            LoginThrottleFilter loginThrottleFilter,
+            TenantStatusFilter tenantStatusFilter)
+            throws Exception {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(
@@ -81,6 +86,10 @@ public class SecurityConfiguration {
                 // JWT authentication, so a blocked IP is answered with 429 before touching the controller.
                 .addFilterBefore(loginThrottleFilter, BearerTokenAuthenticationFilter.class)
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder)))
+                // Tenant lifecycle gate (issue #83): runs right after JWT auth so a signature/expiry-valid
+                // token bound to a suspended/deleted tenant is rejected before reaching any controller —
+                // the control-plane half of "suspend blocks access" (JdbcTenantResolver is the gRPC half).
+                .addFilterAfter(tenantStatusFilter, BearerTokenAuthenticationFilter.class)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .build();
@@ -96,6 +105,12 @@ public class SecurityConfiguration {
     LoginThrottleFilter loginThrottleFilter(
             LoginThrottle loginThrottle, MeterRegistry meterRegistry, ObjectMapper objectMapper) {
         return new LoginThrottleFilter(loginThrottle, meterRegistry, objectMapper);
+    }
+
+    /** The control-plane tenant-lifecycle gate (issue #83); see {@link TenantStatusFilter}. */
+    @Bean
+    TenantStatusFilter tenantStatusFilter(TenantRepository tenants, ObjectMapper objectMapper) {
+        return new TenantStatusFilter(tenants, objectMapper);
     }
 
     /**
