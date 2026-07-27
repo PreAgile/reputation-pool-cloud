@@ -32,6 +32,12 @@ REQUIRED_ENV=(
 	DOMAIN
 	ACME_EMAIL
 )
+# 값은 비어 있어도 되지만 **정의는 있어야** 하는 키. compose 의 `secrets: environment:` 소스는 컨테이너
+# 생성 시점에 해석되고 정의되지 않은 변수에서 하드 실패하는데, `compose config` 는 통과한다 — 즉 이걸
+# 확인하지 않으면 pull 까지 다 끝난 `up` 단계에서야 알 수 없는 에러로 터진다.
+REQUIRED_DEFINED_ENV=(
+	REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL
+)
 
 log() { printf '\n==> %s\n' "$1"; }
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
@@ -67,6 +73,14 @@ for key in "${REQUIRED_ENV[@]}"; do
 	grep -Eq "^${key}=.+" .env || missing+=("$key")
 done
 [ ${#missing[@]} -eq 0 ] || die ".env 에 값이 없다: ${missing[*]}"
+
+undefined=()
+for key in "${REQUIRED_DEFINED_ENV[@]}"; do
+	# 값은 비어 있어도 되므로 `=` 까지만 있으면 통과. 줄 자체가 없으면 실패.
+	grep -Eq "^${key}=" .env || undefined+=("$key")
+done
+[ ${#undefined[@]} -eq 0 ] \
+	|| die ".env 에 정의 자체가 없다(값은 비어도 된다): ${undefined[*]} — .env.example 참고"
 
 # 로컬 개발용 placeholder 가 공개 서버로 넘어오는 사고를 막는다(.env.example 의 값들).
 if grep -Eq '^REPUTATION_POOL_API_KEY=local-dev-key$|^GRAFANA_ADMIN_PASSWORD=local-dev-admin$' .env; then

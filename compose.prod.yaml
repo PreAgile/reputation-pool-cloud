@@ -9,10 +9,10 @@
 #   1. app·dashboard 를 소스에서 빌드하지 않고 GHCR 에 발행된 arm64 이미지를 pull 한다
 #      (`.github/workflows/release.yml`). 2 OCPU 서버에서 Gradle·Next 빌드를 돌리지 않기 위한 것이다.
 #   2. Caddy 를 도메인 + 자동 HTTPS(`Caddyfile.prod`)로 바꾸고 80/443 을 공개한다.
-#   3. 컨테이너별 메모리 상한을 준다. base 에는 상한이 없어 일곱 컨테이너가 호스트 RAM 을 무제한으로
+#   3. 컨테이너별 메모리 상한을 준다. base 에는 상한이 없어 여덟 컨테이너가 호스트 RAM 을 무제한으로
 #      경쟁하고, JVM 힙도 상한을 못 읽는다(Dockerfile 의 MaxRAMPercentage 참고).
 #      base 에 서비스를 추가하면 여기에도 상한과 logging 을 추가해야 한다 — 빠뜨리면 그 컨테이너만
-#      무제한이 된다(#76 의 alertmanager 가 머지될 때 해당된다).
+#      무제한이 된다.
 #   4. db 의 호스트 포트 공개를 닫는다. base 의 `5435:5432` 는 로컬 편의용인데 0.0.0.0 바인딩이라
 #      공개 서버에서는 Postgres 가 인터넷에 열린다.
 #
@@ -87,6 +87,15 @@ services:
       resources:
         limits:
           memory: 1g
+
+  # 알림 라우팅(#76). Go 프로세스 + 소량의 알림 상태만 들고 있어 실사용은 수십 MB 수준이다.
+  # base 와 마찬가지로 호스트 포트를 열지 않는다(compose 네트워크 전용).
+  alertmanager:
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m
 
   grafana:
     # base 의 `127.0.0.1:3001` 바인딩을 그대로 둔다 — 공개 도메인에 노출하지 않고 SSH 터널로 본다

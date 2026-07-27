@@ -2,6 +2,19 @@ package io.github.preagile.reputationpool.cloud.metrics;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.AcquireRequest;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.Context;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.Outcome;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.RegisterRequest;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ReportRequest;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ResourceId;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ResourceKind;
+import io.github.preagile.reputationpool.grpc.v1.ReputationAdvisorGrpc;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.Metadata;
+import io.grpc.stub.MetadataUtils;
+import net.devh.boot.grpc.server.serverfactory.GrpcServerFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,6 +70,9 @@ class PrometheusScrapeIT {
     @Autowired
     private TestRestTemplate rest;
 
+    @Autowired
+    private GrpcServerFactory grpcServerFactory;
+
     @Test
     @DisplayName("토큰 없이 /actuator/prometheus 를 호출하면 → 200 과 함께 reputation 카운터가 노출된다 (permitAll · 내부 스크레이프)")
     void scrapeIsReachableWithoutTokenAndExposesCounters() {
@@ -68,5 +84,54 @@ class PrometheusScrapeIT {
         assertThat(res.getBody())
                 .contains("reputation_resource_blocklisted_total")
                 .contains("reputation_lease_granted_total");
+    }
+
+    @Test
+    @DisplayName("gRPC 호출 후 스크레이프하면 → 처리시간 히스토그램 버킷과 SLO 룰이 쓰는 method/methodType 태그가 노출된다"
+            + " (issue #78, grpc.server.processing.duration percentiles-histogram)")
+    void grpcCallIsScrapedWithProcessingDurationHistogramBuckets() {
+        // net.devh's GrpcServerMetricAutoConfiguration is already active (MeterRegistry + Micrometer's
+        // MetricCollectingServerInterceptor are both on the classpath), so every RPC is timed without any
+        // cloud-side wiring — these calls just need to happen so the timer records at least one sample.
+        // All three unary RPCs the SLO rules select on (monitoring/alerts.yml: GrpcLatencyP99 filters
+        // method=~"Acquire|Report", GrpcHighErrorRate filters methodType!="SERVER_STREAMING") are exercised,
+        // so this test fails if a tag name or value the rules depend on ever changes.
+        ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", grpcServerFactory.getPort())
+                .usePlaintext()
+                .build();
+        try {
+            Metadata md = new Metadata();
+            md.put(Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER), "integration-key");
+            ReputationAdvisorGrpc.ReputationAdvisorBlockingStub stub = ReputationAdvisorGrpc.newBlockingStub(channel)
+                    .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(md));
+
+            ResourceId resource = ResourceId.newBuilder()
+                    .setKind(ResourceKind.PROXY)
+                    .setValue("sli-probe")
+                    .build();
+            stub.register(RegisterRequest.newBuilder().setResource(resource).build());
+            stub.acquire(AcquireRequest.newBuilder()
+                    .setContext(Context.newBuilder().setValue("scrape"))
+                    .build());
+            stub.report(ReportRequest.newBuilder()
+                    .setResource(resource)
+                    .setContext(Context.newBuilder().setValue("scrape"))
+                    .setOutcome(Outcome.newBuilder().setSuccess(Outcome.Success.getDefaultInstance()))
+                    .build());
+        } finally {
+            channel.shutdownNow();
+        }
+
+        ResponseEntity<String> res = rest.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(res.getBody())
+                .contains("grpc_server_processing_duration_seconds_bucket")
+                .contains("method=\"Register\"")
+                .contains("method=\"Acquire\"")
+                .contains("method=\"Report\"")
+                // GrpcHighErrorRate excludes SubscribeEvents by methodType, so pin that tag's spelling too.
+                .contains("methodType=\"UNARY\"")
+                .contains("statusCode=\"OK\"");
     }
 }

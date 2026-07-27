@@ -9,8 +9,9 @@
 # 흔하다. 그때 1 OCPU/6GB 로 낮춰 신청하면 배치되는 경우가 많고, 스택은 그 크기에서도 돈다 — 단
 # compose.prod.yaml 의 상한 합계(8.4GB)가 6GB 를 넘으므로 이 프로파일로 낮춰야 한다.
 #
-# 배분 (합계 약 4.8GB, OS·페이지 캐시로 약 1.2GB 남김):
-#   app 2GB / db 1GB / prometheus 512MB / dashboard 512MB / grafana 384MB / backup 256MB / caddy 128MB
+# 배분 (합계 약 4.9GB, OS·페이지 캐시로 약 1.1GB 남김):
+#   app 2GB / db 1GB / prometheus 512MB / dashboard 512MB / grafana 384MB / backup 256MB
+#   / alertmanager 128MB / caddy 128MB
 #
 # JVM 힙은 건드리지 않는다. Dockerfile 의 `-XX:MaxRAMPercentage=70` 이 cgroup 상한을 읽으므로 app 의
 # 상한을 2GB 로 내리면 힙도 자동으로 1.4GB 로 따라 내려간다 — 이것이 힙을 고정 `-Xmx` 로 박지 않은 이유다.
@@ -41,3 +42,9 @@ services:
       resources:
         limits:
           memory: 384m
+
+  alertmanager:
+    deploy:
+      resources:
+        limits:
+          memory: 128m

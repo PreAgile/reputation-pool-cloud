@@ -199,7 +199,7 @@ docker compose -f compose.yaml -f compose.prod.yaml exec backup /usr/local/bin/b
 
 ## 9. 메모리 배분
 
-12GB 호스트 기준 컨테이너 상한 합계 약 8.4GB, 나머지는 OS와 페이지 캐시 몫이다.
+12GB 호스트 기준 컨테이너 상한 합계 약 8.6GB, 나머지는 OS와 페이지 캐시 몫이다.
 
 | 서비스 | 상한 | 비고 |
 |---|---|---|
@@ -207,7 +207,11 @@ docker compose -f compose.yaml -f compose.prod.yaml exec backup /usr/local/bin/b
 | db | 2GB | |
 | prometheus | 1GB | |
 | dashboard / grafana | 512MB 각 | |
-| backup / caddy | 256MB / 128MB | |
+| alertmanager / backup | 256MB 각 | |
+| caddy | 128MB | |
+
+> base `compose.yaml`에 서비스를 추가하면 `compose.prod.yaml`에도 상한과 `logging`을 추가해야 한다.
+> 빠뜨리면 그 컨테이너만 상한 없이 뜨고 로그가 무한히 쌓인다.
 
 ### 1 OCPU / 6GB 호스트인 경우
 
@@ -224,8 +228,9 @@ docker compose -f compose.yaml -f compose.prod.yaml exec backup /usr/local/bin/b
 | db | 2GB | **1GB** |
 | prometheus | 1GB | **512MB** |
 | grafana | 512MB | **384MB** |
+| alertmanager | 256MB | **128MB** |
 | dashboard / backup / caddy | 512MB / 256MB / 128MB | 동일 |
-| 합계 | 8.4GB | **약 4.8GB** |
+| 합계 | 약 8.6GB | **약 4.9GB** |
 
 **힙은 어느 쪽에서도 건드리지 않는다.** `Dockerfile`의 `-XX:MaxRAMPercentage=70`이 cgroup 상한을 읽으므로
 app의 상한을 내리면 힙이 자동으로 따라 내려간다 — 힙을 고정 `-Xmx`로 박지 않은 이유가 이것이다.

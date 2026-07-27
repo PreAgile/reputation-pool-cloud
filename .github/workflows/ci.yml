@@ -87,6 +87,33 @@ jobs:
             || { echo "Caddyfile.prod 마운트가 없다" >&2; exit 1; }
           echo "ok: 5435 미공개 + Caddyfile.prod 마운트"
 
+      # Every service must carry a memory limit and log rotation. Adding a service to the base
+      # compose.yaml without adding it here leaves that one container unbounded on the deploy host and
+      # its logs growing until the boot volume fills. This drift is silent — it caught us once already
+      # (#76's alertmanager landed on main while the overlay was in review).
+      - name: Assert every service is bounded
+        env:
+          REPUTATION_POOL_API_KEY: ci-config-check
+          GRAFANA_ADMIN_PASSWORD: ci-config-check
+          REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL: ""
+          DOMAIN: app.example.invalid
+          ACME_EMAIL: ci@example.invalid
+        run: |
+          docker compose -f compose.yaml -f compose.prod.yaml config --format json > /tmp/prod.json
+          python3 - <<'PY'
+          import json, sys
+          services = json.load(open('/tmp/prod.json'))['services']
+          no_limit = sorted(n for n, s in services.items()
+                            if not s.get('deploy', {}).get('resources', {}).get('limits', {}).get('memory'))
+          no_logging = sorted(n for n, s in services.items() if not s.get('logging'))
+          for label, bad in (('메모리 상한 없음', no_limit), ('로그 회전 없음', no_logging)):
+              if bad:
+                  print(f'{label}: {", ".join(bad)} — compose.prod.yaml 에 추가할 것', file=sys.stderr)
+          if no_limit or no_logging:
+              sys.exit(1)
+          print(f'ok: 서비스 {len(services)}개 전부 상한·로그 회전 있음')
+          PY
+
       # Adapts the Caddyfile and checks the resulting config. `validate` does not touch the network, so
       # no certificate is requested for the placeholder domain.
       - name: Validate Caddyfile.prod

@@ -16,8 +16,7 @@
 2. **상시 가동.** 면접관이 링크를 클릭하는 시점을 고를 수 없다. "필요할 때 켠다"가 성립하지 않고, 90일 뒤
    꺼지는 것도 성립하지 않는다.
 
-현재 스택은 컨테이너 7개(db·app·dashboard·caddy·prometheus·grafana·backup, #76 머지 후 alertmanager 추가),
-합계 3~4GB를 쓴다.
+현재 스택은 컨테이너 8개(db·app·dashboard·caddy·prometheus·alertmanager·grafana·backup), 합계 3~4GB를 쓴다.
 JVM + Postgres 조합의 병목은 코어가 아니라 **메모리**다.
 
 ## 결정

@@ -1,14 +1,20 @@
 # Prometheus 스크레이프 설정 (#14 / D7b).
 # app 의 Micrometer→Prometheus 엔드포인트를 15초마다 긁는다. compose 네트워크에서 app:8083 으로 직접
 # 접근하며(호스트엔 loopback 만 열림), 이 엔드포인트는 Spring Security 에서 permitAll 이고 Caddy 로는
-# 외부 차단이라 스크레이프는 네트워크 내부로 한정된다. 알림 규칙은 alerts.yml 참조(평가만 — Alertmanager
-# 라우팅은 #15 후속).
+# 외부 차단이라 스크레이프는 네트워크 내부로 한정된다. 알림 규칙은 alerts.yml 참조 — 평가는 여기서,
+# firing 알림의 실제 통지 라우팅(grouping/dedup/silence)은 alerting.alertmanagers 로 넘어간 Alertmanager
+# 가 담당한다(#76, monitoring/alertmanager.yml).
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
 rule_files:
   - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
 
 scrape_configs:
   - job_name: reputation-pool-app
