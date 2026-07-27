@@ -106,8 +106,16 @@ $EDITOR .env
 | `DOMAIN` | Caddy가 서빙할 호스트네임 (예: `app.example.com`) |
 | `ACME_EMAIL` | 인증서 만료·실패 알림 수신 주소 |
 | `REPUTATION_POOL_ADMIN_USERNAME` / `_PASSWORD` / `_JWT_SECRET` | 관리자 콘솔을 쓸 때만. 미설정 시 `/api/**`는 fail closed로 전부 거부(gRPC는 계속 동작) |
+| `REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL` | **값은 비어도 되지만 키는 반드시 있어야 한다.** 빈 값 = SLO 알림이 Alertmanager 까지만 가고 밖으로 나가지 않음(무통합 no-op). 실제 통지를 붙일 때만 URL 을 넣고 `monitoring/alertmanager.yml` 의 `webhook_configs` 주석을 해제한다(#76) |
 
-`bootstrap.sh`는 필수 키 누락과 `.env.example`의 로컬 placeholder 잔존을 기동 전에 거부한다.
+`bootstrap.sh`는 필수 키 누락, **정의 자체가 없는 키**(스크립트의 `REQUIRED_DEFINED_ENV` 목록 — 값은 비어도
+되지만 줄이 있어야 하는 부류), `.env.example`의 로컬 placeholder 잔존을 기동 전에 거부한다.
+
+> **왜 빈 값이라도 키가 있어야 하나** — `alertmanager` 서비스는 이 값을 compose 의
+> `secrets: <name>: environment:` 소스로 파일(`/run/secrets/…`)로 받는다. 이 소스는 컨테이너 **생성**
+> 시점에 변수 정의를 요구하므로, 값이 비어 있으면 빈 파일이 마운트되지만 **정의가 아예 없으면**
+> `environment variable ... required by file ... is not set` 으로 실패한다. `docker compose config` 는
+> 통과하기 때문에 설정 검증만으로는 드러나지 않아, `bootstrap.sh` 가 기동 전에 따로 검사한다.
 
 > `.env` 파일은 현재 시크릿의 유일한 보관 위치다. 시크릿 스토어 도입은 #6.
 
@@ -180,6 +188,29 @@ echo 'APP_IMAGE_TAG=sha-<커밋>' >> .env
 
 > `docker compose down -v`를 프로덕션에서 쓰지 않는다. `caddy-data` 볼륨의 인증서가 사라져 재발급이 일어나고
 > Let's Encrypt 레이트리밋을 소모한다. DB 볼륨도 함께 지워진다.
+
+### 새 `.env` 키가 생긴 릴리스로 재배포할 때
+
+호스트의 `.env` 는 한 번 만든 뒤 그대로 남으므로, 그 후 추가된 키는 자동으로 채워지지 않는다.
+`bootstrap.sh` 가 기동 전에 잡아주지만(위 §3), 어떤 줄을 넣어야 하는지는 `.env.example` 을 봐야 한다.
+
+```
+error: .env 에 정의 자체가 없다(값은 비어도 된다): REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL — .env.example 참고
+```
+
+이 메시지가 나오면 해당 키를 `.env` 에 추가하고 다시 실행한다. 값을 비워 두면 그 기능이 no-op 로
+꺼진 상태로 뜬다(위 예시의 경우 SLO 알림이 밖으로 나가지 않음).
+
+```bash
+echo 'REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL=' >> .env
+./scripts/bootstrap.sh
+```
+
+업그레이드 전에 미리 확인하려면 `.env.example` 과 `.env` 의 키 이름만 비교한다(값은 보지 않는다):
+
+```bash
+diff <(grep -oE '^[A-Z_]+=' .env.example | sort) <(grep -oE '^[A-Z_]+=' .env | sort)
+```
 
 ## 8. 운영 확인
 
