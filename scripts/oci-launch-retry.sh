@@ -6,6 +6,13 @@
 # (`TooManyRequests`)이 뜬다. 이 스크립트는 일정 간격으로 한 번씩만 시도하고, 리밋에는 지수 백오프로
 # 물러나며, 성공하면 즉시 멈추고 공인 IP 와 접속 명령을 출력한다.
 #
+# **`--no-retry` 가 핵심이다.** Oracle 은 용량 부족을 HTTP 500 `InternalError`("Out of host capacity.")
+# 로 반환하는데, OCI SDK 의 기본 재시도 전략은 500 을 일시적 서버 오류로 보고 스스로 재시도한다.
+# 그 결과 `launch` 한 번이 HTTP 요청 8개(실측)를 쏟아내고 그 난타가 429 를 유발했다 — 90초 간격이라도
+# 실제로는 분당 5회를 두드린 셈이고, "connection to endpoint timed out"(target_service: CLI)도 그
+# 부산물이었다. 재시도를 끄면 시도 1회 = 요청 1개 = 1~2초이고, 오라클의 판정을 그대로 받는다.
+# 페이싱은 SDK 가 아니라 이 루프가 통제해야 한다.
+#
 # 인스턴스가 회수됐을 때의 재구축 경로이기도 하다 — #15 §5 가 요구하는 "30분 내 재구축 가능 상태"의
 # 컴퓨트 부분이 이 스크립트고, OS 위쪽은 bootstrap.sh 다.
 #
@@ -19,7 +26,7 @@
 #   ./scripts/oci-launch-retry.sh
 #
 # 환경변수로 조정 (전부 선택):
-#   OCPUS=2 MEMORY_GB=12 BOOT_GB=50 INTERVAL=90 MAX_ATTEMPTS=0
+#   OCPUS=2 MEMORY_GB=12 BOOT_GB=50 INTERVAL=60 MAX_ATTEMPTS=0
 #   SSH_KEY_FILE=~/.ssh/oci_rp_work.pub DISPLAY_NAME=reputation-pool-prod
 #   TENANCY=... AD=... SUBNET=... IMAGE=...   # 자동 탐색이 실패할 때만
 #
@@ -34,8 +41,13 @@ SHAPE="${SHAPE:-VM.Standard.A1.Flex}"
 OCPUS="${OCPUS:-2}"
 MEMORY_GB="${MEMORY_GB:-12}"
 BOOT_GB="${BOOT_GB:-50}"
-# 용량 에러 시 재시도 간격(초). 90초면 API 호출이 분당 1회 미만이라 레이트 리밋에 걸리지 않는다.
-INTERVAL="${INTERVAL:-90}"
+# 시도 간격(초). `--no-retry` 덕에 시도 1회 = HTTP 요청 1개이므로 이 값이 그대로 요청 빈도가 된다.
+#
+# Oracle 은 Compute API 의 오퍼레이션별 레이트 리밋 수치를 공개하지 않는다(수치가 문서화된 것은 IAM
+# Identity Domain API 뿐이고 LaunchInstance 는 거기 없다). 같은 문제를 푸는 도구들이 "60초 미만 금지"
+# (oci-capacity-fixer)에 정착했고, 그 권고는 요청 1개/시도를 전제하므로 60초를 기본으로 한다.
+# 여전히 리밋에 걸리면 아래 백오프 분기가 자동으로 물러난다(5→10→…→30분).
+INTERVAL="${INTERVAL:-60}"
 # 0 = 무한 재시도.
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-0}"
 SSH_KEY_FILE="${SSH_KEY_FILE:-$HOME/.ssh/oci_rp_work.pub}"
@@ -44,8 +56,35 @@ DISPLAY_NAME="${DISPLAY_NAME:-reputation-pool-prod}"
 BACKOFF_START=300
 BACKOFF_MAX=1800
 
+# CLI 타임아웃. `--no-retry` 로 요청이 1개가 된 뒤에는 응답이 1~2초에 오므로 사실상 여유 상한이다.
+# (재시도를 끄기 전에는 한 호출이 99초까지 걸리고 "connection to endpoint timed out"으로 끝났는데,
+# 원인은 느린 응답이 아니라 SDK 가 내부에서 8번 두드리다 스스로 리밋에 걸린 것이었다 — 아래 주석 참고.)
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-30}"
+READ_TIMEOUT="${READ_TIMEOUT:-300}"
+
 log() { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$1"; }
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
+
+# 오류를 한 줄로 요약한다. 재시도 분기가 원문을 삼키면 "무엇 때문에 몇 시간을 기다렸는지" 알 수 없다 —
+# 용량 부족과 스로틀링과 네트워크 장애는 대응이 다른데 로그만 보고는 구분이 안 된다.
+# OCI CLI 오류는 JSON 이라 code/message/target_service/operation_name 을 뽑고, JSON 이 아니면 첫 줄을 쓴다.
+summarize() {
+	local o="$1" code msg op svc req line
+	code="$(printf '%s' "$o" | sed -n 's/.*"code": "\([^"]*\)".*/\1/p' | head -1)"
+	msg="$(printf '%s' "$o" | sed -n 's/.*"message": "\([^"]*\)".*/\1/p' | head -1)"
+	op="$(printf '%s' "$o" | sed -n 's/.*"operation_name": "\([^"]*\)".*/\1/p' | head -1)"
+	svc="$(printf '%s' "$o" | sed -n 's/.*"target_service": "\([^"]*\)".*/\1/p' | head -1)"
+	# opc-request-id 는 오라클 서버가 발급한다. 있으면 "요청이 접수되어 서버가 판정했다"는 증거이고,
+	# 없으면 응답을 못 받은 것(클라이언트측 실패)이다 — 이 구분이 재시도가 유효했는지를 가른다.
+	req="$(printf '%s' "$o" | sed -n 's/.*"opc-request-id": "\([^"/]*\).*/\1/p' | head -1)"
+	if [ -n "$msg" ] || [ -n "$code" ]; then
+		printf '%s%s%s%s' "${code:+$code: }" "${msg:-?}" "${svc:+ [${svc}${op:+/$op}]}" \
+			"${req:+ req=$req}"
+	else
+		line="$(printf '%s' "$o" | grep -v '^[[:space:]]*$' | head -1)"
+		printf '%s' "${line:0:160}"
+	fi
+}
 
 command -v oci > /dev/null 2>&1 || die "oci CLI 가 없다 — 'brew install oci-cli' 후 'oci setup config' 를 실행한다"
 [ -f "$SSH_KEY_FILE" ] || die "SSH 공개키가 없다: $SSH_KEY_FILE (SSH_KEY_FILE 로 지정 가능)"
@@ -147,7 +186,10 @@ while :; do
 	elapsed=$(( ($(date +%s) - started) / 60 ))
 	log "시도 #${attempt} (경과 ${elapsed}분)"
 
-	if out="$(oci compute instance launch \
+	call_started="$(date +%s)"
+	if out="$(oci --no-retry \
+		--connection-timeout "$CONNECT_TIMEOUT" --read-timeout "$READ_TIMEOUT" \
+		compute instance launch \
 		--compartment-id "$TENANCY" \
 		--availability-domain "$AD" \
 		--shape "$SHAPE" \
@@ -159,13 +201,14 @@ while :; do
 		--display-name "$DISPLAY_NAME" \
 		--metadata "file://${METADATA_FILE}" \
 		--wait-for-state RUNNING 2>&1)"; then
-		log "생성 성공"
+		log "생성 성공 (응답 $(( $(date +%s) - call_started ))초)"
 		break
 	fi
+	took="$(( $(date +%s) - call_started ))"
 
 	# 용량 고갈 — 정상적인 재시도 대상.
 	if grep -qiE 'out of (host )?capacity' <<< "$out"; then
-		log "용량 없음 — ${INTERVAL}초 후 재시도"
+		log "용량 없음 (응답 ${took}초) — ${INTERVAL}초 후 재시도  |  $(summarize "$out")"
 		backoff="$BACKOFF_START"
 		sleep "$INTERVAL"
 		continue
@@ -173,7 +216,7 @@ while :; do
 
 	# 레이트 리밋 — 더 물러난다. 여기서 짧게 재시도하면 리밋 창이 계속 갱신된다.
 	if grep -qiE 'toomanyrequests|too many requests|429' <<< "$out"; then
-		log "API 레이트 리밋 — ${backoff}초 후 재시도"
+		log "API 레이트 리밋 (응답 ${took}초) — ${backoff}초 후 재시도  |  $(summarize "$out")"
 		sleep "$backoff"
 		backoff=$(( backoff * 2 ))
 		[ "$backoff" -le "$BACKOFF_MAX" ] || backoff="$BACKOFF_MAX"
@@ -186,7 +229,7 @@ while :; do
 	if grep -qiE 'notauthenticated|"status": 401' <<< "$out"; then
 		auth_fail=$((auth_fail + 1))
 		if [ "$auth_fail" -le 20 ]; then
-			log "인증 실패 ${auth_fail}/20 (키 전파 지연으로 보임) — 15초 후 재시도"
+			log "인증 실패 ${auth_fail}/20 (응답 ${took}초, 키 전파 지연으로 보임) — 15초 후 재시도  |  $(summarize "$out")"
 			sleep 15
 			continue
 		fi
@@ -199,7 +242,7 @@ while :; do
 	# 용량 대기와 성격이 같으므로 같은 간격으로 재시도한다.
 	if grep -qiE 'requestexception|timed out|timeout|connection (aborted|reset|error)|serviceunavailable|internalservererror|"status": 5[0-9][0-9]' <<< "$out"; then
 		transient=$((transient + 1))
-		log "일시적 통신 오류 #${transient} — ${INTERVAL}초 후 재시도"
+		log "일시적 통신 오류 #${transient} (${took}초 후 실패, 서버 응답 없음) — ${INTERVAL}초 후 재시도  |  $(summarize "$out")"
 		sleep "$INTERVAL"
 		continue
 	fi
