@@ -5,16 +5,27 @@
 #
 # (`scripts/bootstrap.sh` 가 이 두 줄을 대신 실행한다.)
 #
+# 이 파일은 **도메인·TLS 를 요구하지 않는다.** 도메인이 아직 없거나 임시 검증 호스트에 올릴 때 이 조합만
+# 쓰면 평문 `:80` 으로 뜬다. 도메인을 붙일 때 `compose.prod.tls.yaml` 을 한 겹 더 얹는다:
+#
+#   docker compose -f compose.yaml -f compose.prod.yaml -f compose.prod.tls.yaml up -d
+#   ./scripts/bootstrap.sh compose.prod.tls.yaml        # 동일
+#
 # base 와의 차이 네 가지:
-#   1. app·dashboard 를 소스에서 빌드하지 않고 GHCR 에 발행된 arm64 이미지를 pull 한다
-#      (`.github/workflows/release.yml`). 2 OCPU 서버에서 Gradle·Next 빌드를 돌리지 않기 위한 것이다.
-#   2. Caddy 를 도메인 + 자동 HTTPS(`Caddyfile.prod`)로 바꾸고 80/443 을 공개한다.
+#   1. app·dashboard 를 소스에서 빌드하지 않고 GHCR 에 발행된 이미지를 pull 한다
+#      (`.github/workflows/release.yml`, arm64+amd64 멀티아치). 2 OCPU 서버에서 Gradle·Next 빌드를
+#      돌리지 않기 위한 것이다.
+#   2. Caddy 를 표준 포트 80 으로 옮긴다(base 는 로컬 편의용 8080).
 #   3. 컨테이너별 메모리 상한을 준다. base 에는 상한이 없어 여덟 컨테이너가 호스트 RAM 을 무제한으로
 #      경쟁하고, JVM 힙도 상한을 못 읽는다(Dockerfile 의 MaxRAMPercentage 참고).
 #      base 에 서비스를 추가하면 여기에도 상한과 logging 을 추가해야 한다 — 빠뜨리면 그 컨테이너만
 #      무제한이 된다.
 #   4. db 의 호스트 포트 공개를 닫는다. base 의 `5435:5432` 는 로컬 편의용인데 0.0.0.0 바인딩이라
 #      공개 서버에서는 Postgres 가 인터넷에 열린다.
+#
+# ⚠️ 이 조합만으로 공개하면 **평문 HTTP** 다. 관리 콘솔 로그인(#11)이 평문으로 나가므로, 도메인·TLS 를
+# 붙이기 전에는 관리자 자격을 설정하지 않거나(미설정 시 `/api/**` 가 fail closed) 재사용하지 않는
+# throwaway 값을 쓴다. 자세한 내용은 docs/engineering/deployment.md 의 "평문 모드".
 #
 # `!override`/`!reset` 태그는 Docker Compose v2.24.0+ 가 필요하다(그 이전 버전은 리스트를 병합해버려
 # base 의 포트 공개가 남는다). bootstrap.sh 가 최신 compose 플러그인을 설치한다.
@@ -58,23 +69,10 @@ services:
           memory: 512m
 
   caddy:
-    environment:
-      # 서비스할 호스트네임. 미설정이면 여기서 즉시 실패한다 — 빈 사이트 주소로 Caddy 가 죽어
-      # 인증서 발급 실패로 보이는 것보다 낫다.
-      DOMAIN: ${DOMAIN:?set DOMAIN (e.g. app.example.com) — Caddy 사이트 주소이자 인증서 대상}
-      # Let's Encrypt 계정 메일. 만료·발급 실패 알림이 여기로 온다.
-      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL — 인증서 만료 알림 수신 주소}
-    # base 의 8080 은 닫고 표준 포트만 연다. 443/udp 는 HTTP/3.
+    # base 의 8080 대신 표준 80 을 연다. 도메인·TLS 는 compose.prod.tls.yaml 이 담당하므로 여기서는
+    # base Caddyfile(평문 `:80`, 같은 라우팅)을 그대로 쓴다 — 도메인이 없어도 스택이 뜬다.
     ports: !override
       - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    # 같은 마운트 지점(/etc/caddy/Caddyfile)에 두 파일이 겹치지 않도록 목록을 통째로 교체한다.
-    volumes: !override
-      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
-      # 발급된 인증서가 여기 남는다. 이 볼륨을 지우면 재발급이 일어나 Let's Encrypt 레이트리밋을
-      # 소모하므로 `compose down -v` 를 프로덕션에서 쓰지 않는다.
-      - caddy-data:/data
     logging: *logging
     deploy:
       resources:

@@ -76,10 +76,15 @@ oci setup config      # user OCID / tenancy OCID / region=ap-tokyo-1 → API 키
 
 콘솔 → Networking → Virtual Cloud Networks → 해당 VCN → Security Lists(또는 인스턴스의 NSG)에서 인그레스 추가:
 
-| 소스 | 프로토콜 | 포트 |
-|---|---|---|
-| `0.0.0.0/0` | TCP | 80, 443 |
-| `0.0.0.0/0` | UDP | 443 (HTTP/3) |
+| 소스 | 프로토콜 | 포트 | 언제 |
+|---|---|---|---|
+| `0.0.0.0/0` | TCP | 80 | 항상 |
+| `0.0.0.0/0` | TCP | 443 | TLS 모드 |
+| `0.0.0.0/0` | UDP | 443 (HTTP/3) | TLS 모드 |
+
+> `bootstrap.sh` 가 여는 **호스트** 방화벽도 모드에 맞춰 갈린다 — 평문 모드에서는 443 에 아무것도
+> 리스닝하지 않으므로 열지 않는다(방화벽 규칙은 영구 저장되니 한 번 열면 남는다). TLS 로 전환할 때
+> 다시 실행하면 열린다. VCN 쪽은 콘솔 작업이라 미리 열어둬도 무해하다.
 
 > 호스트 방화벽만 열고 VCN을 빼먹으면 증상이 **"인증서 발급 실패"**로 나타난다 — ACME HTTP-01 챌린지가
 > 오리진에 닿지 못하기 때문이다. 원인을 엉뚱한 곳에서 찾게 되는 대표적인 함정이다.
@@ -121,24 +126,67 @@ $EDITOR .env
 
 ## 4. 기동
 
+### 두 가지 모드
+
+| 모드 | 명령 | 도메인 | 언제 |
+|---|---|---|---|
+| **평문** | `./scripts/bootstrap.sh` | 불필요 | 도메인이 아직 없을 때, 임시 검증 호스트 |
+| **TLS** | `./scripts/bootstrap.sh compose.prod.tls.yaml` | **필요** (`DOMAIN`·`ACME_EMAIL`) | 공개 데모 |
+
+`compose.prod.yaml` 은 도메인을 요구하지 않는다 — 발행 이미지·메모리 상한·로그 회전·db 비공개는
+두 모드가 공유하고, 도메인·자동 HTTPS·443 은 `compose.prod.tls.yaml` 이 얹는다. 변수 보간은 파일을 읽는
+시점에 일어나므로 `${DOMAIN:?}` 를 나중 오버레이로 무력화할 수 없다 — TLS 요구를 별 파일로 뺀 이유다.
+
+### ⚠️ 평문 모드의 제약
+
+HTTP 이므로 **관리 콘솔 로그인(#11) 자격이 평문으로 전송된다.** 공개 IP 에 평문으로 띄울 때는:
+
+- 관리자 자격(`REPUTATION_POOL_ADMIN_*`)을 **설정하지 않는다.** 미설정이면 `/api/**` 가 fail closed 라
+  대시보드 화면과 public health 는 보이고 로그인만 불가하다 — 배포 경로 검증에는 충분하다
+- 굳이 켜야 하면 **재사용하지 않는 throwaway 값**만 쓴다
+- Grafana 는 두 모드 모두 loopback 바인딩이므로 SSH 터널로만 접근한다(§8)
+
+XFF 위조는 두 모드 모두 막혀 있다 — base `Caddyfile` 도 `header_up X-Forwarded-For {remote_host}` 로
+헤더를 덮어쓴다(§6, [`security.md`](security.md) 참고).
+
+
+
 > **선행 1회: GHCR 패키지를 public 으로 바꾼다.** `release.yml` 이 처음 발행한 직후 패키지는 **private**이
 > 기본이라 서버의 익명 `pull` 이 `denied` 로 실패한다. GitHub → 레포 → Packages → `app`·`dashboard` 각각 →
 > Package settings → Change visibility → **Public**. private 로 유지하려면 서버에서 `read:packages` 권한
 > PAT 로 `docker login ghcr.io` 를 먼저 해야 한다.
 
 ```bash
-./scripts/bootstrap.sh
+./scripts/bootstrap.sh                        # 평문
+./scripts/bootstrap.sh compose.prod.tls.yaml  # 도메인 + 자동 HTTPS
 ```
 
 하는 일: 사전 검사 → 도커·compose 설치(없으면) → 호스트 방화벽 80/443 → `compose pull` → `up -d` →
-app 헬스 대기. 멱등하므로 **재실행이 곧 재배포**다.
+app 헬스 대기. 멱등하므로 **재실행이 곧 재배포**다. 인자로 넘긴 오버레이는 뒤에 덧붙는다(§9 의 6GB
+프로파일도 같은 방식이며, 함께 쓸 수 있다).
 
 수동으로 할 때:
 
 ```bash
-docker compose -f compose.yaml -f compose.prod.yaml pull
-docker compose -f compose.yaml -f compose.prod.yaml up -d
+docker compose -f compose.yaml -f compose.prod.yaml up -d                            # 평문
+docker compose -f compose.yaml -f compose.prod.yaml -f compose.prod.tls.yaml up -d   # TLS
 ```
+
+**평문 → TLS 전환**은 도메인이 준비된 뒤 오버레이를 하나 더 얹어 재실행하면 된다. 컨테이너와 볼륨은
+그대로 재사용되고 Caddy 만 교체된다.
+
+### 모드를 `.env` 에 고정한다 (TLS 호스트에서 필수)
+
+`bootstrap.sh` 는 **재배포·롤백 경로이기도 하다**(§7). TLS 로 띄운 호스트에서 인자 없이 재실행하면
+TLS 오버레이가 빠져 **HTTPS 가 평문으로 내려앉는다.** 모드는 호스트의 성질이므로 `.env` 에 남긴다:
+
+```bash
+DEPLOY_OVERLAYS=compose.prod.tls.yaml
+```
+
+인자 없이 실행하면 이 값이 쓰이고, CLI 인자가 있으면 그것이 우선한다. 그래도 실수로 평문 재실행을 하면
+**다운그레이드 가드**가 막는다 — 실행 중인 caddy 가 `Caddyfile.prod` 를 마운트하고 있으면 거부하고,
+의도적으로 내릴 때만 `ALLOW_PLAINTEXT_DOWNGRADE=1` 로 통과시킨다.
 
 ## 5. DNS와 Cloudflare — 순서가 중요하다
 
