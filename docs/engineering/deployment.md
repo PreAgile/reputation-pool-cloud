@@ -76,10 +76,15 @@ oci setup config      # user OCID / tenancy OCID / region=ap-tokyo-1 → API 키
 
 콘솔 → Networking → Virtual Cloud Networks → 해당 VCN → Security Lists(또는 인스턴스의 NSG)에서 인그레스 추가:
 
-| 소스 | 프로토콜 | 포트 |
-|---|---|---|
-| `0.0.0.0/0` | TCP | 80, 443 |
-| `0.0.0.0/0` | UDP | 443 (HTTP/3) |
+| 소스 | 프로토콜 | 포트 | 언제 |
+|---|---|---|---|
+| `0.0.0.0/0` | TCP | 80 | 항상 |
+| `0.0.0.0/0` | TCP | 443 | TLS 모드 |
+| `0.0.0.0/0` | UDP | 443 (HTTP/3) | TLS 모드 |
+
+> `bootstrap.sh` 가 여는 **호스트** 방화벽도 모드에 맞춰 갈린다 — 평문 모드에서는 443 에 아무것도
+> 리스닝하지 않으므로 열지 않는다(방화벽 규칙은 영구 저장되니 한 번 열면 남는다). TLS 로 전환할 때
+> 다시 실행하면 열린다. VCN 쪽은 콘솔 작업이라 미리 열어둬도 무해하다.
 
 > 호스트 방화벽만 열고 VCN을 빼먹으면 증상이 **"인증서 발급 실패"**로 나타난다 — ACME HTTP-01 챌린지가
 > 오리진에 닿지 못하기 때문이다. 원인을 엉뚱한 곳에서 찾게 되는 대표적인 함정이다.
@@ -169,6 +174,19 @@ docker compose -f compose.yaml -f compose.prod.yaml -f compose.prod.tls.yaml up 
 
 **평문 → TLS 전환**은 도메인이 준비된 뒤 오버레이를 하나 더 얹어 재실행하면 된다. 컨테이너와 볼륨은
 그대로 재사용되고 Caddy 만 교체된다.
+
+### 모드를 `.env` 에 고정한다 (TLS 호스트에서 필수)
+
+`bootstrap.sh` 는 **재배포·롤백 경로이기도 하다**(§7). TLS 로 띄운 호스트에서 인자 없이 재실행하면
+TLS 오버레이가 빠져 **HTTPS 가 평문으로 내려앉는다.** 모드는 호스트의 성질이므로 `.env` 에 남긴다:
+
+```bash
+DEPLOY_OVERLAYS=compose.prod.tls.yaml
+```
+
+인자 없이 실행하면 이 값이 쓰이고, CLI 인자가 있으면 그것이 우선한다. 그래도 실수로 평문 재실행을 하면
+**다운그레이드 가드**가 막는다 — 실행 중인 caddy 가 `Caddyfile.prod` 를 마운트하고 있으면 거부하고,
+의도적으로 내릴 때만 `ALLOW_PLAINTEXT_DOWNGRADE=1` 로 통과시킨다.
 
 ## 5. DNS와 Cloudflare — 순서가 중요하다
 

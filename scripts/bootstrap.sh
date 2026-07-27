@@ -17,6 +17,12 @@
 #   ./scripts/bootstrap.sh compose.prod.tls.yaml    # 도메인 + 자동 HTTPS (DOMAIN/ACME_EMAIL 필요)
 #   ./scripts/bootstrap.sh compose.prod.6gb.yaml    # 1 OCPU/6GB 인스턴스
 #
+# 재배포마다 인자를 기억하지 않으려면 .env 에 남긴다 — 모드는 호스트의 성질이다:
+#
+#   DEPLOY_OVERLAYS=compose.prod.tls.yaml
+#
+# 인자 없이 재실행해 TLS 가 빠지는 사고는 다운그레이드 가드가 막는다(§2-1).
+#
 # 이 스크립트가 하지 못하는 것: OCI 콘솔의 VCN Security List(또는 NSG) 인그레스 규칙. 호스트 방화벽만
 # 열려 있고 VCN 이 막혀 있으면 증상이 "인증서 발급 실패"로 나타나 원인을 찾기 어렵다 — 종료 시 안내한다.
 #
@@ -26,9 +32,8 @@ set -euo pipefail
 
 COMPOSE_FILES=(-f compose.yaml -f compose.prod.yaml)
 # .env 에 반드시 값이 있어야 하는 키. compose 도 `:?` 로 검사하지만, 컨테이너를 띄우기 시작한 뒤에
-# 실패하는 것보다 먼저 한 번에 알려주는 편이 낫다.
-# 값이 반드시 있어야 하는 키. DOMAIN/ACME_EMAIL 은 여기 없다 — 평문 모드(도메인 없이 :80)로도 뜨게
-# 하려는 것이고, TLS 오버레이(compose.prod.tls.yaml)를 쓸 때는 그 파일의 `:?` 가 즉시 실패시킨다.
+# 실패하는 것보다 먼저 한 번에 알려주는 편이 낫다. DOMAIN/ACME_EMAIL 은 여기 없다 — 평문 모드로도
+# 뜨게 하려는 것이고, TLS 오버레이를 쓸 때는 그 파일의 `:?` 가 즉시 실패시킨다.
 REQUIRED_ENV=(
 	REPUTATION_POOL_API_KEY
 	GRAFANA_ADMIN_PASSWORD
@@ -60,12 +65,32 @@ log "사전 검사"
 [ -f compose.prod.yaml ] || die "compose.prod.yaml 이 없다 — 레포 루트에서 실행한다"
 [ -f .env ] || die ".env 가 없다 — 'cp .env.example .env' 후 시크릿과 DOMAIN/ACME_EMAIL 을 채운다"
 
-# 추가 오버레이(예: compose.prod.6gb.yaml)를 인자로 받는다. 없는 파일을 조용히 무시하면 상한이 적용되지
-# 않은 채 뜨므로 즉시 실패시킨다.
-for overlay in "$@"; do
+# 추가 오버레이 해석. 우선순위: CLI 인자 > .env 의 DEPLOY_OVERLAYS > 없음.
+#
+# .env 를 경유하는 이유: 이 스크립트는 재배포·롤백 경로이기도 한데, TLS 로 띄운 호스트에서 인자 없이
+# 재실행하면 TLS 오버레이가 빠져 **HTTPS 가 평문으로 내려앉는다.** 모드는 호스트의 성질이므로 명령줄이
+# 아니라 호스트 설정(.env)에 남아야 한다. 아래 다운그레이드 가드가 최후 방어선이다.
+overlays=("$@")
+if [ ${#overlays[@]} -eq 0 ] && [ -f .env ]; then
+	env_overlays="$(grep -E '^DEPLOY_OVERLAYS=' .env | head -1 | cut -d= -f2-)"
+	if [ -n "$env_overlays" ]; then
+		# 공백 구분 목록. 단어 분리가 의도된 곳이다.
+		read -ra overlays <<< "$env_overlays"
+		echo "ok: .env 의 DEPLOY_OVERLAYS 사용 — ${overlays[*]}"
+	fi
+fi
+
+# 없는 파일을 조용히 무시하면 상한이나 TLS 가 적용되지 않은 채 뜨므로 즉시 실패시킨다.
+for overlay in "${overlays[@]}"; do
 	[ -f "$overlay" ] || die "오버레이 파일이 없다: $overlay"
 	COMPOSE_FILES+=(-f "$overlay")
 	echo "ok: 오버레이 추가 — $overlay"
+done
+
+# TLS 모드 여부. 방화벽 개방 범위와 종료 안내가 이 값으로 갈린다.
+tls_mode=no
+for overlay in "${overlays[@]}"; do
+	case "$overlay" in *compose.prod.tls.yaml) tls_mode=yes ;; esac
 done
 
 missing=()
@@ -127,20 +152,55 @@ fi
 echo "ok: compose ${compose_version}"
 
 # ---------------------------------------------------------------------------
+# 2-1. TLS → 평문 다운그레이드 가드
+#
+# 이미 TLS 로 돌고 있는 호스트에서 평문 모드로 재실행하면 Caddy 가 교체되어 **HTTPS 가 조용히 내려앉는다**
+# (443 이 닫히고 :80 평문만 남는다). 재배포·롤백이 같은 스크립트라 실수하기 쉬운 경로다. 실행 중인
+# caddy 컨테이너가 Caddyfile.prod 를 마운트하고 있으면 TLS 운영 중으로 보고 거부한다.
+# 의도적으로 내리려면 ALLOW_PLAINTEXT_DOWNGRADE=1 을 명시한다.
+# ---------------------------------------------------------------------------
+if [ "$tls_mode" = no ]; then
+	caddy_cid="$("${DOCKER[@]}" compose "${COMPOSE_FILES[@]}" ps -q caddy 2> /dev/null | head -1 || true)"
+	if [ -n "$caddy_cid" ] \
+		&& "${DOCKER[@]}" inspect "$caddy_cid" --format '{{range .Mounts}}{{.Source}} {{end}}' 2> /dev/null \
+		| grep -q 'Caddyfile\.prod'; then
+		if [ "${ALLOW_PLAINTEXT_DOWNGRADE:-0}" = 1 ]; then
+			log "경고: TLS 로 돌던 스택을 평문으로 내린다 (ALLOW_PLAINTEXT_DOWNGRADE=1)"
+		else
+			die "이 호스트는 TLS(HTTPS)로 돌고 있는데 평문 모드로 재실행하려 한다 — HTTPS 가 내려앉는다.
+  TLS 를 유지하려면:  ./scripts/bootstrap.sh compose.prod.tls.yaml
+  또는 .env 에      DEPLOY_OVERLAYS=compose.prod.tls.yaml  을 넣어 재실행마다 자동 적용한다.
+  의도적으로 평문으로 내리려면:  ALLOW_PLAINTEXT_DOWNGRADE=1 ./scripts/bootstrap.sh"
+		fi
+	fi
+fi
+
+# ---------------------------------------------------------------------------
 # 3. 호스트 방화벽 — 80/443 인그레스. Oracle 이미지는 기본이 차단이다: Oracle Linux 는 firewalld,
 #    Ubuntu 는 INPUT 마지막의 REJECT 룰. 열지 않으면 ACME HTTP-01 챌린지부터 실패한다.
 # ---------------------------------------------------------------------------
-log "호스트 방화벽 (80/443 인그레스)"
+# 열 포트를 모드에 맞춘다. 평문 모드에서는 443 에 아무것도 리스닝하지 않으므로 열어둘 이유가 없다 —
+# 방화벽 규칙은 영구 저장되니 한 번 열면 남는다. TLS 로 전환할 때 이 스크립트를 다시 돌리면 열린다.
+if [ "$tls_mode" = yes ]; then
+	log "호스트 방화벽 (80/443 인그레스 — TLS 모드)"
+else
+	log "호스트 방화벽 (80 인그레스 — 평문 모드, 443 은 열지 않는다)"
+fi
 if command -v firewall-cmd > /dev/null 2>&1 && $SUDO firewall-cmd --state > /dev/null 2>&1; then
-	$SUDO firewall-cmd --permanent --add-service=http --add-service=https > /dev/null
-	# HTTP/3 (Caddy 의 443/udp).
-	$SUDO firewall-cmd --permanent --add-port=443/udp > /dev/null
+	$SUDO firewall-cmd --permanent --add-service=http > /dev/null
+	if [ "$tls_mode" = yes ]; then
+		$SUDO firewall-cmd --permanent --add-service=https > /dev/null
+		# HTTP/3 (Caddy 의 443/udp).
+		$SUDO firewall-cmd --permanent --add-port=443/udp > /dev/null
+	fi
 	$SUDO firewall-cmd --reload > /dev/null
-	echo "ok: firewalld — http/https/443udp 허용"
+	echo "ok: firewalld — 허용 완료"
 elif command -v iptables > /dev/null 2>&1; then
 	# INPUT 1 번에 삽입한다: Oracle Ubuntu 이미지의 REJECT 룰 위치에 의존하지 않기 위한 것이다.
 	# 허용 대상이 80/443 뿐이라 맨 앞에 두어도 다른 정책을 넓히지 않는다. -C 로 멱등하게.
-	for spec in "tcp 80" "tcp 443" "udp 443"; do
+	specs=("tcp 80")
+	[ "$tls_mode" = yes ] && specs+=("tcp 443" "udp 443")
+	for spec in "${specs[@]}"; do
 		read -r proto port <<< "$spec"
 		for cmd in iptables ip6tables; do
 			command -v "$cmd" > /dev/null 2>&1 || continue
@@ -151,12 +211,12 @@ elif command -v iptables > /dev/null 2>&1; then
 	# 재부팅 후에도 남도록 저장. netfilter-persistent 가 없으면 경고만 하고 넘어간다(룰은 이미 적용됨).
 	if command -v netfilter-persistent > /dev/null 2>&1; then
 		$SUDO netfilter-persistent save > /dev/null
-		echo "ok: iptables — 80/443 허용 + 영구 저장"
+		echo "ok: iptables — 허용 + 영구 저장"
 	else
 		echo "warn: netfilter-persistent 가 없다 — 룰은 적용됐지만 재부팅 시 사라진다"
 	fi
 else
-	echo "warn: firewalld·iptables 를 찾지 못했다 — 80/443 인그레스를 직접 확인할 것"
+	echo "warn: firewalld·iptables 를 찾지 못했다 — 인그레스를 직접 확인할 것"
 fi
 
 # ---------------------------------------------------------------------------
@@ -193,12 +253,7 @@ done
 
 "${DOCKER[@]}" compose "${COMPOSE_FILES[@]}" ps
 
-# TLS 오버레이를 쓰는지로 안내를 갈라 준다 — 평문 모드에서 인증서 얘기를 하면 혼란만 준다.
-tls_mode=no
-for f in "${COMPOSE_FILES[@]}"; do
-	case "$f" in *compose.prod.tls.yaml) tls_mode=yes ;; esac
-done
-
+# 안내는 tls_mode 로 갈라 준다 — 평문 모드에서 인증서 얘기를 하면 혼란만 준다.
 printf '\n==> 완료. 남은 확인 (이 스크립트 밖)\n'
 printf '  1. OCI 콘솔 → Networking → VCN → Security List(또는 NSG) 인그레스 허용:\n'
 if [ "$tls_mode" = yes ]; then
