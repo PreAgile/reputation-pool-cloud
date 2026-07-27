@@ -109,6 +109,12 @@ keys="$(awk 'NF { printf "%s%s", sep, $0; sep = "\\n" } END { print "" }' "$SSH_
 [ -n "$keys" ] || die "SSH 공개키 파일이 비어 있다: $SSH_KEY_FILE"
 printf '{"ssh_authorized_keys": "%s"}' "$keys" > "$METADATA_FILE"
 
+if [ "$MAX_ATTEMPTS" -eq 0 ]; then
+	retry_desc="(무한)"
+else
+	retry_desc="(최대 ${MAX_ATTEMPTS}회)"
+fi
+
 cat <<EOF
 
 대상 구성
@@ -118,7 +124,7 @@ cat <<EOF
   subnet       ${SUBNET##*.}
   image        ${IMAGE##*.}
   ssh key      $SSH_KEY_FILE
-  재시도       ${INTERVAL}초 간격 $([ "$MAX_ATTEMPTS" -eq 0 ] && echo '(무한)' || echo "(최대 ${MAX_ATTEMPTS}회)")
+  재시도       ${INTERVAL}초 간격 ${retry_desc}
 
 중단은 Ctrl-C. 성공하면 자동으로 멈춥니다.
 EOF

@@ -49,7 +49,8 @@ fi
 # 1. 사전 검사 — 여기서 실패해야 나중에 반쯤 뜬 스택을 디버깅하지 않는다.
 # ---------------------------------------------------------------------------
 log "사전 검사"
-[ -f compose.yaml ] && [ -f compose.prod.yaml ] || die "레포 루트에서 실행해야 한다 (compose.yaml 이 없다)"
+[ -f compose.yaml ] || die "레포 루트에서 실행해야 한다 (compose.yaml 이 없다)"
+[ -f compose.prod.yaml ] || die "compose.prod.yaml 이 없다 — 레포 루트에서 실행한다"
 [ -f .env ] || die ".env 가 없다 — 'cp .env.example .env' 후 시크릿과 DOMAIN/ACME_EMAIL 을 채운다"
 
 # 추가 오버레이(예: compose.prod.6gb.yaml)를 인자로 받는다. 없는 파일을 조용히 무시하면 상한이 적용되지

@@ -96,7 +96,12 @@ jobs:
             -v "$PWD/Caddyfile.prod:/etc/caddy/Caddyfile:ro" \
             caddy:2 caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
 
-      # shellcheck ships on the runner image. bootstrap.sh runs as root on a public host — an unquoted
-      # expansion there is not a style issue.
+      # bootstrap.sh runs as root on a public host — an unquoted expansion there is not a style issue.
+      #
+      # Pinned to an image rather than the runner's preinstalled shellcheck: the runner image's version
+      # moves on its own schedule, so the same script can pass locally and fail here (it did — the two
+      # versions disagreed on SC2015). Pinning makes local and CI report identically; bump deliberately.
       - name: Shellcheck deploy scripts
-        run: shellcheck scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh
+        run: |
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 \
+            scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh
