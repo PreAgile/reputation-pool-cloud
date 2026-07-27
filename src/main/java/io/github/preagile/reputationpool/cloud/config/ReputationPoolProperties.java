@@ -16,6 +16,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param metering usage-metering rollup configuration
  * @param score reputation-score time-series sampling configuration
  * @param limits the shared-JVM global resource budget (issue #84)
+ * @param surgeThresholds the domain-surge alert thresholds published as gauges (issue #77)
  */
 @ConfigurationProperties("reputation-pool")
 public record ReputationPoolProperties(
@@ -25,7 +26,8 @@ public record ReputationPoolProperties(
         @DefaultValue Audit audit,
         @DefaultValue Metering metering,
         @DefaultValue Score score,
-        @DefaultValue Limits limits) {
+        @DefaultValue Limits limits,
+        @DefaultValue SurgeThresholds surgeThresholds) {
 
     /**
      * Reputation-engine tuning. Defaults mirror the L1 adapter demos and the reference server: window
@@ -128,6 +130,61 @@ public record ReputationPoolProperties(
             }
             if (maxCells <= 0) {
                 throw new IllegalArgumentException("limits.max-cells must be > 0, but was " + maxCells);
+            }
+        }
+    }
+
+    /**
+     * Thresholds for the domain-surge alert rules in {@code monitoring/alerts.yml} (issue #77), in
+     * transitions per minute.
+     *
+     * <p><b>Why these live in the app instead of in the rule file.</b> Prometheus does not expand
+     * environment variables inside rule files, so a threshold written literally into {@code alerts.yml}
+     * can only be changed by editing that file and reloading. Publishing each threshold as a gauge
+     * instead ({@link io.github.preagile.reputationpool.cloud.metrics.SurgeThresholdMetrics}) lets the
+     * rule compare the observed rate against a configured series, so an operator retunes it the same way
+     * as every other knob in this file — an environment variable — and the value is visible in Prometheus
+     * and plottable next to the actual rate.
+     *
+     * <p><b>Both defaults are an unmeasured hypothesis</b>, exactly like {@link Limits}: no production
+     * traffic backs them yet. What <em>is</em> derived rather than guessed is their <em>ratio</em>.
+     * A single {@code (resource, context)} pair cannot re-enter cooling until its cooldown expires
+     * (core's {@code ReputationEngine.shouldCool} refuses to repeat the event while one is active), and
+     * the first cooldown is {@code base(cause) × 2^(coolAfter-1)}. With {@link Engine#coolAfter()} at 2
+     * that is 60s for {@code SLOW} but 7200s for {@code BLOCKED} — a 120× spread. So the same
+     * transitions-per-minute figure means "a handful of chronically slow pairs" for the aggregate rate
+     * and "dozens of distinct pairs newly blocked" for {@code BLOCKED}, which is why the blocking
+     * threshold is an order of magnitude lower. {@code coolingPerMinute} anchors on the existing
+     * {@code ResourceBlocklistSurge} rule's 10/min so the two domain-surge rules stay comparable.
+     *
+     * <p>Tune once real traffic is observed: see {@code monitoring/README.md} for the derivation
+     * (measure the steady-state rate, then set the threshold as a multiple of it).
+     *
+     * @param coolingPerMinute transitions into {@code COOLING} per minute, across all causes, above
+     *     which {@code ResourceCoolingSurge} fires
+     * @param blockingPerMinute transitions into {@code COOLING} caused by {@code BLOCKED} per minute
+     *     above which {@code UpstreamBlockingSurge} fires
+     */
+    public record SurgeThresholds(
+            @DefaultValue("10") double coolingPerMinute,
+            @DefaultValue("1") double blockingPerMinute) {
+
+        /**
+         * Fail fast on misconfiguration, the same posture as {@link Limits}. A non-positive threshold is
+         * never valid: the rules compare a rate that is {@code >= 0} against it, so zero or negative
+         * would make the alert fire on any activity at all (or on none) and turn into a permanent alert
+         * storm. Turning a rule off is done by removing it from {@code alerts.yml}, not by zeroing this.
+         *
+         * @throws IllegalArgumentException if either threshold is not positive or not finite
+         */
+        public SurgeThresholds {
+            requirePositiveFinite(coolingPerMinute, "surge-thresholds.cooling-per-minute");
+            requirePositiveFinite(blockingPerMinute, "surge-thresholds.blocking-per-minute");
+        }
+
+        private static void requirePositiveFinite(double value, String name) {
+            if (!Double.isFinite(value) || value <= 0) {
+                throw new IllegalArgumentException(name + " must be a finite number > 0, but was " + value);
             }
         }
     }

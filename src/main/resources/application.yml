@@ -119,6 +119,26 @@ reputation-pool:
   limits:
     max-resources: ${REPUTATION_POOL_MAX_RESOURCES:100000}
     max-cells: ${REPUTATION_POOL_MAX_CELLS:500000}
+  # 도메인 급증 알림 임계값(이슈 #77), 단위는 "분당 전이 건수". monitoring/alerts.yml 의
+  # ResourceCoolingSurge / UpstreamBlockingSurge 가 이 값을 게이지 시계열로 읽어 비교한다.
+  #
+  # 왜 룰 파일이 아니라 여기 있나: Prometheus 는 룰 파일에서 환경변수를 치환하지 않는다. 임계값을
+  # alerts.yml 에 숫자로 박으면 파일을 고쳐 리로드하는 것 말고는 바꿀 방법이 없다. 게이지로 노출하면
+  # 이 레포의 다른 모든 노브와 같은 경로(환경변수)로 조정되고, 값이 Prometheus 에 보여서 Grafana 에서
+  # 실제 냉각율과 임계선을 같은 패널에 겹쳐 볼 수 있다(남은 여유를 눈으로 확인할 수 있다).
+  #
+  # 두 기본값은 limits 와 마찬가지로 실측 없는 가설이다 — 아직 프로덕션 트래픽이 없다. 다만 둘의
+  # "비율"은 감이 아니라 도출된 값이다: 한 (리소스, 컨텍스트) 짝은 쿨다운이 끝나기 전에는 다시 냉각
+  # 이벤트를 내지 않고(core ReputationEngine.shouldCool), 첫 쿨다운은 base(cause) × 2^(cool-after-1)
+  # 이라 cool-after=2 에서 SLOW 는 60초·BLOCKED 는 7200초 — 120배 차이다. 그래서 같은 "분당 N건"이
+  # 전체 합산에서는 "만성적으로 느린 짝 몇 개", BLOCKED 에서는 "서로 다른 짝 수십 개가 새로 차단"을
+  # 뜻하므로 blocking 임계가 한 자릿수 낮다. cooling 은 기존 ResourceBlocklistSurge 의 10/분에 맞췄다.
+  #
+  # 실측 후 조정법(평상시 대비 배수로 잡는다)은 monitoring/README.md "급증 임계값 조정" 참고.
+  # 0 이나 음수는 부팅 시 거부한다 — 룰을 끄려면 alerts.yml 에서 룰을 지운다.
+  surge-thresholds:
+    cooling-per-minute: ${REPUTATION_POOL_COOLING_SURGE_THRESHOLD:10}
+    blocking-per-minute: ${REPUTATION_POOL_BLOCKING_SURGE_THRESHOLD:1}
   # 상태 전이 알림 MVP(이슈 #45, A 조각). 리소스가 BLOCKLISTED로 전이하면 운영자가 대시보드를 보고 있지
   # 않아도 webhook 알림을 받는다. opt-in·fail-safe: enabled=false 또는 webhook-url이 비어 있으면 완전
   # no-op이라 아무것도 전송하지 않는다(둘 다 설정해야 발동). 전송은 엔진 핫패스를 막지 않도록 별도 스레드에서

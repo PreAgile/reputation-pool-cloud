@@ -1,6 +1,14 @@
-# SLO 기반 알림 규칙 (#14 / D7b). 지금은 Prometheus 가 평가만 한다(ALERTS 시계열/그래프로 확인) —
-# Alertmanager 로 실제 통지 라우팅하는 건 #15(프로덕션 인프라) 후속. 지표는 #68 로 이미 노출된
-# http_server_requests(가용성·지연)와 hikaricp(DB 풀), reputation.*(도메인)에서 뽑는다.
+# SLO 기반 알림 규칙 (#14 / D7b). Prometheus 가 룰을 평가하고(ALERTS 시계열/그래프로도 확인 가능),
+# firing 알림은 prometheus.yml 의 alerting.alertmanagers 를 통해 Alertmanager 로 넘어가 grouping·
+# dedup·silence 를 거쳐 통지된다(#76). 지표는 #68 로 이미 노출된 http_server_requests(가용성·지연)와
+# hikaricp(DB 풀), reputation.*(도메인), grpc_server_*(데이터플레인 #78)에서 뽑는다.
+#
+# 임계값을 이 파일에 숫자로 박은 룰과, 앱이 게이지로 노출한 설정값을 읽는 룰이 섞여 있다. 후자(#77)는
+# Prometheus 가 룰 파일에서 환경변수를 치환하지 않기 때문에 그렇게 했다 — 자세한 근거는 해당 룰 주석과
+# application.yml 의 surge-thresholds 블록 참고.
+#
+# 이 파일은 CI 에서 promtool 로 검증된다: `check rules`(문법) + `test rules monitoring/alerts-test.yml`
+# (시계열을 주입해 발화 여부를 단정하는 단위 테스트). 룰을 고치면 그 테스트도 같이 고친다.
 groups:
   - name: reputation-pool-slo
     rules:
@@ -82,3 +90,73 @@ groups:
           severity: critical
         annotations:
           summary: "gRPC 서버 귀책 에러율 5% 초과 (최근 5분)"
+
+      # 도메인 신호: 리소스 냉각 급증 (#77). COOLING 은 정상 사이클의 한 칸이므로(core ResourceState:
+      # HEALTHY → COOLING → RECOVERING → HEALTHY) 개별 전이는 알리지 않는다 — 짧은 시간에 여러 자원이
+      # 함께 냉각되는 "속도"만 신호다. 원인이 자원 하나에 있을 수 없는 층위이고, 운영자가 개입할 여지가
+      # 있는 것도 이 층위뿐이다. 차단(ResourceBlocklistSurge)보다 앞선 조기 신호다.
+      #
+      # 카운터는 이미 전이당 1회로 중복제거돼 있다 — core ReputationEngine.shouldCool 이 쿨다운이 살아
+      # 있는 동안의 추가 실패로는 재냉각도 재이벤트도 만들지 않는다("이미 벌 받고 있는 사건에 속한 늦게
+      # 도착한 결과"). 그래서 룰에서 중복을 따로 걸러낼 필요가 없다.
+      #
+      # cause 로 쪼개지 않는다: 임계가 원인별로 적용되면 여러 원인에 고르게 퍼진 급증을 전부 놓친다
+      # (alerts-test.yml 의 "여러 원인에 분산된 급증" 케이스가 이걸 고정한다 — 5개 원인 × 4/분 = 총
+      # 20/분). 원인별 분해는 Grafana "냉각 원인별 비율" 패널이 담당한다.
+      #
+      # 임계값은 reputation_alert_cooling_surge_threshold 게이지에서 읽는다(앱 설정 surge-thresholds).
+      #
+      # scalar() 를 그냥 쓰지 않고 max() 로 먼저 접는 이유: scalar() 는 입력 벡터가 원소 1개일 때만 값을
+      # 내고 2개 이상이면 NaN 을 돌려준다 — 그러면 비교가 조용히 거짓이 되어 알림이 무동작한다. 지금은
+      # app 컨테이너가 하나라 시계열도 하나지만, 인스턴스가 늘거나(#85 멀티인스턴스) 롤링 중 두 타깃이
+      # 겹치면 인스턴스별 게이지가 생긴다. 그 경우를 absent() 워치독은 잡지 못하므로(있기는 하니까),
+      # 인스턴스 수와 무관하게 단일 값이 되도록 집계해 둔다. 모든 인스턴스가 같은 설정을 읽으므로 어떤
+      # 집계든 같은 값이고, max() 는 값이 갈릴 때 더 보수적인(늦게 우는) 쪽을 고른다.
+      #
+      # 좌변도 sum(...) 으로 이미 전역 합산이라, 양변 모두 인스턴스에 무관하다.
+      - alert: ResourceCoolingSurge
+        expr: >
+          sum(rate(reputation_resource_cooled_total[5m])) * 60
+          > scalar(max(reputation_alert_cooling_surge_threshold))
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "리소스 냉각 급증 (분당 임계 초과, 최근 5분)"
+          description: "원인별 분해는 Grafana '냉각 원인별 비율' 패널에서 확인한다. 임계값은 surge-thresholds.cooling-per-minute."
+
+      # 업스트림 차단 급증 (#77). 위 룰이 원리적으로 볼 수 없는 사건을 위한 별도 룰이다.
+      #
+      # BLOCKED 의 첫 쿨다운은 7200초(core AdaptiveCooldownPolicy base 3600 × 2^(cool-after-1))라, 한
+      # (리소스, 컨텍스트) 짝은 두 시간에 한 번만 이 카운터를 올릴 수 있다. 그래서 낮은 비율조차 "서로
+      # 다른 짝 여러 개가 5분 안에 새로 차단됐다"는 뜻이고, 반대로 위 룰의 임계(전체 10/분)는 BLOCKED
+      # 에게는 짝 50개에 해당해 한참 늦다 — 전체 합산 룰만 두면 BLOCKED 만 오르는 상황을 놓친다
+      # (alerts-test.yml 의 "BLOCKED 만 오르는 급증" 케이스가 이걸 고정한다).
+      # core penalty() 도 BLOCKED 을 30.0(SLOW 2.0의 15배)으로 매기고 있어 별도·저임계 취급이 맞다.
+      #
+      # severity 는 warning 이다: ResourceBlocklistSurge 와 같은 등급이고, 새벽에 받아도 즉시 취할 수
+      # 있는 조치가 없다. critical 승격은 통지 채널이 실제로 붙는 #98(on-call 에스컬레이션)에서 판단한다.
+      - alert: UpstreamBlockingSurge
+        expr: >
+          sum(rate(reputation_resource_cooled_total{cause="BLOCKED"}[5m])) * 60
+          > scalar(max(reputation_alert_blocking_surge_threshold))
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "업스트림 차단 급증 (BLOCKED 원인 냉각이 분당 임계 초과, 최근 5분)"
+          description: "상대가 우리를 차단하기 시작했을 가능성. 임계값은 surge-thresholds.blocking-per-minute."
+
+      # 워치독 (#77): 위 두 룰이 비교 대상으로 쓰는 임계값 게이지가 사라지면, 비교식이 빈 결과/NaN 이
+      # 되어 두 알림이 "조용히" 꺼진다 — 깨졌는데 조용한 것이 가장 위험한 실패 모드다. 앱이 부팅 시
+      # 무조건 등록하므로(SurgeThresholdMetrics) 이 알림이 켜지는 건 스크레이프가 끊겼거나 메트릭
+      # 이름이 바뀐 것이다. 급증 알림 자체보다 먼저 고쳐야 하므로 severity 를 같은 warning 으로 둔다.
+      - alert: SurgeThresholdMetricMissing
+        expr: >
+          absent(reputation_alert_cooling_surge_threshold)
+          or absent(reputation_alert_blocking_surge_threshold)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "급증 알림 임계값 지표가 없다 — ResourceCoolingSurge/UpstreamBlockingSurge 가 무동작 중일 수 있다"
