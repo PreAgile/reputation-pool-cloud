@@ -72,7 +72,9 @@ log "사전 검사"
 # 아니라 호스트 설정(.env)에 남아야 한다. 아래 다운그레이드 가드가 최후 방어선이다.
 overlays=("$@")
 if [ ${#overlays[@]} -eq 0 ] && [ -f .env ]; then
-	env_overlays="$(grep -E '^DEPLOY_OVERLAYS=' .env | head -1 | cut -d= -f2-)"
+	# `|| true` 가 필수다: grep 이 못 찾으면 1 을 반환하고, pipefail 이 그것을 파이프라인 상태로 올려
+	# `set -e` 가 스크립트를 여기서 끝낸다 — DEPLOY_OVERLAYS 가 없는 것이 기본 경로이므로 항상 죽는다.
+	env_overlays="$(grep -E '^DEPLOY_OVERLAYS=' .env | head -1 | cut -d= -f2- || true)"
 	if [ -n "$env_overlays" ]; then
 		# 공백 구분 목록. 단어 분리가 의도된 곳이다.
 		read -ra overlays <<< "$env_overlays"
@@ -80,25 +82,28 @@ if [ ${#overlays[@]} -eq 0 ] && [ -f .env ]; then
 	fi
 fi
 
-# 없는 파일을 조용히 무시하면 상한이나 TLS 가 적용되지 않은 채 뜨므로 즉시 실패시킨다.
-for overlay in "${overlays[@]}"; do
-	[ -f "$overlay" ] || die "오버레이 파일이 없다: $overlay"
-	COMPOSE_FILES+=(-f "$overlay")
-	echo "ok: 오버레이 추가 — $overlay"
-done
-
 # TLS 모드 여부. 방화벽 개방 범위와 종료 안내가 이 값으로 갈린다.
 tls_mode=no
-for overlay in "${overlays[@]}"; do
-	case "$overlay" in *compose.prod.tls.yaml) tls_mode=yes ;; esac
-done
+
+# 빈 배열을 순회하기 전에 개수를 확인한다: macOS 기본 bash 3.2 는 `set -u` 에서 `"${arr[@]}"` 가
+# 빈 배열이면 "unbound variable" 로 죽는다(bash 4.4+ 는 괜찮다). 이 스크립트는 리눅스 호스트용이지만
+# 맥에서 검증할 수 있어야 한다 — 검증 경로가 막히면 버그가 서버에서야 드러난다.
+if [ ${#overlays[@]} -gt 0 ]; then
+	# 없는 파일을 조용히 무시하면 상한이나 TLS 가 적용되지 않은 채 뜨므로 즉시 실패시킨다.
+	for overlay in "${overlays[@]}"; do
+		[ -f "$overlay" ] || die "오버레이 파일이 없다: $overlay"
+		COMPOSE_FILES+=(-f "$overlay")
+		echo "ok: 오버레이 추가 — $overlay"
+		case "$overlay" in *compose.prod.tls.yaml) tls_mode=yes ;; esac
+	done
+fi
 
 missing=()
 for key in "${REQUIRED_ENV[@]}"; do
 	# 주석이 아니고 값이 비어 있지 않은 줄만 인정한다. source 하지 않는다(.env 는 실행 대상이 아니다).
 	grep -Eq "^${key}=.+" .env || missing+=("$key")
 done
-[ ${#missing[@]} -eq 0 ] || die ".env 에 값이 없다: ${missing[*]}"
+[ ${#missing[@]} -eq 0 ] || die ".env 에 값이 없다: ${missing[*]-}"
 
 undefined=()
 for key in "${REQUIRED_DEFINED_ENV[@]}"; do
@@ -106,13 +111,23 @@ for key in "${REQUIRED_DEFINED_ENV[@]}"; do
 	grep -Eq "^${key}=" .env || undefined+=("$key")
 done
 [ ${#undefined[@]} -eq 0 ] \
-	|| die ".env 에 정의 자체가 없다(값은 비어도 된다): ${undefined[*]} — .env.example 참고"
+	|| die ".env 에 정의 자체가 없다(값은 비어도 된다): ${undefined[*]-} — .env.example 참고"
 
 # 로컬 개발용 placeholder 가 공개 서버로 넘어오는 사고를 막는다(.env.example 의 값들).
 if grep -Eq '^REPUTATION_POOL_API_KEY=local-dev-key$|^GRAFANA_ADMIN_PASSWORD=local-dev-admin$' .env; then
 	die ".env 에 .env.example 의 로컬 placeholder 가 그대로 있다 — 공개 서버에서는 강한 난수로 바꾼다"
 fi
 echo "ok: .env 필수 키 확인"
+
+# 사전 검사까지만 확인하고 끝낸다. 이 스크립트는 도커 설치·방화벽·기동을 하므로 CI 에서 통째로 돌릴 수
+# 없는데, 그 결과 사전 검사 구간의 버그가 서버에서야 드러났다(grep 미매치가 set -e 로 스크립트를 죽인
+# 사고). DRY_RUN 은 그 구간만 실제로 실행해 CI 가 검증할 수 있게 하는 장치다.
+if [ "${DRY_RUN:-0}" = 1 ]; then
+	log "사전 검사 통과 (DRY_RUN=1 — 도커·방화벽·기동은 건너뛴다)"
+	echo "compose 파일: ${COMPOSE_FILES[*]}"
+	echo "tls_mode: $tls_mode"
+	exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # 2. 도커 — 없으면 설치. get.docker.com 은 도커가 공식 문서에서 안내하는 설치 경로이고
@@ -263,7 +278,9 @@ else
 fi
 
 if [ "$tls_mode" = yes ]; then
-	domain="$(grep -E '^DOMAIN=' .env | head -1 | cut -d= -f2-)"
+	# 위와 같은 이유로 `|| true`. TLS 모드면 값이 있어야 하지만, 없더라도 안내 문구가 깨질 뿐이지
+	# 스크립트가 죽어서는 안 된다(이미 기동은 끝난 시점이다).
+	domain="$(grep -E '^DOMAIN=' .env | head -1 | cut -d= -f2- || true)"
 	cat <<EOF
   2. DNS: ${domain:-<DOMAIN>} A/AAAA 레코드를 이 인스턴스로. Cloudflare 를 쓰면 인증서가 발급될
      때까지 DNS-only(회색 구름)로 두고, 발급 확인 후 proxied(주황 구름)로 전환한다.

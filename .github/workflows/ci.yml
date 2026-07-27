@@ -151,6 +151,46 @@ jobs:
               caddy:2 caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
           done
 
+      # shellcheck cannot catch this class of bug: `var=$(grep ... | head -1)` aborts the whole script
+      # under `set -e` + `pipefail` when grep matches nothing. That shipped and broke the default path on
+      # the server. DRY_RUN stops right after the precheck block so CI can actually execute it.
+      - name: Bootstrap prechecks (DRY_RUN)
+        run: |
+          ok_env=$'REPUTATION_POOL_API_KEY=ci-not-a-placeholder\nGRAFANA_ADMIN_PASSWORD=ci-not-a-placeholder\nREPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL='
+
+          # 남은 인자는 bootstrap.sh 의 **인자**로 넘긴다. `DRY_RUN=1 "$@" ./scripts/bootstrap.sh` 처럼
+          # 쓰면 오버레이 파일명이 명령어 위치로 들어가 `command not found` 가 된다(실제로 그랬다).
+          expect_pass() {
+            local label="$1" want_tls="$2" env_body="$3"; shift 3
+            printf '%s\n' "$env_body" > .env
+            local out
+            if ! out="$(DRY_RUN=1 ./scripts/bootstrap.sh "$@" 2>&1)"; then
+              echo "[$label] 통과해야 하는데 실패했다" >&2; printf '%s\n' "$out" >&2; exit 1
+            fi
+            grep -q "tls_mode: $want_tls" <<< "$out" \
+              || { echo "[$label] tls_mode 가 $want_tls 가 아니다" >&2; printf '%s\n' "$out" >&2; exit 1; }
+            echo "ok: $label"
+          }
+          expect_reject() {
+            local label="$1" env_body="$2"; shift 2
+            printf '%s\n' "$env_body" > .env
+            if DRY_RUN=1 ./scripts/bootstrap.sh "$@" > /dev/null 2>&1; then
+              echo "[$label] 거부해야 하는데 통과했다" >&2; exit 1
+            fi
+            echo "ok: $label (거부됨)"
+          }
+
+          # 기본 경로 — DEPLOY_OVERLAYS 가 없는 것이 정상이며, 여기서 죽으면 안 된다(그 회귀가 있었다).
+          expect_pass "DEPLOY_OVERLAYS 없음" no "$ok_env"
+          expect_pass "DEPLOY_OVERLAYS=tls" yes "$ok_env"$'\nDEPLOY_OVERLAYS=compose.prod.tls.yaml'
+          expect_pass "DEPLOY_OVERLAYS=6gb" no "$ok_env"$'\nDEPLOY_OVERLAYS=compose.prod.6gb.yaml'
+          expect_pass "CLI 인자 tls" yes "$ok_env" compose.prod.tls.yaml
+          expect_reject "없는 오버레이 (.env)" "$ok_env"$'\nDEPLOY_OVERLAYS=does-not-exist.yaml'
+          expect_reject "없는 오버레이 (CLI 인자)" "$ok_env" does-not-exist.yaml
+          expect_reject "placeholder 잔존" $'REPUTATION_POOL_API_KEY=local-dev-key\nGRAFANA_ADMIN_PASSWORD=x\nREPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL='
+          expect_reject "alertmanager 정의 없음" $'REPUTATION_POOL_API_KEY=x\nGRAFANA_ADMIN_PASSWORD=x'
+          rm -f .env
+
       # bootstrap.sh runs as root on a public host — an unquoted expansion there is not a style issue.
       #
       # Pinned to an image rather than the runner's preinstalled shellcheck: the runner image's version

@@ -17,6 +17,11 @@
 		# 로컬에서는 무해하지만, 이 파일은 `compose.prod.yaml`(도메인 없이 평문 :80 공개)에서도 쓰이므로
 		# 안전한 기본값이어야 한다 — append 로 두면 아무나 XFF 를 위조해 로그인 스로틀(#28)을 우회하거나
 		# 타 IP 를 락아웃시킬 수 있다(Spring 의 ForwardedHeaderFilter 가 첫 항목을 채택한다).
+		#
+		# Caddy 는 이 줄에 "Unnecessary header_up X-Forwarded-For" 경고를 낸다 — 헤더를 그냥 전달하려는
+		# 중복 설정으로 흔히 쓰이기 때문이다. 여기 의도는 전달이 아니라 **덮어쓰기**이므로 경고는 무시한다.
+		# 실측으로 확인했다: 위조 XFF 를 실어 보내도 앱 로그의 소스 IP 는 실제 peer 이고 위조값은 나타나지
+		# 않는다. 경고를 근거로 이 줄을 지우면 스로틀 우회 구멍이 되살아난다.
 		header_up X-Forwarded-For {remote_host}
 	}
 }
