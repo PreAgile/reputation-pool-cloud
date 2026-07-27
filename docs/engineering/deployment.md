@@ -32,8 +32,9 @@ CI(무료 arm64 호스티드 러너)에서 굽고 서버는 `pull`만 하면 재
    - Image: Ubuntu 24.04 (arm64) — 아래 방화벽 절차는 Oracle Linux 9도 지원한다
    - 부트 볼륨 50GB 이상(200GB까지 무료), SSH 공개키 등록
 3. `Out of host capacity`가 나오면 — 무료 티어에서 흔하다:
-   - 1 OCPU / 6GB로 줄여 신청한다(스택은 그것으로도 돈다 — 그 경우 §6 참고)
-   - 시간대를 바꿔 재시도한다
+   - 1 OCPU / 6GB로 줄여 신청한다. 스택은 그것으로도 돈다 — §9의 6GB 오버레이를 쓴다
+   - 시간대를 바꿔 재시도한다. **재시도 간격은 3분 이상** — 짧게 연달아 누르면 용량 에러가 아니라
+     `Too many requests for the user`(API 레이트 리밋)가 뜨고, 그 상태에서 더 누르면 리밋 창이 계속 갱신된다
    - **다른 리전으로 우회할 수 없다**(홈 리전 고정). 이것이 1번을 가입 전에 확정해야 하는 이유다
 4. 실제 한도 확인: 콘솔 → Governance → Limits, Quotas and Usage → `Cores for Ampere A1 based VM instances`
    (2026-06에 4 OCPU/24GB → 2 OCPU/12GB로 무공지 축소된 전례가 있다)
@@ -177,8 +178,28 @@ docker compose -f compose.yaml -f compose.prod.yaml exec backup /usr/local/bin/b
 | dashboard / grafana | 512MB 각 | |
 | backup / caddy | 256MB / 128MB | |
 
-**1 OCPU / 6GB로 축소 신청한 경우**: `compose.prod.yaml`의 app을 2GB, db를 1GB, prometheus를 512MB로 내린다.
-힙은 cgroup 상한에서 자동으로 따라 줄어들므로 JVM 플래그는 건드리지 않는다.
+### 1 OCPU / 6GB 호스트인 경우
+
+`Out of host capacity`로 2 OCPU 배치가 안 되어 1 OCPU/6GB로 받았다면, 위 합계(8.4GB)가 호스트를 넘으므로
+[`compose.prod.6gb.yaml`](../../compose.prod.6gb.yaml) 오버레이를 한 겹 더 얹는다:
+
+```bash
+./scripts/bootstrap.sh compose.prod.6gb.yaml
+```
+
+| 서비스 | 12GB | 6GB |
+|---|---|---|
+| app | 4GB | **2GB** (힙 ≈1.4GB) |
+| db | 2GB | **1GB** |
+| prometheus | 1GB | **512MB** |
+| grafana | 512MB | **384MB** |
+| dashboard / backup / caddy | 512MB / 256MB / 128MB | 동일 |
+| 합계 | 8.4GB | **약 4.8GB** |
+
+**힙은 어느 쪽에서도 건드리지 않는다.** `Dockerfile`의 `-XX:MaxRAMPercentage=70`이 cgroup 상한을 읽으므로
+app의 상한을 내리면 힙이 자동으로 따라 내려간다 — 힙을 고정 `-Xmx`로 박지 않은 이유가 이것이다.
+
+나중에 12GB 인스턴스를 확보하면 이 오버레이를 빼고 `bootstrap.sh`를 다시 실행하면 된다.
 
 ## 10. 유휴 회수 주의
 

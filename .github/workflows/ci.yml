@@ -50,6 +50,22 @@ jobs:
           ACME_EMAIL: ci@example.invalid
         run: docker compose -f compose.yaml -f compose.prod.yaml config -q
 
+      # The 6GB profile is only used on a downsized host, so a typo in it would surface as a failed
+      # bring-up there. Also asserts its total stays under the host it exists for.
+      - name: Validate 6GB overlay
+        env:
+          REPUTATION_POOL_API_KEY: ci-config-check
+          GRAFANA_ADMIN_PASSWORD: ci-config-check
+          DOMAIN: app.example.invalid
+          ACME_EMAIL: ci@example.invalid
+        run: |
+          config="$(docker compose -f compose.yaml -f compose.prod.yaml -f compose.prod.6gb.yaml config)"
+          total=$(grep -oE 'memory: "[0-9]+"' <<< "$config" | grep -oE '[0-9]+' | paste -sd+ - | bc)
+          echo "메모리 상한 합계: $((total / 1024 / 1024)) MiB"
+          # 6GB 호스트에서 OS·페이지 캐시 몫을 남겨야 한다. 5GiB 를 넘으면 프로파일이 무의미해진다.
+          [ "$total" -le $((5 * 1024 * 1024 * 1024)) ] \
+            || { echo "6GB 프로파일 합계가 5GiB 를 넘는다" >&2; exit 1; }
+
       # Asserts the overlay actually closed the two openings it exists to close: Postgres must not be
       # published, and Caddy must serve Caddyfile.prod (not the plaintext base Caddyfile). A silent
       # list-merge regression (Compose < 2.24 semantics) would leave both in place.

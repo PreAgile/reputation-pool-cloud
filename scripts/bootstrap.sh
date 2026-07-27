@@ -12,6 +12,10 @@
 #   cp .env.example .env && $EDITOR .env      # 시크릿 + DOMAIN/ACME_EMAIL 채우기
 #   ./scripts/bootstrap.sh
 #
+# 인자로 넘긴 compose 파일은 오버레이로 뒤에 덧붙는다. 호스트가 작을 때 쓴다:
+#
+#   ./scripts/bootstrap.sh compose.prod.6gb.yaml    # 1 OCPU/6GB 인스턴스
+#
 # 이 스크립트가 하지 못하는 것: OCI 콘솔의 VCN Security List(또는 NSG) 인그레스 규칙. 호스트 방화벽만
 # 열려 있고 VCN 이 막혀 있으면 증상이 "인증서 발급 실패"로 나타나 원인을 찾기 어렵다 — 종료 시 안내한다.
 #
@@ -47,6 +51,14 @@ fi
 log "사전 검사"
 [ -f compose.yaml ] && [ -f compose.prod.yaml ] || die "레포 루트에서 실행해야 한다 (compose.yaml 이 없다)"
 [ -f .env ] || die ".env 가 없다 — 'cp .env.example .env' 후 시크릿과 DOMAIN/ACME_EMAIL 을 채운다"
+
+# 추가 오버레이(예: compose.prod.6gb.yaml)를 인자로 받는다. 없는 파일을 조용히 무시하면 상한이 적용되지
+# 않은 채 뜨므로 즉시 실패시킨다.
+for overlay in "$@"; do
+	[ -f "$overlay" ] || die "오버레이 파일이 없다: $overlay"
+	COMPOSE_FILES+=(-f "$overlay")
+	echo "ok: 오버레이 추가 — $overlay"
+done
 
 missing=()
 for key in "${REQUIRED_ENV[@]}"; do
