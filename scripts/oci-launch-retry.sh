@@ -134,6 +134,7 @@ EOF
 # ---------------------------------------------------------------------------
 attempt=0
 auth_fail=0
+transient=0
 backoff="$BACKOFF_START"
 started="$(date +%s)"
 
@@ -193,6 +194,16 @@ while :; do
 		die "인증이 계속 실패한다 — 콘솔 User settings → API keys 에 지문이 등록됐는지 확인한다"
 	fi
 
+	# 일시적 통신·서버 오류. 시간 단위로 도는 루프에서는 반드시 만난다 — 초판은 28분 시점에
+	# `RequestException: The connection to endpoint timed out` 으로 죽어 그때까지의 대기를 날렸다.
+	# 용량 대기와 성격이 같으므로 같은 간격으로 재시도한다.
+	if grep -qiE 'requestexception|timed out|timeout|connection (aborted|reset|error)|serviceunavailable|internalservererror|"status": 5[0-9][0-9]' <<< "$out"; then
+		transient=$((transient + 1))
+		log "일시적 통신 오류 #${transient} — ${INTERVAL}초 후 재시도"
+		sleep "$INTERVAL"
+		continue
+	fi
+
 	# 그 외(권한·잘못된 OCID·한도 초과 등)는 재시도해도 달라지지 않는다.
 	printf '%s\n' "$out" >&2
 	die "재시도로 해결되지 않는 오류다 — 위 메시지를 확인한다"
@@ -219,7 +230,7 @@ fi
 
 cat <<EOF
 
-==> 완료 (시도 ${attempt}회)
+==> 완료 (시도 ${attempt}회, 일시적 오류 ${transient}회 흡수)
   instance   $instance_id
   public IP  ${public_ip:-<콘솔에서 확인>}
 
