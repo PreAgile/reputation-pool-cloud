@@ -1,0 +1,77 @@
+# 배포 이미지 발행 (#15 / D8) — app·dashboard 를 GHCR 에 `linux/arm64` 로 푸시한다.
+#
+# 왜 CI 에서 빌드하고 서버는 pull 만 하나: 배포 타깃이 Oracle Cloud Always Free A1(2 OCPU/12GB, ARM)이라
+# 서버에서 Gradle `bootJar` + `next build` 를 돌리면 2코어를 수 분간 점유하고 빌드 중 서비스 메모리와
+# 경쟁한다. 빌드 산출물만 내려받으면 재배포가 `compose pull && up -d` 로 끝난다.
+#
+# 왜 arm64 단일 아키텍처인가: amd64 이미지의 소비자가 없다. 로컬 개발과 CI e2e 는 `compose.yaml` 의
+# `build:` 로 소스에서 직접 빌드하고, 발행 이미지를 쓰는 곳은 `compose.prod.yaml`(= A1 호스트)뿐이다.
+# 멀티아치 매니페스트는 amd64 스테이징 호스트가 실제로 생길 때 matrix 에 러너를 추가해 붙인다.
+#
+# 러너는 public 레포에 무료로 제공되는 arm64 호스티드 러너(`ubuntu-24.04-arm`)를 쓴다 — 네이티브 빌드라
+# QEMU 에뮬레이션(JVM/Node 빌드에서 수 배 느려짐)이 필요 없다.
+name: Release Images
+
+on:
+  push:
+    branches: [ main ]
+  # 코드 변경 없이 이미지를 다시 굽고 싶을 때(베이스 이미지 보안 패치 반영 등).
+  workflow_dispatch:
+
+# 발행 도중 취소하면 태그가 반쯤 갱신된 상태로 남을 수 있어 cancel-in-progress 를 쓰지 않는다.
+concurrency:
+  group: release-${{ github.ref }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: ${{ matrix.image }} → GHCR (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      # 한쪽이 깨져도 나머지는 발행한다(둘은 독립 이미지다).
+      fail-fast: false
+      matrix:
+        include:
+          - image: app
+            context: .
+          - image: dashboard
+            context: ./dashboard
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 이미지 이름을 소문자로 직접 적는다: GHCR 은 대문자 경로를 거부하는데 `github.repository` 는
+      # `PreAgile/...` 라 그대로 쓰면 실패한다. compose.prod.yaml 이 같은 문자열을 참조하므로 두 파일을
+      # 함께 고쳐야 한다.
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/preagile/reputation-pool-cloud/${{ matrix.image }}
+          # latest = 서버가 평소에 pull 하는 태그, sha-<커밋> = 롤백용 고정 좌표.
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 레이어 캐시로 Gradle 의존성·pnpm store 재다운로드를 피한다.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

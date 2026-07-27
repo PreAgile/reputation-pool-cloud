@@ -1,0 +1,66 @@
+# 프로덕션 한 오리진 서빙 (#15 / D8). `compose.prod.yaml` 이 base `Caddyfile` 대신 이 파일을 마운트한다.
+#
+# base 와 라우팅 규칙은 같고 차이는 세 가지다:
+#   1. 사이트 주소가 `:80` 대신 도메인이라 Caddy 자동 HTTPS(Let's Encrypt 발급·갱신)가 켜진다.
+#      base 의 `auto_https off` 는 여기에 없다.
+#   2. HTTPS 전용이므로 HSTS 를 명시한다.
+#   3. X-Forwarded-For 를 신뢰하지 않고 직접 덮어쓴다 — 아래 `(backend)` 스니펫 주석 참고.
+# 라우팅 규칙을 고칠 때는 두 파일을 함께 고쳐야 한다(경로 분기가 갈리면 로컬과 프로덕션이 달라진다).
+#
+# 호스트네임을 하나만 쓰는 이유: 대시보드와 `/api` 가 same-origin 이어야 CORS 가 없다(ADR 0001).
+# `api.<도메인>` 을 별도 호스트로 분리하면 브라우저 기준 크로스 오리진이 되어 CORS 설정과 쿠키/토큰
+# 정책을 다시 설계해야 한다 — 필요가 생길 때 별도로 다룬다. 그때까지 `api` 서브도메인은 이 호스트로의
+# CNAME 이면 충분하다.
+{
+	admin off
+	# 인증서 만료·발급 실패 알림 수신 주소. compose.prod.yaml 이 ACME_EMAIL 로 주입한다.
+	email {$ACME_EMAIL}
+}
+
+# 백엔드 프록시 규칙. `/api` 와 `/actuator` 두 곳에서 같은 헤더 처리를 해야 하므로 스니펫으로 묶는다.
+(backend) {
+	reverse_proxy app:8083 {
+		# X-Forwarded-For 를 클라이언트가 보낸 값과 무관하게 실제 peer IP 로 **덮어쓴다**(기본 동작은
+		# 기존 값에 append 다).
+		#
+		# 이유(#28): 앱은 `server.forward-headers-strategy=framework` 로 XFF 를 신뢰하고 로그인 스로틀의
+		# per-IP 한도를 그 값으로 키잉한다. 이 신뢰는 "8083 이 외부에서 직접 닿지 않는다"가 전제인데,
+		# Caddy 가 공개되는 순간 아무나 `X-Forwarded-For: 1.2.3.4` 를 실어 보낼 수 있게 된다.
+		# Spring 의 ForwardedHeaderFilter 는 XFF 의 **첫** 항목을 쓰므로, append 로는 공격자가 넣은 값이
+		# 앞에 남아 스로틀을 우회하거나 무관한 IP 를 락아웃시킬 수 있다. 덮어쓰면 위조가 불가능해진다.
+		#
+		# Cloudflare proxied 로 전환한 뒤에는 여기가 Cloudflare 엣지 IP 가 되어 스로틀 입도가 거칠어진다.
+		# 진짜 클라이언트 IP 를 되찾으려면 아래로 바꾼다 —
+		#     header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
+		# **단, VCN 인그레스를 Cloudflare IP 범위로 제한한 뒤에만** 그렇게 한다. 오리진에 직접 닿을 수
+		# 있는 상태에서 CF-Connecting-IP 를 신뢰하면 위조 구멍이 그대로 돌아온다.
+		# 절차는 docs/engineering/deployment.md 의 "오리진 잠그기" 참고.
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
+# DOMAIN 미설정이면 compose 가 기동 전에 실패한다(compose.prod.yaml 의 `:?`). 여기서 빈 사이트 주소로
+# Caddy 가 죽는 상황을 만들지 않기 위한 것이다.
+{$DOMAIN} {
+	# 이 오리진은 HTTPS 로만 접근된다(Caddy 가 :80 을 자동으로 리다이렉트). 다운그레이드 시도를 브라우저
+	# 단계에서 끊는다. `preload` 는 등록 후 철회가 어려워 넣지 않는다.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	# REST 컨트롤 플레인 (#11).
+	handle /api/* {
+		import backend
+	}
+	# 내부 전용(#14): 스크레이프 엔드포인트는 외부로 노출하지 않는다. Spring Security 에서 permitAll 이라
+	# 신뢰 경계가 네트워크이므로, compose 네트워크의 Prometheus 만 app:8083 을 직접 긁는다. (health/info 위)
+	handle /actuator/prometheus* {
+		respond 404
+	}
+	# actuator health/info (public) — 대시보드 헬스 카드가 same-origin 으로 조회.
+	handle /actuator/* {
+		import backend
+	}
+	# 그 외 전부 대시보드.
+	handle {
+		reverse_proxy dashboard:3000
+	}
+}

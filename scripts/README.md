@@ -1,4 +1,14 @@
-# DB 백업 / 복원 (#15)
+# 운영 스크립트 (#15)
+
+- `oci-launch-retry.sh` — Oracle A1 인스턴스를 용량이 풀릴 때까지 재시도해 생성한다
+  (`Out of host capacity` 대응). OCI CLI + API 키 인증이 필요하다.
+- `bootstrap.sh` — 빈 리눅스 호스트를 스택이 도는 상태로 만든다(멱등, 재실행이 곧 재배포).
+  작은 호스트면 오버레이를 인자로 넘긴다: `./scripts/bootstrap.sh compose.prod.6gb.yaml`.
+  절차와 배경은 [`docs/engineering/deployment.md`](../docs/engineering/deployment.md).
+- `backup.sh` / `restore.sh` — 아래.
+- `dev-seed.sql` — 로컬 개발용 시드.
+
+## DB 백업 / 복원
 
 로컬/셀프호스트에서 `docker compose up` 으로 서비스를 운영할 때의 데이터 안전 장치.
 
@@ -36,4 +46,7 @@ pg_restore → 행 검증` 을 자동으로 돈다(Testcontainers). 스크립트
 ## 후속 (#15)
 
 - 오프사이트 저장(오브젝트 스토리지 업로드) + RPO/RTO 확정
-- 스테이징/프로덕션 compose 분리, 시크릿 관리, CI/CD — 배포 타깃 결정 후
+- **복원 리허설을 실 서버에서 한 번 통과** — `RestoreRehearsalIT` 는 CI 에서 덤프/복원 경로만 검증한다
+- 시크릿 스토어(#6) — 현재는 서버의 `.env` 파일
+- 스테이징/프로덕션 분리, 자동 배포(CI → 서버). 배포 타깃은 확정됐다
+  ([ADR 0002](../docs/decisions/0002-deploy-target-oracle-a1-arm64.md))
