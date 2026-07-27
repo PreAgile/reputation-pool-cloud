@@ -99,4 +99,4 @@ jobs:
       # shellcheck ships on the runner image. bootstrap.sh runs as root on a public host — an unquoted
       # expansion there is not a style issue.
       - name: Shellcheck deploy scripts
-        run: shellcheck scripts/bootstrap.sh scripts/backup.sh scripts/restore.sh
+        run: shellcheck scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh

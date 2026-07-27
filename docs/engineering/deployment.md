@@ -32,10 +32,41 @@ CI(무료 arm64 호스티드 러너)에서 굽고 서버는 `pull`만 하면 재
    - Image: Ubuntu 24.04 (arm64) — 아래 방화벽 절차는 Oracle Linux 9도 지원한다
    - 부트 볼륨 50GB 이상(200GB까지 무료), SSH 공개키 등록
 3. `Out of host capacity`가 나오면 — 무료 티어에서 흔하다:
-   - 1 OCPU / 6GB로 줄여 신청한다. 스택은 그것으로도 돈다 — §9의 6GB 오버레이를 쓴다
-   - 시간대를 바꿔 재시도한다. **재시도 간격은 3분 이상** — 짧게 연달아 누르면 용량 에러가 아니라
+   - **[`scripts/oci-launch-retry.sh`](../../scripts/oci-launch-retry.sh)로 자동 재시도한다** (권장).
+     용량이 풀리는 순간을 잡고, 성공하면 멈추고 공인 IP를 출력한다. 아래 "용량 재시도" 참고
+   - 콘솔에서 손으로 누를 때 **재시도 간격은 3분 이상** — 짧게 연달아 누르면 용량 에러가 아니라
      `Too many requests for the user`(API 레이트 리밋)가 뜨고, 그 상태에서 더 누르면 리밋 창이 계속 갱신된다
+   - 급하면 1 OCPU / 6GB로 줄여 신청한다. 스택은 그것으로도 돈다 — §9의 6GB 오버레이를 쓴다
    - **다른 리전으로 우회할 수 없다**(홈 리전 고정). 이것이 1번을 가입 전에 확정해야 하는 이유다
+   - 도쿄·오사카는 **가용성 도메인이 1개**라 "다른 AD로 재시도"가 불가능하다(에러 메시지가 그렇게 안내하지만
+     해당 없음)
+
+### 용량 재시도 (`oci-launch-retry.sh`)
+
+사전 준비 — OCI CLI와 **API 키 인증**(세션 토큰은 1시간에 만료돼 장시간 루프가 죽는다):
+
+```bash
+brew install oci-cli
+oci setup config      # user OCID / tenancy OCID / region=ap-tokyo-1 → API 키 생성
+# ~/.oci/oci_api_key_public.pem 를 콘솔에 등록:
+#   Profile → User settings → API keys → Add API key → Paste public key
+```
+
+실행:
+
+```bash
+./scripts/oci-launch-retry.sh
+```
+
+가용성 도메인·퍼블릭 서브넷·Ubuntu 24.04(arm64) 이미지 OCID를 **자동 탐색**하므로 콘솔에서 OCID를 복사해
+붙일 필요가 없다. 90초 간격으로 한 번씩만 시도하고(분당 1회 미만이라 레이트 리밋에 걸리지 않는다), 리밋에
+걸리면 5분→10분→…30분으로 물러난다. 성공하면 멈추고 알림·공인 IP·SSH 명령을 출력한다.
+
+조정은 환경변수로 한다: `OCPUS`, `MEMORY_GB`, `BOOT_GB`, `INTERVAL`, `MAX_ATTEMPTS`, `SSH_KEY_FILE`,
+`DISPLAY_NAME`. 자동 탐색이 실패하면 `TENANCY`, `AD`, `SUBNET`, `IMAGE`를 직접 지정한다.
+
+인스턴스가 유휴 회수(§10)됐을 때의 재구축 경로이기도 하다 — 컴퓨트는 이 스크립트, OS 위쪽은
+`bootstrap.sh`다.
 4. 실제 한도 확인: 콘솔 → Governance → Limits, Quotas and Usage → `Cores for Ampere A1 based VM instances`
    (2026-06에 4 OCPU/24GB → 2 OCPU/12GB로 무공지 축소된 전례가 있다)
 

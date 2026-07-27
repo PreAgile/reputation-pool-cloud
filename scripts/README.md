@@ -1,6 +1,9 @@
 # 운영 스크립트 (#15)
 
+- `oci-launch-retry.sh` — Oracle A1 인스턴스를 용량이 풀릴 때까지 재시도해 생성한다
+  (`Out of host capacity` 대응). OCI CLI + API 키 인증이 필요하다.
 - `bootstrap.sh` — 빈 리눅스 호스트를 스택이 도는 상태로 만든다(멱등, 재실행이 곧 재배포).
+  작은 호스트면 오버레이를 인자로 넘긴다: `./scripts/bootstrap.sh compose.prod.6gb.yaml`.
   절차와 배경은 [`docs/engineering/deployment.md`](../docs/engineering/deployment.md).
 - `backup.sh` / `restore.sh` — 아래.
 - `dev-seed.sql` — 로컬 개발용 시드.
