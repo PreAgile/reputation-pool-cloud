@@ -92,6 +92,24 @@ oci setup config      # user OCID / tenancy OCID / region=ap-tokyo-1 → API 키
 Postgres(5432)·gRPC(9093)·Grafana(3000)는 **열지 않는다**. `compose.prod.yaml`이 db 호스트 포트를 닫고
 app을 loopback에 묶으므로 애초에 열 대상이 아니다.
 
+22 번은 Oracle 이미지가 기본으로 열어두는 유일한 포트이고, `0.0.0.0/0` 으로 두면 상시 스캔 대상이 된다
+(실측: 24시간 인증 실패 209건, 단일 IP 90회). 키 전용 인증은 인증 단계를 막지만 sshd 의 **pre-auth**
+취약점(CVE-2024-6387 등)은 인증 전에 터지므로 키가 보호해주지 않는다 — 소스를 좁히면 그 부류가
+구조적으로 사라진다. 이동이 잦아 유동 IP 가 걸림돌이면 `scripts/oci-ssh-allow.sh` 로 갱신한다:
+
+```bash
+./scripts/oci-ssh-allow.sh                   # 지금 내 공인 IP 추가
+./scripts/oci-ssh-allow.sh --list            # 현재 허용 목록
+./scripts/oci-ssh-allow.sh --only A/32 B/32  # 목록 교체
+```
+
+sshd 쪽 정책(키 전용·root 로그인 금지·fail2ban)은 서버에서 `scripts/harden-ssh.sh` 가 담당한다.
+
+> 22 번을 좁히기 전에 **복구 경로를 확보**해 둘 것. OCI 는 인스턴스 생성 후 메타데이터로 키를 추가할
+> 수 없다(cloud-init 이 첫 부팅만 읽는다). OCI Bastion 의 Managed SSH 는 원본 키 없이도 접속할 수 있고
+> **public 서브넷 대상에도 동작한다.** 단 Bastion 이 주입한 키는 `#ocid1.bastionsession...` 주석 블록에
+> 들어가고 세션 만료 시 플러그인이 지우므로, 들어간 즉시 블록 밖에 `>>` 로 영구 등록해야 한다.
+
 ## 3. .env 구성
 
 ```bash
@@ -222,6 +240,20 @@ header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
 
 제한 전 기본값은 `{remote_host}`(직접 peer IP 덮어쓰기)다. 배경은
 [`security.md`](security.md)의 로그인 스로틀 항목과 [ADR 0001](../decisions/0001-reverse-proxy-caddy.md) 참고.
+
+인그레스 교체는 콘솔에서 손으로 하지 않아도 된다 — `scripts/oci-origin-lock.sh` 가 Cloudflare 목록을
+받아 80/443 규칙을 교체하고 22·ICMP 는 보존한다(멱등, 노트북에서 실행):
+
+```bash
+./scripts/oci-origin-lock.sh          # 잠그기
+./scripts/oci-origin-lock.sh --list   # 현재 80/443 소스
+./scripts/oci-origin-lock.sh --unlock # 되돌리기
+```
+
+> ⚠️ **잠근 뒤에는 Cloudflare 를 회색 구름으로 되돌리는 것이 롤백이 아니다.** 유저가 오리진에 직접
+> 오려 하는데 인그레스가 막고 있어 전부 차단된다. 회색으로 돌릴 일이 생기면 `--unlock` 을 먼저 한다.
+> 그리고 Cloudflare 가 대역을 추가하면 갱신이 필요하다 — 증상이 "일부 지역 유저만 502" 로 나타나
+> 원인을 찾기 어렵다.
 
 ## 7. 재배포 · 롤백
 

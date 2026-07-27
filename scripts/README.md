@@ -5,6 +5,21 @@
 - `bootstrap.sh` — 빈 리눅스 호스트를 스택이 도는 상태로 만든다(멱등, 재실행이 곧 재배포).
   작은 호스트면 오버레이를 인자로 넘긴다: `./scripts/bootstrap.sh compose.prod.6gb.yaml`.
   절차와 배경은 [`docs/engineering/deployment.md`](../docs/engineering/deployment.md).
+- `harden-ssh.sh` — sshd 인증 정책을 확정하고 브루트포스 표면을 닫는다(키 전용 기본, fail2ban,
+  무인 보안 업데이트). **서버에서** 실행한다. `SSH_PASSWORD_AUTH=1` 로 비밀번호 인증을 켤 수도 있지만
+  기본은 끈다 — 22 번이 열려 있는 동안 비밀번호는 추측 가능한 자격이다.
+- `oci-ssh-allow.sh` — 22 번 인그레스 허용 IP 를 관리한다(집·사무실·카페 이동 대응). **노트북에서**
+  실행한다 — SSH 가 막힌 상태에서도 복구해야 하므로 OCI API 만 쓴다. 결과 목록에 자기 IP 가 없으면
+  적용을 거부한다.
+- `oci-origin-lock.sh` — 80/443 인그레스를 Cloudflare 공개 대역으로만 제한한다(§6 오리진 잠그기).
+  Cloudflare 가 대역을 추가하면 재실행한다. `--check` 는 드리프트만 판정하고(동기화 0 / 어긋남 3),
+  `--unlock` 은 되돌린다.
+- `origin-lock-check-cron.sh` + `com.poolroost.origin-lock-check.plist` — 위 `--check` 를 주 1회
+  실행해 **드리프트가 있을 때만** 알린다. 대역이 추가되면 그 대역을 쓰는 엣지의 요청만 막혀
+  "일부 지역 유저만 502" 가 되는데, 부분 장애라 모니터링에 잘 안 잡히고 원인이 몇 달 전 방화벽
+  규칙이라는 걸 떠올리기 어렵다. **감지는 자동, 적용은 사람이** — 외부 URL 응답으로 방화벽을
+  자동으로 다시 쓰는 것은 그 엔드포인트가 오염·부분응답일 때 스스로 구멍을 만든다.
+  설치 방법과 macOS TCC 주의사항은 plist 상단 주석 참고.
 - `backup.sh` / `restore.sh` — 아래.
 - `dev-seed.sql` — 로컬 개발용 시드.
 
