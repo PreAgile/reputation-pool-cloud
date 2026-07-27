@@ -121,24 +121,54 @@ $EDITOR .env
 
 ## 4. 기동
 
+### 두 가지 모드
+
+| 모드 | 명령 | 도메인 | 언제 |
+|---|---|---|---|
+| **평문** | `./scripts/bootstrap.sh` | 불필요 | 도메인이 아직 없을 때, 임시 검증 호스트 |
+| **TLS** | `./scripts/bootstrap.sh compose.prod.tls.yaml` | **필요** (`DOMAIN`·`ACME_EMAIL`) | 공개 데모 |
+
+`compose.prod.yaml` 은 도메인을 요구하지 않는다 — 발행 이미지·메모리 상한·로그 회전·db 비공개는
+두 모드가 공유하고, 도메인·자동 HTTPS·443 은 `compose.prod.tls.yaml` 이 얹는다. 변수 보간은 파일을 읽는
+시점에 일어나므로 `${DOMAIN:?}` 를 나중 오버레이로 무력화할 수 없다 — TLS 요구를 별 파일로 뺀 이유다.
+
+### ⚠️ 평문 모드의 제약
+
+HTTP 이므로 **관리 콘솔 로그인(#11) 자격이 평문으로 전송된다.** 공개 IP 에 평문으로 띄울 때는:
+
+- 관리자 자격(`REPUTATION_POOL_ADMIN_*`)을 **설정하지 않는다.** 미설정이면 `/api/**` 가 fail closed 라
+  대시보드 화면과 public health 는 보이고 로그인만 불가하다 — 배포 경로 검증에는 충분하다
+- 굳이 켜야 하면 **재사용하지 않는 throwaway 값**만 쓴다
+- Grafana 는 두 모드 모두 loopback 바인딩이므로 SSH 터널로만 접근한다(§8)
+
+XFF 위조는 두 모드 모두 막혀 있다 — base `Caddyfile` 도 `header_up X-Forwarded-For {remote_host}` 로
+헤더를 덮어쓴다(§6, [`security.md`](security.md) 참고).
+
+
+
 > **선행 1회: GHCR 패키지를 public 으로 바꾼다.** `release.yml` 이 처음 발행한 직후 패키지는 **private**이
 > 기본이라 서버의 익명 `pull` 이 `denied` 로 실패한다. GitHub → 레포 → Packages → `app`·`dashboard` 각각 →
 > Package settings → Change visibility → **Public**. private 로 유지하려면 서버에서 `read:packages` 권한
 > PAT 로 `docker login ghcr.io` 를 먼저 해야 한다.
 
 ```bash
-./scripts/bootstrap.sh
+./scripts/bootstrap.sh                        # 평문
+./scripts/bootstrap.sh compose.prod.tls.yaml  # 도메인 + 자동 HTTPS
 ```
 
 하는 일: 사전 검사 → 도커·compose 설치(없으면) → 호스트 방화벽 80/443 → `compose pull` → `up -d` →
-app 헬스 대기. 멱등하므로 **재실행이 곧 재배포**다.
+app 헬스 대기. 멱등하므로 **재실행이 곧 재배포**다. 인자로 넘긴 오버레이는 뒤에 덧붙는다(§9 의 6GB
+프로파일도 같은 방식이며, 함께 쓸 수 있다).
 
 수동으로 할 때:
 
 ```bash
-docker compose -f compose.yaml -f compose.prod.yaml pull
-docker compose -f compose.yaml -f compose.prod.yaml up -d
+docker compose -f compose.yaml -f compose.prod.yaml up -d                            # 평문
+docker compose -f compose.yaml -f compose.prod.yaml -f compose.prod.tls.yaml up -d   # TLS
 ```
+
+**평문 → TLS 전환**은 도메인이 준비된 뒤 오버레이를 하나 더 얹어 재실행하면 된다. 컨테이너와 볼륨은
+그대로 재사용되고 Caddy 만 교체된다.
 
 ## 5. DNS와 Cloudflare — 순서가 중요하다
 

@@ -9,11 +9,12 @@
 # Ubuntu 24.04 또는 Oracle Linux 9 이며, 다른 systemd 리눅스에서도 동작한다.
 #
 #   git clone https://github.com/PreAgile/reputation-pool-cloud.git && cd reputation-pool-cloud
-#   cp .env.example .env && $EDITOR .env      # 시크릿 + DOMAIN/ACME_EMAIL 채우기
-#   ./scripts/bootstrap.sh
+#   cp .env.example .env && $EDITOR .env      # 시크릿 채우기
+#   ./scripts/bootstrap.sh                    # 평문 :80 (도메인 없이도 뜬다)
 #
-# 인자로 넘긴 compose 파일은 오버레이로 뒤에 덧붙는다. 호스트가 작을 때 쓴다:
+# 인자로 넘긴 compose 파일은 오버레이로 뒤에 덧붙는다:
 #
+#   ./scripts/bootstrap.sh compose.prod.tls.yaml    # 도메인 + 자동 HTTPS (DOMAIN/ACME_EMAIL 필요)
 #   ./scripts/bootstrap.sh compose.prod.6gb.yaml    # 1 OCPU/6GB 인스턴스
 #
 # 이 스크립트가 하지 못하는 것: OCI 콘솔의 VCN Security List(또는 NSG) 인그레스 규칙. 호스트 방화벽만
@@ -26,11 +27,11 @@ set -euo pipefail
 COMPOSE_FILES=(-f compose.yaml -f compose.prod.yaml)
 # .env 에 반드시 값이 있어야 하는 키. compose 도 `:?` 로 검사하지만, 컨테이너를 띄우기 시작한 뒤에
 # 실패하는 것보다 먼저 한 번에 알려주는 편이 낫다.
+# 값이 반드시 있어야 하는 키. DOMAIN/ACME_EMAIL 은 여기 없다 — 평문 모드(도메인 없이 :80)로도 뜨게
+# 하려는 것이고, TLS 오버레이(compose.prod.tls.yaml)를 쓸 때는 그 파일의 `:?` 가 즉시 실패시킨다.
 REQUIRED_ENV=(
 	REPUTATION_POOL_API_KEY
 	GRAFANA_ADMIN_PASSWORD
-	DOMAIN
-	ACME_EMAIL
 )
 # 값은 비어 있어도 되지만 **정의는 있어야** 하는 키. compose 의 `secrets: environment:` 소스는 컨테이너
 # 생성 시점에 해석되고 정의되지 않은 변수에서 하드 실패하는데, `compose config` 는 통과한다 — 즉 이걸
@@ -192,16 +193,39 @@ done
 
 "${DOCKER[@]}" compose "${COMPOSE_FILES[@]}" ps
 
-domain="$(grep -E '^DOMAIN=' .env | head -1 | cut -d= -f2-)"
-cat <<EOF
+# TLS 오버레이를 쓰는지로 안내를 갈라 준다 — 평문 모드에서 인증서 얘기를 하면 혼란만 준다.
+tls_mode=no
+for f in "${COMPOSE_FILES[@]}"; do
+	case "$f" in *compose.prod.tls.yaml) tls_mode=yes ;; esac
+done
 
-==> 완료. 남은 확인 (이 스크립트 밖)
-  1. OCI 콘솔 → Networking → VCN → Security List(또는 NSG)에서 인그레스 80/443 (TCP)과 443 (UDP) 허용.
-     호스트 방화벽만 열고 여기를 빼먹으면 인증서 발급 실패로 나타난다.
+printf '\n==> 완료. 남은 확인 (이 스크립트 밖)\n'
+printf '  1. OCI 콘솔 → Networking → VCN → Security List(또는 NSG) 인그레스 허용:\n'
+if [ "$tls_mode" = yes ]; then
+	printf '     80/443 (TCP) + 443 (UDP). 호스트 방화벽만 열고 여기를 빼먹으면 "인증서 발급 실패"로 나타난다.\n'
+else
+	printf '     80 (TCP). 호스트 방화벽만 열고 여기를 빼먹으면 브라우저에서 그냥 안 열린다.\n'
+fi
+
+if [ "$tls_mode" = yes ]; then
+	domain="$(grep -E '^DOMAIN=' .env | head -1 | cut -d= -f2-)"
+	cat <<EOF
   2. DNS: ${domain:-<DOMAIN>} A/AAAA 레코드를 이 인스턴스로. Cloudflare 를 쓰면 인증서가 발급될
      때까지 DNS-only(회색 구름)로 두고, 발급 확인 후 proxied(주황 구름)로 전환한다.
   3. https://${domain:-<도메인>}/actuator/health 가 200 이면 공개 경로까지 성공이다.
      인증서 진행 상황: docker compose ${COMPOSE_FILES[*]} logs caddy
+EOF
+else
+	cat <<EOF
+  2. 평문 모드다(도메인·TLS 없음). http://<이 서버 공인 IP>/ 로 대시보드가 열리고
+     http://<공인 IP>/actuator/health 가 200 이면 성공이다.
+  3. ⚠️ HTTP 이므로 관리 콘솔 로그인 자격이 평문으로 전송된다. 도메인·TLS 를 붙이기 전에는
+     관리자 자격을 설정하지 않거나(미설정 시 /api/** 가 fail closed) throwaway 값만 쓴다.
+     도메인이 준비되면: ./scripts/bootstrap.sh compose.prod.tls.yaml
+EOF
+fi
+
+cat <<EOF
 
   롤백: .env 에 APP_IMAGE_TAG=sha-<커밋> 을 넣고 이 스크립트를 다시 실행한다.
 EOF

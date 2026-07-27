@@ -9,10 +9,22 @@
 	auto_https off
 }
 
+# 백엔드 프록시 규칙. `/api` 와 `/actuator` 두 곳에서 같은 헤더 처리를 해야 하므로 스니펫으로 묶는다.
+# (Caddyfile.prod 와 동일하게 유지할 것 — 갈리면 로컬과 프로덕션 동작이 달라진다.)
+(backend) {
+	reverse_proxy app:8083 {
+		# X-Forwarded-For 를 클라이언트가 보낸 값과 무관하게 실제 peer IP 로 덮어쓴다(기본은 append).
+		# 로컬에서는 무해하지만, 이 파일은 `compose.prod.yaml`(도메인 없이 평문 :80 공개)에서도 쓰이므로
+		# 안전한 기본값이어야 한다 — append 로 두면 아무나 XFF 를 위조해 로그인 스로틀(#28)을 우회하거나
+		# 타 IP 를 락아웃시킬 수 있다(Spring 의 ForwardedHeaderFilter 가 첫 항목을 채택한다).
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
 :80 {
 	# REST 컨트롤 플레인 (#11).
 	handle /api/* {
-		reverse_proxy app:8083
+		import backend
 	}
 	# 내부 전용(#14): 프로메테우스 스크레이프는 외부(:80)로 노출하지 않는다. app 은 loopback 바인딩이고
 	# Spring Security 에서 이 엔드포인트는 permitAll 이라, 신뢰 경계는 네트워크다 — compose 네트워크의
@@ -22,7 +34,7 @@
 	}
 	# actuator health/info (public) — 화면6 헬스 카드가 same-origin으로 조회.
 	handle /actuator/* {
-		reverse_proxy app:8083
+		import backend
 	}
 	# 그 외 전부 대시보드.
 	handle {
