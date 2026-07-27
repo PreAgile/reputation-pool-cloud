@@ -147,11 +147,11 @@
     {
       "type": "timeseries",
       "title": "냉각 원인별 비율 (건/분) — 이슈 #77",
-      "description": "ResourceCoolingSurge 가 발화하면 여기서 원인을 본다 — 알림은 합산값으로 울리므로(원인별로 쪼개면 여러 원인에 분산된 급증을 놓친다) 어느 원인이 올랐는지는 이 패널만 답할 수 있다. 원인은 진단을 가른다: BLOCKED 는 상대가 우리를 탐지했다는 뜻이고, TIMEOUT/CONNECTION_RESET 은 우리 경로 문제일 수 있다. 점선은 설정된 알림 임계값(surge-thresholds)이라 남은 여유가 바로 보인다.",
+      "description": "ResourceCoolingSurge 가 발화하면 여기서 원인을 본다 — 알림은 합산값으로 울리므로(원인별로 쪼개면 여러 원인에 분산된 급증을 놓친다) 어느 원인이 올랐는지는 이 패널만 답할 수 있다. 원인은 진단을 가른다: BLOCKED 는 상대가 우리를 탐지했다는 뜻이고, TIMEOUT/CONNECTION_RESET 은 우리 경로 문제일 수 있다. 점선은 설정된 알림 임계값(surge-thresholds)이라 남은 여유가 바로 보인다 — 룰과 같이 max() 로 접어 인스턴스가 여러 개여도 선이 하나로 그려진다.",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": { "unit": "none", "min": 0 },
+        "defaults": { "unit": "epm", "min": 0 },
         "overrides": [
           {
             "matcher": { "id": "byName", "options": "임계값 (전체 합산)" },
@@ -182,12 +182,12 @@
         },
         {
           "refId": "C",
-          "expr": "reputation_alert_cooling_surge_threshold",
+          "expr": "max(reputation_alert_cooling_surge_threshold)",
           "legendFormat": "임계값 (전체 합산)"
         },
         {
           "refId": "D",
-          "expr": "reputation_alert_blocking_surge_threshold",
+          "expr": "max(reputation_alert_blocking_surge_threshold)",
           "legendFormat": "임계값 (BLOCKED)"
         }
       ]

@@ -105,12 +105,19 @@ groups:
       # 20/분). 원인별 분해는 Grafana "냉각 원인별 비율" 패널이 담당한다.
       #
       # 임계값은 reputation_alert_cooling_surge_threshold 게이지에서 읽는다(앱 설정 surge-thresholds).
-      # scalar() 로 단일 값을 뽑아 비교하므로, 그 시계열이 사라지면 비교가 NaN 이 되어 조용히 발화하지
-      # 않는다 — 아래 SurgeThresholdMetricMissing 워치독이 그 경우를 잡는다.
+      #
+      # scalar() 를 그냥 쓰지 않고 max() 로 먼저 접는 이유: scalar() 는 입력 벡터가 원소 1개일 때만 값을
+      # 내고 2개 이상이면 NaN 을 돌려준다 — 그러면 비교가 조용히 거짓이 되어 알림이 무동작한다. 지금은
+      # app 컨테이너가 하나라 시계열도 하나지만, 인스턴스가 늘거나(#85 멀티인스턴스) 롤링 중 두 타깃이
+      # 겹치면 인스턴스별 게이지가 생긴다. 그 경우를 absent() 워치독은 잡지 못하므로(있기는 하니까),
+      # 인스턴스 수와 무관하게 단일 값이 되도록 집계해 둔다. 모든 인스턴스가 같은 설정을 읽으므로 어떤
+      # 집계든 같은 값이고, max() 는 값이 갈릴 때 더 보수적인(늦게 우는) 쪽을 고른다.
+      #
+      # 좌변도 sum(...) 으로 이미 전역 합산이라, 양변 모두 인스턴스에 무관하다.
       - alert: ResourceCoolingSurge
         expr: >
           sum(rate(reputation_resource_cooled_total[5m])) * 60
-          > scalar(reputation_alert_cooling_surge_threshold)
+          > scalar(max(reputation_alert_cooling_surge_threshold))
         for: 5m
         labels:
           severity: warning
@@ -132,7 +139,7 @@ groups:
       - alert: UpstreamBlockingSurge
         expr: >
           sum(rate(reputation_resource_cooled_total{cause="BLOCKED"}[5m])) * 60
-          > scalar(reputation_alert_blocking_surge_threshold)
+          > scalar(max(reputation_alert_blocking_surge_threshold))
         for: 5m
         labels:
           severity: warning

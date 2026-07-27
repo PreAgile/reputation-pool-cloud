@@ -156,6 +156,37 @@ tests:
         alertname: ResourceCoolingSurge
         exp_alerts: []
 
+  # 임계값 게이지가 인스턴스별로 여러 개 있어도 → 룰은 그대로 동작한다
+  # (scalar() 는 원소가 2개 이상이면 NaN 을 돌려주므로 max() 로 먼저 접지 않으면 알림이 조용히 무동작한다.
+  #  absent() 워치독은 "있기는 하다"라서 이 경우를 못 잡는다 — 그래서 이 케이스로 고정한다.
+  #  지금은 app 컨테이너가 하나지만 롤링 중 겹침이나 #85 멀티인스턴스에서 실제로 발생할 수 있다.)
+  - interval: 1m
+    name: "멀티 인스턴스: 임계값 게이지가 2개여도 룰이 동작한다"
+    input_series:
+      - series: 'reputation_resource_cooled_total{cause="TIMEOUT"}'
+        values: "0+18x20"
+      - series: 'reputation_alert_cooling_surge_threshold{instance="app-1:8083"}'
+        values: "10x20"
+      - series: 'reputation_alert_cooling_surge_threshold{instance="app-2:8083"}'
+        values: "10x20"
+      - series: 'reputation_alert_blocking_surge_threshold{instance="app-1:8083"}'
+        values: "1x20"
+      - series: 'reputation_alert_blocking_surge_threshold{instance="app-2:8083"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ResourceCoolingSurge
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "리소스 냉각 급증 (분당 임계 초과, 최근 5분)"
+              description: "원인별 분해는 Grafana '냉각 원인별 비율' 패널에서 확인한다. 임계값은 surge-thresholds.cooling-per-minute."
+      # 게이지가 존재하므로 워치독은 조용해야 한다 (absent() 가 이 상황을 잡지 못한다는 사실 자체를 고정)
+      - eval_time: 15m
+        alertname: SurgeThresholdMetricMissing
+        exp_alerts: []
+
   # 임계값 지표가 아예 없으면 → 급증 룰은 조용해지고 워치독이 그 사실을 알린다
   # (이 설계가 새로 만든 fail-open 구멍을 워치독이 실제로 막는지 고정한다.)
   - interval: 1m
