@@ -158,11 +158,13 @@ jobs:
         run: |
           ok_env=$'REPUTATION_POOL_API_KEY=ci-not-a-placeholder\nGRAFANA_ADMIN_PASSWORD=ci-not-a-placeholder\nREPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL='
 
+          # 남은 인자는 bootstrap.sh 의 **인자**로 넘긴다. `DRY_RUN=1 "$@" ./scripts/bootstrap.sh` 처럼
+          # 쓰면 오버레이 파일명이 명령어 위치로 들어가 `command not found` 가 된다(실제로 그랬다).
           expect_pass() {
-            local label="$1" want_tls="$2"; shift 2
-            printf '%s\n' "$1" > .env; shift
+            local label="$1" want_tls="$2" env_body="$3"; shift 3
+            printf '%s\n' "$env_body" > .env
             local out
-            if ! out="$(DRY_RUN=1 "$@" ./scripts/bootstrap.sh 2>&1)"; then
+            if ! out="$(DRY_RUN=1 ./scripts/bootstrap.sh "$@" 2>&1)"; then
               echo "[$label] 통과해야 하는데 실패했다" >&2; printf '%s\n' "$out" >&2; exit 1
             fi
             grep -q "tls_mode: $want_tls" <<< "$out" \
@@ -170,9 +172,9 @@ jobs:
             echo "ok: $label"
           }
           expect_reject() {
-            local label="$1"; shift
-            printf '%s\n' "$1" > .env; shift
-            if DRY_RUN=1 "$@" ./scripts/bootstrap.sh > /dev/null 2>&1; then
+            local label="$1" env_body="$2"; shift 2
+            printf '%s\n' "$env_body" > .env
+            if DRY_RUN=1 ./scripts/bootstrap.sh "$@" > /dev/null 2>&1; then
               echo "[$label] 거부해야 하는데 통과했다" >&2; exit 1
             fi
             echo "ok: $label (거부됨)"
@@ -183,7 +185,8 @@ jobs:
           expect_pass "DEPLOY_OVERLAYS=tls" yes "$ok_env"$'\nDEPLOY_OVERLAYS=compose.prod.tls.yaml'
           expect_pass "DEPLOY_OVERLAYS=6gb" no "$ok_env"$'\nDEPLOY_OVERLAYS=compose.prod.6gb.yaml'
           expect_pass "CLI 인자 tls" yes "$ok_env" compose.prod.tls.yaml
-          expect_reject "없는 오버레이" "$ok_env"$'\nDEPLOY_OVERLAYS=does-not-exist.yaml'
+          expect_reject "없는 오버레이 (.env)" "$ok_env"$'\nDEPLOY_OVERLAYS=does-not-exist.yaml'
+          expect_reject "없는 오버레이 (CLI 인자)" "$ok_env" does-not-exist.yaml
           expect_reject "placeholder 잔존" $'REPUTATION_POOL_API_KEY=local-dev-key\nGRAFANA_ADMIN_PASSWORD=x\nREPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL='
           expect_reject "alertmanager 정의 없음" $'REPUTATION_POOL_API_KEY=x\nGRAFANA_ADMIN_PASSWORD=x'
           rm -f .env
