@@ -27,6 +27,9 @@
 # 장시간 루프가 중간에 죽는다.
 set -euo pipefail
 
+# CLI 가 매 호출마다 붙이는 키 라벨 권고 경고를 끈다 — 오류 판별용 출력에 섞이면 읽기 어렵다.
+export SUPPRESS_LABEL_WARNING=True
+
 SHAPE="${SHAPE:-VM.Standard.A1.Flex}"
 OCPUS="${OCPUS:-2}"
 MEMORY_GB="${MEMORY_GB:-12}"
@@ -50,33 +53,52 @@ command -v oci > /dev/null 2>&1 || die "oci CLI 가 없다 — 'brew install oci
 
 # ---------------------------------------------------------------------------
 # 필요한 OCID 들을 탐색한다. 콘솔에서 복사해 붙이는 과정을 없애 오타 가능성을 줄인다.
+#
+# 조회를 재시도로 감싼다: API 키를 방금 등록했다면 서비스별 엔드포인트로 전파되는 시차 때문에 401 이
+# 섞여 나온다(identity 는 통과하는데 compute/virtual_network 는 아직 401인 상태가 몇 분 이어진다).
+# 재시도가 없으면 여기서 죽어 정작 용량 대기를 시작하지도 못한다.
 # ---------------------------------------------------------------------------
+oci_try() {
+	local label="$1"
+	shift
+	local i out
+	for i in $(seq 1 24); do
+		if out="$("$@" 2> /dev/null)" && [ -n "$out" ] && [ "$out" != "null" ]; then
+			printf '%s' "$out"
+			return 0
+		fi
+		printf '%s  %s 조회 재시도 %d/24\n' "$(date '+%H:%M:%S')" "$label" "$i" >&2
+		sleep 10
+	done
+	die "$label 조회가 4분간 실패했다 — 인증 전파 지연이거나 대상이 없다"
+}
+
 TENANCY="${TENANCY:-$(awk -F= '/^tenancy[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2; exit}' "$HOME/.oci/config")}"
 [ -n "$TENANCY" ] || die "$HOME/.oci/config 에서 tenancy OCID 를 찾지 못했다 — TENANCY 로 직접 지정한다"
 
 if [ -z "${AD:-}" ]; then
-	AD="$(oci iam availability-domain list --compartment-id "$TENANCY" --query 'data[0].name' --raw-output)"
+	AD="$(oci_try '가용성 도메인' \
+		oci iam availability-domain list --compartment-id "$TENANCY" \
+		--query 'data[0].name' --raw-output)"
 fi
-[ -n "$AD" ] || die "가용성 도메인을 찾지 못했다 — AD 로 직접 지정한다"
 
 # 퍼블릭 서브넷 = 공인 IP 할당이 금지되지 않은 서브넷. 여러 개면 첫 번째를 쓴다.
+# 백틱은 JMESPath 의 리터럴 표기다(셸 명령 치환이 아니므로 단일 인용을 유지해야 한다).
+# shellcheck disable=SC2016
 if [ -z "${SUBNET:-}" ]; then
-	# 백틱은 JMESPath 의 리터럴 표기다(셸 명령 치환이 아니므로 단일 인용을 유지해야 한다).
-	# shellcheck disable=SC2016
-	SUBNET="$(oci network subnet list --compartment-id "$TENANCY" \
+	SUBNET="$(oci_try '퍼블릭 서브넷' \
+		oci network subnet list --compartment-id "$TENANCY" \
 		--query 'data[?"prohibit-public-ip-on-vnic"==`false`].id | [0]' --raw-output)"
 fi
-[ -n "$SUBNET" ] && [ "$SUBNET" != "null" ] \
-	|| die "퍼블릭 서브넷을 찾지 못했다 — VCN 에 퍼블릭 서브넷이 있는지 확인하거나 SUBNET 으로 지정한다"
 
 # --shape 로 필터하면 해당 shape 아키텍처(arm64)에 맞는 빌드만 나온다.
 if [ -z "${IMAGE:-}" ]; then
-	IMAGE="$(oci compute image list --compartment-id "$TENANCY" \
+	IMAGE="$(oci_try 'Ubuntu 24.04 (arm64) 이미지' \
+		oci compute image list --compartment-id "$TENANCY" \
 		--operating-system 'Canonical Ubuntu' --operating-system-version '24.04' \
 		--shape "$SHAPE" --sort-by TIMECREATED --sort-order DESC \
 		--query 'data[0].id' --raw-output)"
 fi
-[ -n "$IMAGE" ] && [ "$IMAGE" != "null" ] || die "Ubuntu 24.04 (arm64) 이미지를 찾지 못했다 — IMAGE 로 지정한다"
 
 # ssh_authorized_keys 를 셸에서 JSON 문자열로 만들면 인용 문제가 생긴다 — 파일로 넘긴다.
 METADATA_FILE="$(mktemp)"
@@ -105,6 +127,7 @@ EOF
 # 재시도 루프
 # ---------------------------------------------------------------------------
 attempt=0
+auth_fail=0
 backoff="$BACKOFF_START"
 started="$(date +%s)"
 
@@ -148,6 +171,20 @@ while :; do
 		backoff=$(( backoff * 2 ))
 		[ "$backoff" -le "$BACKOFF_MAX" ] || backoff="$BACKOFF_MAX"
 		continue
+	fi
+
+	# API 키를 콘솔에 등록한 직후에는 서비스별 엔드포인트로 전파되는 시차 때문에 401 이 섞여 나온다
+	# (identity 는 통과하는데 compute 는 아직 401인 상태가 몇 분 이어진다). 제한된 횟수만 기다린다 —
+	# 계속 나오면 전파가 아니라 키 등록 자체가 안 된 것이다.
+	if grep -qiE 'notauthenticated|"status": 401' <<< "$out"; then
+		auth_fail=$((auth_fail + 1))
+		if [ "$auth_fail" -le 20 ]; then
+			log "인증 실패 ${auth_fail}/20 (키 전파 지연으로 보임) — 15초 후 재시도"
+			sleep 15
+			continue
+		fi
+		printf '%s\n' "$out" >&2
+		die "인증이 계속 실패한다 — 콘솔 User settings → API keys 에 지문이 등록됐는지 확인한다"
 	fi
 
 	# 그 외(권한·잘못된 OCID·한도 초과 등)는 재시도해도 달라지지 않는다.
