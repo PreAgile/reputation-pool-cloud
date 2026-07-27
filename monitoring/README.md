@@ -30,12 +30,67 @@
 - `hikaricp_connections_*` — DB 커넥션 풀
 - `jvm_*` — 힙 등 런타임
 - `reputation_*_total` — 도메인 이벤트(lease/block/cool/recover, #68)
+- `grpc_server_processing_duration_seconds_*` — gRPC 데이터플레인 지연·상태코드(#78)
+- `reputation_alert_*_surge_threshold` — 급증 알림 임계값 자체(#77, 아래 참고)
 
 ## 알림(SLO)
 
 `monitoring/alerts.yml` 에 SLO 규칙을 정의한다(가용성·지연·DB풀·차단 급증 등). Prometheus 가 룰을 평가하고
 (Prometheus UI 의 Alerts/ALERTS 시계열로도 확인 가능), firing 알림은 `prometheus.yml` 의
 `alerting.alertmanagers` 배선을 통해 `alertmanager` 서비스로 넘어가 실제 통지 라우팅까지 이어진다(#76).
+
+### 룰 검증 (CI 에서 자동)
+
+CI 의 `deploy-config` 잡이 `promtool` 로 두 단계를 돌린다 — 로컬에서도 같은 명령으로 확인할 수 있다:
+
+```bash
+docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prometheus:v3.1.0 \
+  check rules alerts.yml            # 문법
+docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prometheus:v3.1.0 \
+  test rules alerts-test.yml        # 의미: 시계열을 주입해 발화 여부·라벨·주석을 단정
+```
+
+`alerts-test.yml` 이 있는 이유: 문법이 맞는데도 **조용히 발화하지 않는 룰**이 가장 위험하다(임계값 시계열
+이름이 바뀌었거나, 집계에서 라벨을 잃었거나). 룰을 고치면 이 테스트도 같이 고친다.
+
+### 급증 임계값 조정 (운영자)
+
+`ResourceCoolingSurge` 와 `UpstreamBlockingSurge` 의 임계값은 룰 파일에 박혀 있지 않고 **앱 설정에서
+온다.** Prometheus 는 룰 파일에서 환경변수를 치환하지 않으므로, 앱이 값을 게이지로 노출하고 룰이 그
+시계열과 비교한다:
+
+| 환경변수 | 기본값 | 의미 |
+|---|---|---|
+| `REPUTATION_POOL_COOLING_SURGE_THRESHOLD` | `10` | 전체 냉각 전이 **분당** 건수 |
+| `REPUTATION_POOL_BLOCKING_SURGE_THRESHOLD` | `1` | `BLOCKED` 원인 냉각 **분당** 건수 |
+
+부수 효과로 Grafana "냉각 원인별 비율" 패널에 임계선이 점선으로 함께 그려져 **남은 여유가 눈에 보인다.**
+
+**두 기본값은 실측 없는 가설이다** (`limits` 와 같은 posture). 도출된 것은 둘의 *비율*뿐이다 — 한
+`(리소스, 컨텍스트)` 짝은 쿨다운이 끝나기 전에 다시 냉각 이벤트를 내지 못하고(core
+`ReputationEngine.shouldCool`), 첫 쿨다운이 `SLOW` 60초 대 `BLOCKED` 7200초로 120배 차이나므로, 같은
+분당 건수가 원인에 따라 전혀 다른 규모를 뜻한다.
+
+실트래픽이 쌓인 뒤 조정하는 절차:
+
+1. **평상시 값을 관측한다.** Grafana "냉각 원인별 비율" 패널에서 사고가 없던 구간의 전체 합산과 `BLOCKED`
+   값을 각각 읽는다(최소 1주 — 요일·시간대 편차가 보일 만큼).
+2. **그 배수로 잡는다.** 평상시의 **300%** 정도가 출발점이다 — 정상 변동에는 안 울리고 실제 급증에는
+   울리는 지점. 오탐이 잦으면 400~500%로, 사고를 놓쳤으면 200%로 옮긴다.
+3. **`BLOCKED` 은 더 낮게 둔다.** 쿨다운이 2시간이라 값 자체가 원래 작다. 평상시가 0에 가까우면 배수가
+   무의미하므로 절대값(예: `0.5`)으로 잡되, 0 보다는 커야 한다.
+4. `.env` 에 넣고 재배포한다(`./scripts/bootstrap.sh`). 값은 `/actuator/prometheus` 의
+   `reputation_alert_cooling_surge_threshold` 로 확인한다.
+
+> 임계값을 **자동 산정**하는 것(#88 이상탐지 → #90 정책 자동 튜닝)은 v2 트랙이다. 데이터가 쌓이기 전에는
+> 계산할 근거가 없고(#88 자체가 "데이터 임계점 전에는 착수 보류"라고 적어 뒀다), *"울리면 임계를 올린다"*
+> 는 방식은 지속형 장애에서 정확히 침묵하게 되므로 채택하지 않는다. 임계값을 목표에서 **도출**하는
+> 정석 경로는 #79(SLO + 에러버짓 + multi-burn-rate)다.
+>
+> `0` 이나 음수는 부팅 시 거부한다 — 룰을 끄려면 `alerts.yml` 에서 해당 룰을 지운다.
+>
+> 임계값 게이지가 사라지면 두 급증 룰은 비교 대상이 없어 조용히 무동작한다. `SurgeThresholdMetricMissing`
+> 워치독이 그 경우를 잡는다.
 
 ## 알림 라우팅
 
@@ -108,3 +163,6 @@ Alertmanager 자체는 동작하며(라우팅·grouping·dedup 은 살아있음)
 
 - core observability 포트(0.4.0 릴리스 후) Micrometer 어댑터 → 리스 지연 Timer·이용률 Gauge·거절율 카운터 추가
 - Alertmanager severity 별 라우팅 분기(receiver 2개 이상일 때), Grafana 외부 노출·인증(#15)
+- SLO 확정 + 에러버짓·multi-burn-rate 로 단순 임계 룰 승격(#79) — 급증 임계값의 절대 수치도 여기서 재조정
+- 알림·메트릭 테넌트 귀속(#81) — 지금 도메인 카운터는 테넌트 전역 합산이라, 한 테넌트의 급증이 전체 알림을 울린다
+- 임계값 자동 산정: 시계열 이상탐지(#88) → 정책 자동 튜닝(#90, core advisor). 데이터 축적 후 v2 트랙

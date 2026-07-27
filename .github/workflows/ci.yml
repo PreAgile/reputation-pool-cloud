@@ -132,3 +132,24 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 \
             scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh
+
+      # Alert rules have the same exposure as the deploy artefacts above: nothing loads alerts.yml until
+      # Prometheus reloads it on the server, so a typo — or worse, a rule that parses but can never fire —
+      # would ship unnoticed. `check rules` covers syntax; `test rules` runs monitoring/alerts-test.yml,
+      # which injects series and asserts firing/labels/annotations, so a rule that goes silently no-op
+      # fails here instead of in production. Image pinned for the same reason as shellcheck: so local and
+      # CI report identically.
+      - name: Validate Prometheus alert rules
+        run: |
+          docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prometheus:v3.1.0 \
+            check rules alerts.yml
+          docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prometheus:v3.1.0 \
+            test rules alerts-test.yml
+
+      # Alertmanager's routing config has the same property. amtool parses the file and resolves the
+      # receiver graph, so an unreachable route or an unknown receiver fails here rather than leaving
+      # firing alerts silently unrouted on the server (#76).
+      - name: Validate Alertmanager config
+        run: |
+          docker run --rm -v "$PWD/monitoring/alertmanager.yml:/w/alertmanager.yml:ro" -w /w \
+            --entrypoint amtool prom/alertmanager:v0.31.1 check-config alertmanager.yml

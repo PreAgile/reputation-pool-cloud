@@ -1,0 +1,176 @@
+# alerts.yml 의 단위 테스트 (#77). `promtool test rules monitoring/alerts-test.yml` 로 실행하며 CI 의
+# deploy-config 잡이 자동으로 돌린다. 입력 시계열을 직접 주입해 "어떤 상황 → 어떤 결과"를 단정하므로,
+# 룰이 조용히 무동작하게 되는 회귀를 잡는다(문법 오류는 promtool check rules 가, 의미는 이 파일이 잡는다).
+#
+# 테스트 이름 관례: 이 레포의 한글 @DisplayName 규칙("어떤 상황 → 어떤 결과")을 YAML 에 옮길 수 없으므로
+# 각 케이스 위 주석에 같은 형식으로 남긴다.
+#
+# 임계값 시계열(reputation_alert_*_surge_threshold)은 앱이 게이지로 노출하는 값이다. 여기서는 기본값
+# (cooling 10/분, blocking 1/분)을 그대로 주입한다 — 기본값이 바뀌면 이 파일도 같이 바뀌어야 한다.
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 냉각이 임계 아래로 꾸준하면 → 발화하지 않는다 (조용한 정상 상태)
+  - interval: 1m
+    name: "정상 상태: 냉각율이 임계 미만"
+    input_series:
+      - series: 'reputation_resource_cooled_total{cause="SLOW"}'
+        values: "0+3x20"
+      - series: 'reputation_resource_cooled_total{cause="TIMEOUT"}'
+        values: "0+2x20"
+      - series: "reputation_alert_cooling_surge_threshold"
+        values: "10x20"
+      - series: "reputation_alert_blocking_surge_threshold"
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ResourceCoolingSurge
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: UpstreamBlockingSurge
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: SurgeThresholdMetricMissing
+        exp_alerts: []
+
+  # 임계를 넘겼지만 아직 5분이 안 지났으면 → 발화하지 않는다 (`for: 5m` 이 순간 튐을 걸러낸다)
+  # 5분 이상 지속되면 → warning 으로 발화한다
+  - interval: 1m
+    name: "냉각 급증: for 5m 대기 후 발화"
+    input_series:
+      - series: 'reputation_resource_cooled_total{cause="TIMEOUT"}'
+        values: "0+18x20"
+      - series: "reputation_alert_cooling_surge_threshold"
+        values: "10x20"
+      - series: "reputation_alert_blocking_surge_threshold"
+        values: "1x20"
+    alert_rule_test:
+      # 조건은 참이지만 아직 5분이 안 찼다 → pending 이라 exp_alerts 는 비어 있다
+      - eval_time: 6m
+        alertname: ResourceCoolingSurge
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: ResourceCoolingSurge
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "리소스 냉각 급증 (분당 임계 초과, 최근 5분)"
+              description: "원인별 분해는 Grafana '냉각 원인별 비율' 패널에서 확인한다. 임계값은 surge-thresholds.cooling-per-minute."
+
+  # 여러 원인에 고르게 분산된 급증이면 → 합산 룰이 잡는다
+  # (cause 별로 쪼갠 룰이라면 원인별 4/분이 임계 10 미달이라 전부 놓쳤을 상황. 이 케이스가 "쪼개지 않는다"는
+  #  설계 결정을 고정한다.)
+  - interval: 1m
+    name: "냉각 급증: 5개 원인에 분산돼도 합산으로 잡힌다"
+    input_series:
+      - series: 'reputation_resource_cooled_total{cause="SLOW"}'
+        values: "0+4x20"
+      - series: 'reputation_resource_cooled_total{cause="TIMEOUT"}'
+        values: "0+4x20"
+      - series: 'reputation_resource_cooled_total{cause="CONNECTION_RESET"}'
+        values: "0+4x20"
+      - series: 'reputation_resource_cooled_total{cause="TLS_HANDSHAKE"}'
+        values: "0+4x20"
+      - series: 'reputation_resource_cooled_total{cause="BLOCKED"}'
+        values: "0+4x20"
+      - series: "reputation_alert_cooling_surge_threshold"
+        values: "10x20"
+      - series: "reputation_alert_blocking_surge_threshold"
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ResourceCoolingSurge
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "리소스 냉각 급증 (분당 임계 초과, 최근 5분)"
+              description: "원인별 분해는 Grafana '냉각 원인별 비율' 패널에서 확인한다. 임계값은 surge-thresholds.cooling-per-minute."
+
+  # BLOCKED 만 낮은 비율로 오르면 → 합산 룰은 조용하고 UpstreamBlockingSurge 만 발화한다
+  # (BLOCKED 전용 저임계 룰이 없으면 이 상황을 아무도 잡지 못한다 — 별도 룰이 존재하는 이유를 고정한다.)
+  - interval: 1m
+    name: "업스트림 차단: BLOCKED 만 올라 전용 룰만 발화"
+    input_series:
+      - series: 'reputation_resource_cooled_total{cause="BLOCKED"}'
+        values: "0+3x20"
+      - series: "reputation_alert_cooling_surge_threshold"
+        values: "10x20"
+      - series: "reputation_alert_blocking_surge_threshold"
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ResourceCoolingSurge
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: UpstreamBlockingSurge
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "업스트림 차단 급증 (BLOCKED 원인 냉각이 분당 임계 초과, 최근 5분)"
+              description: "상대가 우리를 차단하기 시작했을 가능성. 임계값은 surge-thresholds.blocking-per-minute."
+
+  # 다른 원인이 시끄럽고 BLOCKED 은 조용하면 → 차단 룰은 오염되지 않는다 (cause 필터가 실제로 걸린다)
+  - interval: 1m
+    name: "업스트림 차단: 다른 원인의 급증에 오염되지 않는다"
+    input_series:
+      - series: 'reputation_resource_cooled_total{cause="SLOW"}'
+        values: "0+30x20"
+      - series: 'reputation_resource_cooled_total{cause="BLOCKED"}'
+        values: "0+0x20"
+      - series: "reputation_alert_cooling_surge_threshold"
+        values: "10x20"
+      - series: "reputation_alert_blocking_surge_threshold"
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: UpstreamBlockingSurge
+        exp_alerts: []
+      # 합산 룰은 당연히 발화해야 한다 (SLOW 30/분)
+      - eval_time: 15m
+        alertname: ResourceCoolingSurge
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "리소스 냉각 급증 (분당 임계 초과, 최근 5분)"
+              description: "원인별 분해는 Grafana '냉각 원인별 비율' 패널에서 확인한다. 임계값은 surge-thresholds.cooling-per-minute."
+
+  # 임계값을 운영자가 올려 두면 → 같은 냉각율에서 발화하지 않는다 (설정이 실제로 룰에 반영된다)
+  - interval: 1m
+    name: "임계값 설정: 상향하면 같은 부하에서 발화하지 않는다"
+    input_series:
+      - series: 'reputation_resource_cooled_total{cause="TIMEOUT"}'
+        values: "0+18x20"
+      - series: "reputation_alert_cooling_surge_threshold"
+        values: "50x20"
+      - series: "reputation_alert_blocking_surge_threshold"
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ResourceCoolingSurge
+        exp_alerts: []
+
+  # 임계값 지표가 아예 없으면 → 급증 룰은 조용해지고 워치독이 그 사실을 알린다
+  # (이 설계가 새로 만든 fail-open 구멍을 워치독이 실제로 막는지 고정한다.)
+  - interval: 1m
+    name: "워치독: 임계값 지표가 없으면 급증 룰이 무동작이고 워치독이 발화한다"
+    input_series:
+      - series: 'reputation_resource_cooled_total{cause="TIMEOUT"}'
+        values: "0+18x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ResourceCoolingSurge
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: SurgeThresholdMetricMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "급증 알림 임계값 지표가 없다 — ResourceCoolingSurge/UpstreamBlockingSurge 가 무동작 중일 수 있다"

@@ -87,6 +87,22 @@ class PrometheusScrapeIT {
     }
 
     @Test
+    @DisplayName("스크레이프하면 → 급증 알림 임계값 게이지가 alerts.yml 이 참조하는 이름 그대로 노출된다 (issue #77)")
+    void scrapeExposesSurgeThresholdGaugesUnderTheNamesTheRulesReference() {
+        ResponseEntity<String> res = rest.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // monitoring/alerts.yml compares against these two series by name, so a rename or a Micrometer
+        // suffix change would silently disable ResourceCoolingSurge / UpstreamBlockingSurge — a broken
+        // alert that stays quiet. Pinning the rendered names here makes that a failing test instead.
+        // Gauges carry no `_total` suffix (that is a counter convention), which is why the rule
+        // expressions use the bare names.
+        assertThat(res.getBody())
+                .contains("reputation_alert_cooling_surge_threshold")
+                .contains("reputation_alert_blocking_surge_threshold");
+    }
+
+    @Test
     @DisplayName("gRPC 호출 후 스크레이프하면 → 처리시간 히스토그램 버킷과 SLO 룰이 쓰는 method/methodType 태그가 노출된다"
             + " (issue #78, grpc.server.processing.duration percentiles-histogram)")
     void grpcCallIsScrapedWithProcessingDurationHistogramBuckets() {
