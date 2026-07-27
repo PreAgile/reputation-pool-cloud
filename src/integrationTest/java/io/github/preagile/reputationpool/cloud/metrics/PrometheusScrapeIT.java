@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.AcquireRequest;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.Context;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.Outcome;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.RegisterRequest;
+import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ReportRequest;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ResourceId;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ResourceKind;
 import io.github.preagile.reputationpool.grpc.v1.ReputationAdvisorGrpc;
@@ -85,12 +87,15 @@ class PrometheusScrapeIT {
     }
 
     @Test
-    @DisplayName("gRPC 호출 후 스크레이프하면 → 처리시간 히스토그램 버킷과 method 태그가 노출된다 (issue #78, grpc.server.processing.duration"
-            + " percentiles-histogram)")
+    @DisplayName("gRPC 호출 후 스크레이프하면 → 처리시간 히스토그램 버킷과 SLO 룰이 쓰는 method/methodType 태그가 노출된다"
+            + " (issue #78, grpc.server.processing.duration percentiles-histogram)")
     void grpcCallIsScrapedWithProcessingDurationHistogramBuckets() {
         // net.devh's GrpcServerMetricAutoConfiguration is already active (MeterRegistry + Micrometer's
         // MetricCollectingServerInterceptor are both on the classpath), so every RPC is timed without any
-        // cloud-side wiring — this call just needs to happen so the timer records at least one sample.
+        // cloud-side wiring — these calls just need to happen so the timer records at least one sample.
+        // All three unary RPCs the SLO rules select on (monitoring/alerts.yml: GrpcLatencyP99 filters
+        // method=~"Acquire|Report", GrpcHighErrorRate filters methodType!="SERVER_STREAMING") are exercised,
+        // so this test fails if a tag name or value the rules depend on ever changes.
         ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", grpcServerFactory.getPort())
                 .usePlaintext()
                 .build();
@@ -100,14 +105,18 @@ class PrometheusScrapeIT {
             ReputationAdvisorGrpc.ReputationAdvisorBlockingStub stub = ReputationAdvisorGrpc.newBlockingStub(channel)
                     .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(md));
 
-            stub.register(RegisterRequest.newBuilder()
-                    .setResource(ResourceId.newBuilder()
-                            .setKind(ResourceKind.PROXY)
-                            .setValue("sli-probe")
-                            .build())
-                    .build());
+            ResourceId resource = ResourceId.newBuilder()
+                    .setKind(ResourceKind.PROXY)
+                    .setValue("sli-probe")
+                    .build();
+            stub.register(RegisterRequest.newBuilder().setResource(resource).build());
             stub.acquire(AcquireRequest.newBuilder()
                     .setContext(Context.newBuilder().setValue("scrape"))
+                    .build());
+            stub.report(ReportRequest.newBuilder()
+                    .setResource(resource)
+                    .setContext(Context.newBuilder().setValue("scrape"))
+                    .setOutcome(Outcome.newBuilder().setSuccess(Outcome.Success.getDefaultInstance()))
                     .build());
         } finally {
             channel.shutdownNow();
@@ -119,6 +128,10 @@ class PrometheusScrapeIT {
         assertThat(res.getBody())
                 .contains("grpc_server_processing_duration_seconds_bucket")
                 .contains("method=\"Register\"")
-                .contains("method=\"Acquire\"");
+                .contains("method=\"Acquire\"")
+                .contains("method=\"Report\"")
+                // GrpcHighErrorRate excludes SubscribeEvents by methodType, so pin that tag's spelling too.
+                .contains("methodType=\"UNARY\"")
+                .contains("statusCode=\"OK\"");
     }
 }

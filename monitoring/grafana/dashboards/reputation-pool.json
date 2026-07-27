@@ -131,14 +131,15 @@
     },
     {
       "type": "timeseries",
-      "title": "gRPC 지연 p99 (method 별, s) — 이슈 #78",
+      "title": "gRPC 지연 p99 (unary method 별, s) — 이슈 #78",
+      "description": "SubscribeEvents 는 서버 스트리밍이라 처리시간이 곧 구독 수명(분 단위)이다 — 같은 축에 그리면 밀리초 단위인 실제 데이터플레인 RPC 들이 바닥에 눌려 안 보이므로 methodType 으로 제외한다.",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.99, sum(rate(grpc_server_processing_duration_seconds_bucket[5m])) by (le, method))",
+          "expr": "histogram_quantile(0.99, sum by (le, method) (rate(grpc_server_processing_duration_seconds_bucket{methodType!=\"SERVER_STREAMING\"}[5m])))",
           "legendFormat": "{{method}}"
         }
       ]

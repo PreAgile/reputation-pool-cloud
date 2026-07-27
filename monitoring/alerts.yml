@@ -47,22 +47,38 @@ groups:
       # gRPC 데이터플레인 지연 SLO (#78): Acquire/Report(실제 서빙 경로) p99 가 500ms 를 5분 이상 초과.
       # net.devh의 GrpcServerMetricAutoConfiguration 이 이미 모든 RPC를 grpc_server_processing_duration_seconds
       # 로 계측하고 있고, application.yml 의 percentiles-histogram 설정으로 _bucket 시계열이 노출된다.
+      #
+      # method 를 유지한 채(`by (le, method)`) 메서드별로 따로 평가한다 — 두 RPC 의 지연 프로파일이 애초에
+      # 다르기 때문이다(Acquire 는 평판 스코어링, Report 는 셀 갱신). 버킷을 합산하면 트래픽이 많고 빠른
+      # Acquire 가 느린 Report 를 가려 알림이 조용히 무동작하게 된다. method 는 6개 RPC 로 유한하니
+      # 카디널리티 부담도 없다.
       - alert: GrpcLatencyP99
         expr: >
-          histogram_quantile(0.99, sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report"}[5m])) by (le)) > 0.5
+          histogram_quantile(0.99, sum by (le, method) (rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report"}[5m]))) > 0.5
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "gRPC(Acquire/Report) p99 지연 500ms 초과 (최근 5분)"
+          summary: "gRPC {{ $labels.method }} p99 지연 500ms 초과 (최근 5분)"
 
-      # gRPC 에러율 SLO (#78): statusCode 가 OK 가 아닌 비율이 5% 를 5분 이상 초과.
+      # gRPC 에러율 SLO (#78): 서버 귀책 상태코드 비율이 5% 를 5분 이상 초과.
+      #
+      # `statusCode != "OK"` 를 그대로 쓰지 않는 이유 — 이 타이머는 6개 RPC 를 모두 계측하므로 서버가
+      # 정상인데도 non-OK 가 쌓이는 경로가 두 개 있다:
+      #   * SubscribeEvents 는 서버 스트리밍이라 클라이언트가 끊을 때마다 CANCELLED 로 종료된다. 정상
+      #     구독 종료가 영구적으로 에러율을 끌어올려 알림이 상시 firing 이 된다 → methodType 으로 배제.
+      #   * UNAUTHENTICATED/INVALID_ARGUMENT/RESOURCE_EXHAUSTED 는 클라이언트 귀책이거나 설계된 거절이다
+      #     (잘못된 API 키, 잘못된 요청, #84 전역 예산 거절). 서버는 정상 동작 중이므로 가용성 SLO 위반이
+      #     아니다 — 예산 소진은 별도 도메인 신호로 다룰 문제고 여기서 페이지를 울릴 사안이 아니다.
+      # 그래서 서버 귀책 코드만 분자로 센다. 또 메서드별로 쪼개지 않고 데이터플레인 전체 비율로 평가한다:
+      # critical 페이지라 트래픽이 적은 메서드(예: 하루 몇 건의 Report)에서 단 1건의 에러가 100% 로 잡혀
+      # 울리는 걸 막아야 한다. 메서드별 분해는 Grafana 대시보드가 담당한다.
       - alert: GrpcHighErrorRate
         expr: >
-          sum(rate(grpc_server_processing_duration_seconds_count{statusCode!="OK"}[5m]))
-          / sum(rate(grpc_server_processing_duration_seconds_count[5m])) > 0.05
+          sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[5m]))
+          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[5m])) > 0.05
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "gRPC 에러율 5% 초과 (최근 5분)"
+          summary: "gRPC 서버 귀책 에러율 5% 초과 (최근 5분)"
