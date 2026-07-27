@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cloudflare 대역 드리프트 주간 점검 (macOS launchd).
+
+  `origin-lock-check-cron.sh` 를 매주 월요일 10:00 에 실행한다. 드리프트가 있을 때만 알림이 뜨고,
+  정상이면 조용히 끝난다. 대역 변경은 연 단위로 드물기 때문에 주 1회로 충분하다.
+
+  RunAtLoad 를 켠 이유: 노트북이 예약 시각에 꺼져 있으면 launchd 가 그 회차를 건너뛴다.
+  로그인할 때 한 번 돌면 놓친 주가 오래 방치되지 않는다.
+
+  ⚠️ macOS TCC: launchd 에이전트는 ~/Desktop·~/Documents·~/Downloads 아래의 파일을 실행할 수 없다
+  (`Operation not permitted`). 터미널에서 직접 돌릴 때는 Terminal 에 권한이 있어 성공하므로, 이
+  차이를 모르면 "손으로는 되는데 예약 실행만 조용히 실패"하는 상태가 된다 — launchd 는 stderr 를
+  파일로만 남기므로 알아채기도 어렵다. 그래서 레포가 그 경로에 있으면 보호되지 않는 위치에
+  **복사본을 두고** REPO 를 거기로 가리킨다.
+
+  설치 (레포 경로에 관계없이 안전한 방법):
+    INST=~/.local/share/poolroost
+    mkdir -p $INST/scripts
+    cp scripts/origin-lock-check-cron.sh scripts/oci-origin-lock.sh $INST/scripts/
+    chmod +x $INST/scripts/*.sh
+    sed "s|REPO_PATH_PLACEHOLDER|$INST|" scripts/com.poolroost.origin-lock-check.plist \
+      > ~/Library/LaunchAgents/com.poolroost.origin-lock-check.plist
+    launchctl load ~/Library/LaunchAgents/com.poolroost.origin-lock-check.plist
+
+  스크립트를 고치면 복사본도 다시 넣어야 한다(위 cp 를 다시 실행).
+
+  해제:   launchctl unload ~/Library/LaunchAgents/com.poolroost.origin-lock-check.plist
+  즉시실행: launchctl start com.poolroost.origin-lock-check
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.poolroost.origin-lock-check</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>-lc</string>
+		<string>exec "$REPO/scripts/origin-lock-check-cron.sh"</string>
+	</array>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- oci CLI 가 Homebrew 경로에 있고, launchd 의 기본 PATH 에는 그게 없다. -->
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>REPO</key>
+		<string>REPO_PATH_PLACEHOLDER</string>
+	</dict>
+
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>1</integer>
+		<key>Hour</key>
+		<integer>10</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<key>StandardOutPath</key>
+	<string>/tmp/poolroost-origin-lock-check.out</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/poolroost-origin-lock-check.err</string>
+</dict>
+</plist>

@@ -35,6 +35,7 @@ command -v python3 > /dev/null 2>&1 || die "python3 가 없다"
 MODE=lock
 case "${1:-}" in
 	--list) MODE=list ;;
+	--check) MODE=check ;;
 	--unlock) MODE=unlock ;;
 	"") MODE=lock ;;
 	*) die "알 수 없는 인자: $1" ;;
@@ -92,6 +93,11 @@ else
 	# 받은 값이 CIDR 로 보이는지 최소 검증한다. 장애 페이지 HTML 을 그대로 규칙에 넣으면
 	# 적용이 실패하거나(다행) 이상한 규칙이 들어간다.
 	grep -qE '^[0-9a-fA-F:.]+/[0-9]+$' "$SRC" || die "받은 목록이 CIDR 형식이 아니다 — 중단한다"
+	# 개수 하한. 부분 응답(엣지 장애 등)을 그대로 적용하면 **정상 대역이 규칙에서 빠져** 일부 지역
+	# 유저만 502 가 되는데, 원인이 우리 쪽 자동화라는 걸 떠올리기 어렵다. IPv4 는 오랫동안 15개다.
+	got="$(grep -cE '^[0-9.]+/[0-9]+$' "$SRC" || true)"
+	[ "${got:-0}" -ge 10 ] \
+		|| die "IPv4 대역이 ${got}개뿐이다(하한 10) — 부분 응답으로 보인다. 적용하지 않는다"
 fi
 
 MODE="$MODE" python3 - "$BEFORE" "$AFTER" "$SRC" <<'PY'
@@ -149,6 +155,24 @@ if mode == "list":
     print(f"\n  규칙 {len(web_rules)}개 / 그 외 보존 대상 {len(keep)}개")
     sys.exit(0)
 
+if mode == "check":
+    # 드리프트 판정 = "Cloudflare 가 지금 공개하는 대역"과 "인그레스에 실제로 들어 있는 소스"의 차집합.
+    # 스냅샷 파일이 아니라 **양쪽 실물**을 비교한다 — 스냅샷은 실제 적용 상태와 어긋날 수 있다.
+    have = {r["source"] for r in web_rules}
+    want = set(sources)
+    missing = sorted(want - have)   # CF 가 추가한 대역 → 그 지역 유저가 502
+    extra = sorted(have - want)     # CF 가 뺀 대역 → 불필요하게 열려 있음
+    if not missing and not extra:
+        print(f"\n==> 동기화됨 — Cloudflare 대역 {len(want)}개가 모두 인그레스에 있다")
+        sys.exit(0)
+    print("\n==> 드리프트 발견")
+    for s in missing:
+        print(f"  + {s}   인그레스에 없음 → 이 대역을 쓰는 유저가 502")
+    for s in extra:
+        print(f"  - {s}   Cloudflare 목록에 없음 → 불필요하게 열려 있음")
+    print("\n  해결:  ./scripts/oci-origin-lock.sh")
+    sys.exit(3)
+
 # 80/TCP, 443/TCP, 443/UDP(HTTP/3) 를 소스마다 만든다.
 spec = [("6", "tcpOptions", 80), ("6", "tcpOptions", 443), ("17", "udpOptions", 443)]
 new = []
@@ -174,7 +198,10 @@ if len(sources) > 4:
     print(f"    … 외 {len(sources) - 4}개")
 PY
 
+# 읽기 전용 모드는 여기서 끝난다. `--check` 를 빼먹으면 동기화된 경우에 그대로 적용 단계로
+# 넘어가므로(드리프트일 때는 python 이 exit 3 으로 죽어서 안 넘어간다) 조용히 쓰기가 일어난다.
 [ "$MODE" = list ] && exit 0
+[ "$MODE" = check ] && exit 0
 
 log "적용"
 oci network security-list update --security-list-id "$SL" \
