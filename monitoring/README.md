@@ -55,8 +55,15 @@ SLO 알림의 grouping/dedup/silence 를 in-app 코드로 재구현하지 않는
 
 `monitoring/alertmanager.yml` 의 `default` receiver 는 커밋 상태로 **아무 integration 도 없다** — 이
 레포가 반복해온 관례(`AlertProperties.enabled` 기본 `false`, `REPUTATION_POOL_ALERTS_ENABLED` 기본
-`false`)와 동일하게, 시크릿을 주입하지 않아도 `docker compose up` 이 그대로 성공한다. Alertmanager 자체는
-동작하며(라우팅·grouping·dedup 은 살아있음) 그저 어디로도 통지를 내보내지 않는 상태다.
+`false`)와 동일하게, 실제 webhook URL 을 주입하지 않아도 `docker compose up` 이 그대로 성공한다.
+Alertmanager 자체는 동작하며(라우팅·grouping·dedup 은 살아있음) 그저 어디로도 통지를 내보내지 않는 상태다.
+
+> **주의** — `REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL` 은 **빈 값이어도 정의는 돼 있어야** 한다.
+> `compose.yaml` 의 `secrets: <name>: environment:` 소스는 컨테이너 생성 시점에 변수를 요구하므로, 변수가
+> 아예 없으면 `docker compose up` 이 `environment variable ... required by file ... is not set` 으로
+> 실패한다(`docker compose config` 는 통과하므로 `up` 에서만 드러난다). 그래서 `.env.example` 은 다른
+> optional 변수들과 달리 이 변수를 주석 처리하지 않고 빈 값으로 정의해 둔다 — `cp .env.example .env` 를
+> 그대로 따르면 신경 쓸 일이 없고, 프로덕션에서도 webhook 을 쓰지 않더라도 빈 값으로 주입해야 한다.
 
 ### 실제 webhook 연결 (운영자)
 
