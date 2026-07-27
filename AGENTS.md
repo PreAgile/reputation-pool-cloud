@@ -25,6 +25,7 @@
 - 개발 방법론: [`docs/engineering/development-methodology.md`](docs/engineering/development-methodology.md)
 - 아키텍처와 open-core 경계: [`docs/engineering/architecture.md`](docs/engineering/architecture.md)
 - 보안·인증·tenant 규칙: [`docs/engineering/security.md`](docs/engineering/security.md)
+- 배포·서버 운영: [`docs/engineering/deployment.md`](docs/engineering/deployment.md)
 - 테스트·검증·PR 규칙: [`docs/engineering/testing-and-review.md`](docs/engineering/testing-and-review.md)
 
 상세 규칙이 현재 이슈의 범위를 벗어나면 해당 문서를 불필요하게 적용하지 않는다.

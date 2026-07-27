@@ -1,0 +1,105 @@
+# 프로덕션 오버레이 (#15 / D8) — `compose.yaml` 위에 겹쳐 쓴다. 단독으로는 동작하지 않는다.
+#
+#   docker compose -f compose.yaml -f compose.prod.yaml pull
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d
+#
+# (`scripts/bootstrap.sh` 가 이 두 줄을 대신 실행한다.)
+#
+# base 와의 차이 네 가지:
+#   1. app·dashboard 를 소스에서 빌드하지 않고 GHCR 에 발행된 arm64 이미지를 pull 한다
+#      (`.github/workflows/release.yml`). 2 OCPU 서버에서 Gradle·Next 빌드를 돌리지 않기 위한 것이다.
+#   2. Caddy 를 도메인 + 자동 HTTPS(`Caddyfile.prod`)로 바꾸고 80/443 을 공개한다.
+#   3. 컨테이너별 메모리 상한을 준다. base 에는 상한이 없어 일곱 컨테이너가 호스트 RAM 을 무제한으로
+#      경쟁하고, JVM 힙도 상한을 못 읽는다(Dockerfile 의 MaxRAMPercentage 참고).
+#      base 에 서비스를 추가하면 여기에도 상한과 logging 을 추가해야 한다 — 빠뜨리면 그 컨테이너만
+#      무제한이 된다(#76 의 alertmanager 가 머지될 때 해당된다).
+#   4. db 의 호스트 포트 공개를 닫는다. base 의 `5435:5432` 는 로컬 편의용인데 0.0.0.0 바인딩이라
+#      공개 서버에서는 Postgres 가 인터넷에 열린다.
+#
+# `!override`/`!reset` 태그는 Docker Compose v2.24.0+ 가 필요하다(그 이전 버전은 리스트를 병합해버려
+# base 의 포트 공개가 남는다). bootstrap.sh 가 최신 compose 플러그인을 설치한다.
+
+# 도커 기본 json-file 드라이버는 로그를 무한히 쌓는다 — 부트 볼륨이 차면 스택 전체가 멈추므로
+# 서비스마다 회전 상한을 준다.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    # 공개 서버에서 Postgres 를 인터넷에 노출하지 않는다. 접속이 필요하면 SSH 터널을 쓴다.
+    ports: !override []
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  app:
+    # 서버는 pull 만 한다 — build 섹션을 제거해야 `compose up` 이 소스 빌드로 되돌아가지 않는다.
+    build: !reset null
+    image: ghcr.io/preagile/reputation-pool-cloud/app:${APP_IMAGE_TAG:-latest}
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          # 힙은 이 값의 70%(≈2.8GB) — Dockerfile 의 -XX:MaxRAMPercentage 가 cgroup 상한을 읽는다.
+          memory: 4g
+
+  dashboard:
+    build: !reset null
+    image: ghcr.io/preagile/reputation-pool-cloud/dashboard:${DASHBOARD_IMAGE_TAG:-latest}
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  caddy:
+    environment:
+      # 서비스할 호스트네임. 미설정이면 여기서 즉시 실패한다 — 빈 사이트 주소로 Caddy 가 죽어
+      # 인증서 발급 실패로 보이는 것보다 낫다.
+      DOMAIN: ${DOMAIN:?set DOMAIN (e.g. app.example.com) — Caddy 사이트 주소이자 인증서 대상}
+      # Let's Encrypt 계정 메일. 만료·발급 실패 알림이 여기로 온다.
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL — 인증서 만료 알림 수신 주소}
+    # base 의 8080 은 닫고 표준 포트만 연다. 443/udp 는 HTTP/3.
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    # 같은 마운트 지점(/etc/caddy/Caddyfile)에 두 파일이 겹치지 않도록 목록을 통째로 교체한다.
+    volumes: !override
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      # 발급된 인증서가 여기 남는다. 이 볼륨을 지우면 재발급이 일어나 Let's Encrypt 레이트리밋을
+      # 소모하므로 `compose down -v` 를 프로덕션에서 쓰지 않는다.
+      - caddy-data:/data
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+  prometheus:
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  grafana:
+    # base 의 `127.0.0.1:3001` 바인딩을 그대로 둔다 — 공개 도메인에 노출하지 않고 SSH 터널로 본다
+    # (`ssh -L 3001:127.0.0.1:3001 <서버>`). #15 Phase C 의 "관리자 UI 비노출" 항목.
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  backup:
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m

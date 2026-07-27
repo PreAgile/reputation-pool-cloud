@@ -21,6 +21,12 @@
   8083 포트는 리버스 프록시만 접근 가능해야 하고 앱을 외부에 직접 노출하면 안 된다(그러지 않으면 `X-Forwarded-For`
   위조로 스로틀 우회·타 IP 프레이밍이 가능). 이 전제를 강제하려고 `compose.yaml`은 app의 8083/9093을 loopback
   (`127.0.0.1`)에만 바인딩한다 — 브라우저는 Caddy(`:8080`)로만 접근하고, 8083을 `0.0.0.0`에 재노출하지 않는다.
+- **프록시가 공개되면 loopback 바인딩만으로는 부족하다(#15).** 8083이 닫혀 있어도 Caddy 자체가 인터넷에 열리면
+  아무나 `X-Forwarded-For: <임의 IP>`를 실어 보낼 수 있고, Caddy의 기본 동작은 그 값에 **append**이며 Spring의
+  `ForwardedHeaderFilter`는 **첫** 항목을 쓴다 — 즉 공격자가 넣은 값이 채택되어 위조 구멍이 그대로 돌아온다.
+  그래서 `Caddyfile.prod`는 `header_up X-Forwarded-For {remote_host}`로 헤더를 **덮어쓴다**(append 아님).
+  Cloudflare proxied 뒤에서 진짜 클라이언트 IP(`CF-Connecting-IP`)를 다시 신뢰해도 되는 조건과 절차는
+  [`deployment.md`](deployment.md)의 "오리진 잠그기"에 있다.
 - **관측성.** 차단 발동 시 WARN 로그(자격·사용자명 미기록, 소스 IP만)와 `auth.login.throttled` 카운터를 남긴다
   (#14/#45 알림 파이프라인 훅). 인메모리 구현(Caffeine 등 외부 의존성 없이 `ConcurrentHashMap` + `Clock` 만료).
 - 설정: `reputation-pool.admin.login-throttle.*` (`enabled`, `max-attempts`, `window`, `block-duration`,

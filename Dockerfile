@@ -21,4 +21,13 @@ RUN apt-get update \
 COPY --from=build /workspace/build/libs/*.jar app.jar
 # HTTP (actuator/health) and gRPC.
 EXPOSE 8083 9093
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# Heap is a share of the *container* limit, not the host (#15). Without a flag the JVM's container-aware
+# default caps the heap near 1/4 of the limit — on a 12GB host with no compose limit that reserves ~3GB
+# while eight containers compete for the same RAM, and it does not shrink if the deploy target drops to
+# 1 OCPU/6GB. MaxRAMPercentage reads the cgroup limit, so `deploy.resources.limits.memory` in
+# compose.prod.yaml is the single knob that sizes the heap.
+#
+# ExitOnOutOfMemoryError: a heap-exhausted JVM that keeps running serves errors indefinitely. Exiting
+# lets compose's `restart: unless-stopped` recycle it, and the in-memory pool restores from its
+# checkpoint on startup.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]
