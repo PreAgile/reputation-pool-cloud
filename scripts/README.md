@@ -5,6 +5,14 @@
 - `bootstrap.sh` — 빈 리눅스 호스트를 스택이 도는 상태로 만든다(멱등, 재실행이 곧 재배포).
   작은 호스트면 오버레이를 인자로 넘긴다: `./scripts/bootstrap.sh compose.prod.6gb.yaml`.
   절차와 배경은 [`docs/engineering/deployment.md`](../docs/engineering/deployment.md).
+- `harden-ssh.sh` — sshd 인증 정책을 확정하고 브루트포스 표면을 닫는다(키 전용 기본, fail2ban,
+  무인 보안 업데이트). **서버에서** 실행한다. `SSH_PASSWORD_AUTH=1` 로 비밀번호 인증을 켤 수도 있지만
+  기본은 끈다 — 22 번이 열려 있는 동안 비밀번호는 추측 가능한 자격이다.
+- `oci-ssh-allow.sh` — 22 번 인그레스 허용 IP 를 관리한다(집·사무실·카페 이동 대응). **노트북에서**
+  실행한다 — SSH 가 막힌 상태에서도 복구해야 하므로 OCI API 만 쓴다. 결과 목록에 자기 IP 가 없으면
+  적용을 거부한다.
+- `oci-origin-lock.sh` — 80/443 인그레스를 Cloudflare 공개 대역으로만 제한한다(§6 오리진 잠그기).
+  Cloudflare 가 대역을 추가하면 재실행한다. `--unlock` 으로 되돌린다.
 - `backup.sh` / `restore.sh` — 아래.
 - `dev-seed.sql` — 로컬 개발용 시드.
 
