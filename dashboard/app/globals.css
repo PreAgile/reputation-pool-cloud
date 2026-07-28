@@ -230,21 +230,6 @@ body {
   animation: rp-scale-out var(--motion-fast) var(--ease-std);
 }
 
-/* 우측 시트(Drawer) — 화면 오른쪽에서 슬라이드 인. 오버뷰 리소스 미리보기(#52 P4). */
-@keyframes rp-drawer-in {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
-}
-@keyframes rp-drawer-out {
-  from { transform: translateX(0); }
-  to { transform: translateX(100%); }
-}
-.rp-anim-drawer[data-state="open"] {
-  animation: rp-drawer-in var(--motion-slow) var(--ease-out);
-}
-.rp-anim-drawer[data-state="closed"] {
-  animation: rp-drawer-out var(--motion-fast) var(--ease-std);
-}
 
 /* 실시간 상태 점(pulse) — 점 + 바깥으로 확장·소멸하는 링(신호 감지 느낌). #54 P2 마이크로 인터랙션.
    링 색은 currentColor 상속 → 상태색(text-ok 등) 위에 얹으면 그 색으로 퍼진다. */
