@@ -187,6 +187,99 @@ tests:
         alertname: SurgeThresholdMetricMissing
         exp_alerts: []
 
+  # 체크포인트가 매 주기 성공하면 → 신선도가 톱니로 오르내리고 발화하지 않는다
+  # (정상 신선도는 평평하지 않다 — 0 에서 1주기까지 올랐다가 저장 성공으로 0 이 되기를 반복한다.
+  #  임계선이 톱니 꼭대기보다 확실히 위에 있어야 한다는 것을 이 케이스가 고정한다.)
+  - interval: 30s
+    name: "체크포인트 정상: 0~30초 톱니는 발화하지 않는다"
+    input_series:
+      - series: "reputation_pool_checkpoint_age_seconds"
+        values: "0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30 0 30"
+      - series: "reputation_pool_checkpoint_interval_seconds"
+        values: "30x33"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CheckpointStale
+        exp_alerts: []
+
+  # 저장이 계속 실패해 신선도가 단조 증가하면 → 임계(주기 3배=90초)를 넘고 5분 지속 후 발화한다
+  - interval: 30s
+    name: "체크포인트 고장: 단조 증가가 임계를 넘으면 발화한다"
+    input_series:
+      - series: "reputation_pool_checkpoint_age_seconds"
+        values: "0+30x40"
+      - series: "reputation_pool_checkpoint_interval_seconds"
+        values: "30x40"
+    alert_rule_test:
+      # 90초(=임계)를 갓 넘긴 직후는 for:5m 이 아직 안 찼다
+      - eval_time: 2m
+        alertname: CheckpointStale
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: CheckpointStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "체크포인트가 낡았다 — 재시작 시 상태 손실 위험 (주기의 3배 초과, 5분 지속)"
+              description: "메모리는 정상이라 다른 지표는 움직이지 않는다. reputation_pool_checkpoint_failures_total 로 만성 실패인지 확인한다."
+
+  # 주기를 60초로 바꿔 설정하면 → 임계도 180초로 따라 움직인다
+  # (임계를 룰에 박지 않고 설정 게이지에서 파생시킨다는 결정을 고정한다. 같은 신선도 120초가 30초 주기
+  #  에서는 발화하고 60초 주기에서는 발화하지 않아야 한다.)
+  - interval: 30s
+    name: "체크포인트 임계 파생: 주기를 늘리면 임계도 따라 늘어난다"
+    input_series:
+      - series: "reputation_pool_checkpoint_age_seconds"
+        values: "120x40"
+      - series: "reputation_pool_checkpoint_interval_seconds"
+        values: "60x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CheckpointStale
+        exp_alerts: []
+
+  # 같은 신선도라도 주기가 30초면 → 임계 90초를 넘어 발화한다 (위 케이스의 대조군)
+  - interval: 30s
+    name: "체크포인트 임계 파생: 같은 신선도도 주기가 짧으면 발화한다"
+    input_series:
+      - series: "reputation_pool_checkpoint_age_seconds"
+        values: "120x40"
+      - series: "reputation_pool_checkpoint_interval_seconds"
+        values: "30x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CheckpointStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "체크포인트가 낡았다 — 재시작 시 상태 손실 위험 (주기의 3배 초과, 5분 지속)"
+              description: "메모리는 정상이라 다른 지표는 움직이지 않는다. reputation_pool_checkpoint_failures_total 로 만성 실패인지 확인한다."
+
+  # 기동 시 리스토어가 실패하면 → 신선도는 건강해 보여도 전용 룰이 발화한다
+  # (이 손실 경로는 신선도로 볼 수 없다는 사실 자체를 고정한다 — 읽기만 실패하고 저장은 성공한다.)
+  - interval: 1m
+    name: "리스토어 실패: 신선도가 정상이어도 전용 룰이 잡는다"
+    input_series:
+      - series: "reputation_pool_restore_failures_total"
+        values: "0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+      - series: "reputation_pool_checkpoint_age_seconds"
+        values: "0x20"
+      - series: "reputation_pool_checkpoint_interval_seconds"
+        values: "30x20"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: CheckpointStale
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: PoolRestoreFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "기동 시 풀 복원 실패 — 해당 테넌트의 저장본이 빈 스냅샷으로 덮어써질 수 있다"
+
   # 임계값 지표가 아예 없으면 → 급증 룰은 조용해지고 워치독이 그 사실을 알린다
   # (이 설계가 새로 만든 fail-open 구멍을 워치독이 실제로 막는지 고정한다.)
   - interval: 1m

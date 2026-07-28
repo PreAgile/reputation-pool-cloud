@@ -32,6 +32,8 @@
 - `reputation_*_total` — 도메인 이벤트(lease/block/cool/recover, #68)
 - `grpc_server_processing_duration_seconds_*` — gRPC 데이터플레인 지연·상태코드(#78)
 - `reputation_alert_*_surge_threshold` — 급증 알림 임계값 자체(#77, 아래 참고)
+- `reputation_pool_checkpoint_*` — 체크포인트 신선도·주기·실패(#80, 아래 참고)
+- `reputation_pool_restore_failures_total` — 기동 시 풀 복원 실패(#80)
 
 ## 알림(SLO)
 
@@ -91,6 +93,29 @@ docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prom
 >
 > 임계값 게이지가 사라지면 두 급증 룰은 비교 대상이 없어 조용히 무동작한다. `SurgeThresholdMetricMissing`
 > 워치독이 그 경우를 잡는다.
+
+### 체크포인트 신선도 (#80)
+
+이 앱의 풀 상태는 **메모리에 살고** `checkpoint-interval`(기본 30초)마다 통째로 DB 에 저장된다. 저장이
+실패해도 메모리로 계속 정상 응답하므로 **지연·에러율·도메인 지표가 전혀 움직이지 않는다** — 증상 없는
+고장이고, 피해는 재시작하는 순간 그동안의 상태가 사라지며 드러난다.
+
+`reputation_pool_checkpoint_age_seconds` 가 그 간격을 잰다: **마지막으로 "모든 테넌트가" 저장에 성공한
+뒤 흐른 시간.** 한 테넌트만 실패해도 갱신되지 않는다 — 그러지 않으면 실패하는 테넌트가 건강한 이웃 뒤에
+영영 숨는다.
+
+- **정상은 톱니다.** 0 과 주기 사이를 오르내린다. 평평한 0 을 기대하면 안 된다.
+- **기동 직후는 0 에서 시작**해 첫 성공까지 증가한다. 배포마다 알림이 울리지 않으면서, 한 번도 성공하지
+  못하면 정상적으로 임계를 넘는다.
+- **알림 임계는 주기의 3배**이고 룰이 `reputation_pool_checkpoint_interval_seconds` 게이지에서 파생시킨다
+  — 주기를 바꾸면 임계가 따라 움직이므로 두 값이 어긋날 수 없다(#77 과 달리 새 환경변수를 만들지 않았다).
+
+> **복원 실패는 별개이고 더 나쁘다.** 기동 시 어떤 테넌트의 스냅샷을 읽지 못하면 그 테넌트는 **빈 풀로
+> 체크포인트 대상에 남고**, 다음 라운드가 그 빈 스냅샷을 정상 저장본 위에 덮어쓴다 — 되돌릴 수 없다.
+> 이때 저장 자체는 성공하므로 **신선도 지표는 건강하게 보인다.** 유일한 신호가
+> `reputation_pool_restore_failures_total` 이고 `PoolRestoreFailed` 룰이 그걸 본다.
+> 덮어쓰기 자체를 막는 것(저장 건너뛰기 / 해당 테넌트 서빙 거부)은 가용성 트레이드오프가 있는 동작
+> 변경이라 별도 이슈로 다룬다.
 
 ## 알림 라우팅
 
@@ -164,5 +189,6 @@ Alertmanager 자체는 동작하며(라우팅·grouping·dedup 은 살아있음)
 - core observability 포트(0.4.0 릴리스 후) Micrometer 어댑터 → 리스 지연 Timer·이용률 Gauge·거절율 카운터 추가
 - Alertmanager severity 별 라우팅 분기(receiver 2개 이상일 때), Grafana 외부 노출·인증(#15)
 - SLO 확정 + 에러버짓·multi-burn-rate 로 단순 임계 룰 승격(#79) — 급증 임계값의 절대 수치도 여기서 재조정
+- 복원 실패 시 덮어쓰기 방지(#80 후속) — 지금은 관측만 한다. 저장 건너뛰기 vs 서빙 거부의 가용성 트레이드오프 결정 필요
 - 알림·메트릭 테넌트 귀속(#81) — 지금 도메인 카운터는 테넌트 전역 합산이라, 한 테넌트의 급증이 전체 알림을 울린다
 - 임계값 자동 산정: 시계열 이상탐지(#88) → 정책 자동 튜닝(#90, core advisor). 데이터 축적 후 v2 트랙

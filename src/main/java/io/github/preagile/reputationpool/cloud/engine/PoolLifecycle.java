@@ -27,6 +27,12 @@ import org.springframework.stereotype.Component;
  * restore or checkpoint. That is on top of the whole-chore isolation the reference already has —
  * {@code @Scheduled} with a fixed delay keeps running after a failed execution, and swallowing here
  * means a bad interval is skipped and retried next time.
+ *
+ * <p><b>Swallowed is not unobserved (issue #80).</b> That isolation is right for availability but it used
+ * to make a failing checkpoint invisible: the pools keep serving from memory, so nothing but a log line
+ * marked the fact until a restart rehydrated stale state. Both fan-outs now report their outcome to
+ * {@link CheckpointFreshness}, which publishes how long it has been since a round in which every tenant
+ * saved. The isolation behaviour is unchanged — only the reporting is new.
  */
 @Component
 public class PoolLifecycle implements SmartLifecycle {
@@ -44,6 +50,7 @@ public class PoolLifecycle implements SmartLifecycle {
     private final Clock clock;
     private final ReputationPoolProperties properties;
     private final GlobalResourceBudget budget;
+    private final CheckpointFreshness freshness;
 
     private volatile boolean running = false;
 
@@ -52,12 +59,14 @@ public class PoolLifecycle implements SmartLifecycle {
             AuditPurger auditPurger,
             Clock clock,
             ReputationPoolProperties properties,
-            GlobalResourceBudget budget) {
+            GlobalResourceBudget budget,
+            CheckpointFreshness freshness) {
         this.registry = registry;
         this.auditPurger = auditPurger;
         this.clock = clock;
         this.properties = properties;
         this.budget = budget;
+        this.freshness = freshness;
     }
 
     /**
@@ -86,6 +95,10 @@ public class PoolLifecycle implements SmartLifecycle {
                     restoredCells += snapshot.cells().size();
                 }
             } catch (RuntimeException e) {
+                // Counted as well as logged (#80): a tenant that fails to restore keeps an empty pool that
+                // the next checkpoint then writes over its good snapshot, and the freshness gauge cannot
+                // show that — those saves succeed. This counter is the only signal that it happened.
+                freshness.recordRestoreFailure();
                 log.warn("restore failed for tenant {}; continuing with the other tenants", tenantId, e);
             }
         }
@@ -118,19 +131,26 @@ public class PoolLifecycle implements SmartLifecycle {
      * Writes each tenant's current snapshot to its own store. Isolated per tenant and as a whole: a
      * failed save is logged and swallowed so one tenant's transient DB error neither aborts the other
      * tenants' checkpoints nor cancels the periodic schedule.
+     *
+     * <p>The round's outcome is reported to {@link CheckpointFreshness} (#80). Only a round where every
+     * tenant saved counts as fresh — one failure leaves the published age growing, because the durable
+     * copy really is that old for at least one tenant.
      */
     @Scheduled(
             initialDelayString = "${reputation-pool.checkpoint-interval:PT30S}",
             fixedDelayString = "${reputation-pool.checkpoint-interval:PT30S}")
     void checkpoint() {
+        int failed = 0;
         for (ManagedPool managed : registry.managedPools()) {
             try {
                 managed.store().save(managed.pool().snapshot());
             } catch (RuntimeException e) {
+                failed++;
                 log.warn(
                         "checkpoint save failed for tenant {}; will retry on the next interval", managed.tenantId(), e);
             }
         }
+        freshness.recordRound(failed);
     }
 
     /**

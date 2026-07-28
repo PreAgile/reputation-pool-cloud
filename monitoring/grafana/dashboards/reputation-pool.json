@@ -191,6 +191,57 @@
           "legendFormat": "임계값 (BLOCKED)"
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "체크포인트 신선도 (초) — 이슈 #80",
+      "description": "메모리 상태가 DB 에 마지막으로 온전히 저장된 뒤 흐른 시간. 건강하면 0 과 주기(기본 30초) 사이를 톱니처럼 오간다 — 평평한 0 이 아니라 톱니가 정상이다. 저장이 실패하면 메모리로는 계속 정상 응답하므로 다른 지표는 전혀 움직이지 않고 이 선만 단조 증가한다. 점선은 알림 임계(주기 × 3)로, 룰과 같은 식이라 화면과 알림이 어긋나지 않는다.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "알림 임계 (주기 × 3)" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.lineWidth", "value": 2 }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "reputation_pool_checkpoint_age_seconds",
+          "legendFormat": "신선도"
+        },
+        {
+          "refId": "B",
+          "expr": "3 * max(reputation_pool_checkpoint_interval_seconds)",
+          "legendFormat": "알림 임계 (주기 × 3)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "체크포인트 · 복원 실패율 (건/분) — 이슈 #80",
+      "description": "신선도가 '얼마나 낡았나'를 보여준다면 이 패널은 '얼마나 자주 실패하나'를 보여준다 — 만성 실패와 일시적 한 번을 구별하는 데 쓴다. 복원 실패는 특히 중요하다: 신선도로는 보이지 않으면서(읽기만 실패하고 저장은 성공한다) 복원 못 한 테넌트의 빈 풀이 정상 저장본을 덮어쓴다.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "epm", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(reputation_pool_checkpoint_failures_total[5m])) * 60",
+          "legendFormat": "체크포인트 저장 실패"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(reputation_pool_restore_failures_total[5m])) * 60",
+          "legendFormat": "기동 시 복원 실패"
+        }
+      ]
     }
   ]
 }

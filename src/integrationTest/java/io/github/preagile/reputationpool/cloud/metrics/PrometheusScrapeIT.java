@@ -103,6 +103,22 @@ class PrometheusScrapeIT {
     }
 
     @Test
+    @DisplayName("스크레이프하면 → 체크포인트 신선도 지표가 alerts.yml 이 참조하는 이름 그대로 노출된다 (issue #80)")
+    void scrapeExposesCheckpointFreshnessMetricsUnderTheNamesTheRulesReference() {
+        ResponseEntity<String> res = rest.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+        // CheckpointStale/PoolRestoreFailed 가 이 이름들로 비교하므로, 이름이 바뀌면 알림이 조용히 죽는다.
+        // 게이지에는 _total 접미사가 붙지 않고 카운터에는 붙는다는 것까지 여기서 고정한다 — 룰 표현식이
+        // 그 차이에 의존한다.
+        assertThat(res.getBody())
+                .contains("reputation_pool_checkpoint_age_seconds")
+                .contains("reputation_pool_checkpoint_interval_seconds")
+                .contains("reputation_pool_checkpoint_failures_total")
+                .contains("reputation_pool_restore_failures_total");
+    }
+
+    @Test
     @DisplayName("gRPC 호출 후 스크레이프하면 → 처리시간 히스토그램 버킷과 SLO 룰이 쓰는 method/methodType 태그가 노출된다"
             + " (issue #78, grpc.server.processing.duration percentiles-histogram)")
     void grpcCallIsScrapedWithProcessingDurationHistogramBuckets() {

@@ -128,6 +128,18 @@ public class EngineConfiguration {
         return new GlobalResourceBudget(props.limits());
     }
 
+    /**
+     * How stale the durable copy of the pools is (issue #80). A failing checkpoint has no symptom while
+     * the process lives — the pools serve correctly from memory — so this is what turns it from a log line
+     * into an alertable signal. Takes the configured interval so the alert rule can derive its threshold
+     * from it rather than restating the number; see {@link CheckpointFreshness}.
+     */
+    @Bean
+    CheckpointFreshness checkpointFreshness(
+            Clock clock, io.micrometer.core.instrument.MeterRegistry meterRegistry, ReputationPoolProperties props) {
+        return new CheckpointFreshness(clock, meterRegistry, props.checkpointInterval());
+    }
+
     @Bean
     PerTenantPoolRegistry tenantPoolRegistry(
             Clock clock,
