@@ -96,8 +96,36 @@ jobs:
             *[!0-9a-fA-F]* | "") echo "SHA 형식이 아니다: $sha" >&2; exit 1 ;;
           esac
           [ ${#sha} -ge 7 ] || { echo "SHA 가 너무 짧다: $sha" >&2; exit 1; }
+          # 이미지 태그용 7자리. release.yml 의 merge 잡이 매니페스트를 sha-${SHA:0:7} 로 발행하므로
+          # 여기서도 같은 길이를 써야 한다(40자리는 아치별 단일 이미지 태그이고 매니페스트가 아니다).
+          short="${sha:0:7}"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "배포 대상: $sha"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          echo "배포 대상: $sha (이미지 태그 sha-$short)"
+
+      # 존재하지 않는 태그를 pull 하려다 서버에서 실패하는 것보다, 여기서 먼저 막는 편이 원인이 분명하다.
+      # 실제로 이 워크플로의 첫 리뷰에서 잡힌 결함이 정확히 이것이었다(40자리 태그 요청 → 매니페스트 없음).
+      # GHCR 패키지는 public 이라 익명으로 조회된다.
+      - name: 배포할 이미지 태그가 실제로 발행됐는지 확인
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          TAG: sha-${{ steps.target.outputs.short }}
+        run: |
+          missing=()
+          for image in app dashboard; do
+            ref="ghcr.io/preagile/reputation-pool-cloud/${image}:${TAG}"
+            if docker manifest inspect "$ref" > /dev/null 2>&1; then
+              echo "ok: $ref"
+            else
+              missing+=("$ref")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "다음 이미지가 GHCR 에 없다:" >&2
+            printf '  %s\n' "${missing[@]}" >&2
+            echo "release.yml 의 merge 잡이 이 커밋에 대해 성공했는지, 패키지가 public 인지 확인한다." >&2
+            exit 1
+          fi
 
       - name: SSH 준비
         if: steps.gate.outputs.ready == 'true'
@@ -119,11 +147,20 @@ jobs:
       # 이미지 안이 아니라 **서버의 체크아웃에서 bind-mount** 된다. 이미지만 갱신하면 알림 룰이나 리버스
       # 프록시 설정 변경이 반영되지 않는다. 그래서 체크아웃도 같은 커밋으로 맞춘다.
       #
-      # 이미지 태그: `latest` 대신 `sha-<커밋>` 을 고정한다. `latest` 는 이 배포가 도는 사이 다음 머지로
-      # 옮겨갈 수 있어, 체크아웃 커밋과 실행 이미지가 서로 다른 조합이 될 수 있다. 태그를 고정하면
-      # "이 커밋의 코드 + 이 커밋의 이미지" 가 보장되고, 롤백도 과거 SHA 하나로 재현된다.
-      # .env 를 고쳐 쓰지 않고 환경변수로 넘기는 이유: .env 는 운영자의 상태이고, compose 가
-      # `${APP_IMAGE_TAG:-latest}` 로 환경에서도 보간하므로 굳이 서버 파일을 건드릴 필요가 없다.
+      # 이미지 태그: `latest` 대신 커밋에 고정한다. `latest` 는 이 배포가 도는 사이 다음 머지로 옮겨갈 수
+      # 있어, 체크아웃 커밋과 실행 이미지가 서로 다른 조합이 될 수 있다.
+      #
+      # **태그는 7자리 짧은 SHA 다.** release.yml 의 merge 잡이 매니페스트 리스트를 `sha-${SHA:0:7}` 로
+      # 발행한다(40자리 `sha-<full>-<arch>` 는 아치별 단일 이미지 태그이고 compose 가 쓸 대상이 아니다).
+      # 여기서 40자리를 요청하면 존재하지 않는 매니페스트를 pull 하려다 실패한다. git reset 에는 전체 SHA 를
+      # 그대로 쓴다(더 정확하고, git 은 짧은 것도 받는다).
+      #
+      # **환경변수로 넘기지 않고 .env 에 기록한다.** bootstrap.sh 는 도커 그룹이 이번 세션에 아직 반영되지
+      # 않았으면 `DOCKER=(sudo docker)` 로 실행하는데, sudo 는 기본 env_reset 이라 export 한 변수를 버린다 —
+      # 그러면 compose 가 `${APP_IMAGE_TAG:-latest}` 의 기본값으로 떨어져 "체크아웃은 대상 커밋인데 이미지는
+      # latest" 인 조합이 조용히 만들어진다. compose 는 프로젝트 디렉터리의 .env 를 sudo 와 무관하게 직접
+      # 읽으므로 그쪽이 안전하다. 이 레포가 이미 문서화한 고정·롤백 방식과도 같다(.env.example 의
+      # APP_IMAGE_TAG 주석). 부수 효과로, 나중에 서버에서 bootstrap.sh 를 수동 재실행해도 같은 이미지가 뜬다.
       - name: 원격 배포
         if: steps.gate.outputs.ready == 'true'
         env:
@@ -131,6 +168,7 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '~/reputation-pool-cloud' }}
           SHA: ${{ steps.target.outputs.sha }}
+          SHORT: ${{ steps.target.outputs.short }}
         run: |
           ssh -i ~/.ssh/deploy_key \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
@@ -138,7 +176,7 @@ jobs:
               -o BatchMode=yes \
               -o ConnectTimeout=20 \
               "$DEPLOY_USER@$DEPLOY_HOST" \
-              "DEPLOY_PATH='$DEPLOY_PATH' TARGET_SHA='$SHA' bash -euo pipefail -s" <<'REMOTE'
+              "DEPLOY_PATH='$DEPLOY_PATH' TARGET_SHA='$SHA' IMAGE_TAG='sha-$SHORT' bash -euo pipefail -s" <<'REMOTE'
           cd "${DEPLOY_PATH/#\~/$HOME}"
           echo "==> 체크아웃을 $TARGET_SHA 로 맞춘다"
           git fetch --prune --quiet origin
@@ -146,9 +184,24 @@ jobs:
           # .env 는 gitignore 대상이라 이 명령에 지워지지 않는다(시크릿은 그대로 남는다).
           git reset --hard --quiet "$TARGET_SHA"
           git --no-pager log -1 --oneline
-          echo "==> bootstrap.sh (이미지 태그를 커밋에 고정)"
-          export APP_IMAGE_TAG="sha-$TARGET_SHA"
-          export DASHBOARD_IMAGE_TAG="sha-$TARGET_SHA"
+
+          # .env 의 키를 멱등하게 갱신한다(있으면 교체, 없으면 추가). 값은 sha-<7자리> 라 sed 구분자와
+          # 충돌하지 않는다. 파일이 개행으로 끝나지 않는 경우를 대비해 추가 전에 개행을 보장한다.
+          set_env_key() {
+            local key="$1" val="$2"
+            if grep -qE "^${key}=" .env; then
+              sed -i.bak "s|^${key}=.*|${key}=${val}|" .env && rm -f .env.bak
+            else
+              [ -s .env ] && [ "$(tail -c 1 .env)" != "" ] && printf '\n' >> .env
+              printf '%s=%s\n' "$key" "$val" >> .env
+            fi
+          }
+          echo "==> 이미지 태그를 .env 에 고정: $IMAGE_TAG"
+          set_env_key APP_IMAGE_TAG "$IMAGE_TAG"
+          set_env_key DASHBOARD_IMAGE_TAG "$IMAGE_TAG"
+          grep -E '^(APP|DASHBOARD)_IMAGE_TAG=' .env
+
+          echo "==> bootstrap.sh"
           # 오버레이(TLS·6GB 등)는 서버 .env 의 DEPLOY_OVERLAYS 가 정한다 — 모드는 호스트의 성질이므로
           # CI 가 결정하지 않는다. bootstrap.sh 가 그 값을 읽고, 빠지면 다운그레이드 가드가 막는다.
           ./scripts/bootstrap.sh
