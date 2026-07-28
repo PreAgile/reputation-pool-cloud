@@ -39,6 +39,14 @@
 	}
 }
 
+# 로케일 자동 판별(#110) 경로의 `Vary` — base `Caddyfile` 과 동일하게 유지할 것. 이유는 그쪽 주석 참고
+# (Next 15.5 가 app-router 200 응답의 `Vary` 를 RSC 값으로 덮어써서 앱에서는 붙일 수 없다).
+# 프로덕션은 Cloudflare 뒤에 있으므로 이 헤더가 엣지까지 도달하는 것이 특히 중요하다.
+(locale_vary) {
+	header / +Vary "Accept-Language, Cookie, CF-IPCountry"
+	header /login +Vary "Accept-Language, Cookie, CF-IPCountry"
+}
+
 # DOMAIN 미설정이면 compose 가 기동 전에 실패한다(compose.prod.yaml 의 `:?`). 여기서 빈 사이트 주소로
 # Caddy 가 죽는 상황을 만들지 않기 위한 것이다.
 {$DOMAIN} {
@@ -61,6 +69,7 @@
 	}
 	# 그 외 전부 대시보드.
 	handle {
+		import locale_vary
 		reverse_proxy dashboard:3000
 	}
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import { seriousViolations } from "@/test/a11y";
-import MarketingPageKo from "./page";
+import MarketingPageKo, { metadata } from "./page";
 
 // next-themes 훅(ThemeToggle)만 대체. 랜딩은 라우팅 훅을 쓰지 않는다(Link 만 사용).
 vi.mock("next-themes", () => ({
@@ -48,6 +48,13 @@ describe("랜딩 페이지 한국어 (/ko, #16)", () => {
     const menu = screen.getByRole("menu");
     expect(within(menu).getByRole("menuitem", { name: "English" })).toHaveAttribute("href", "/");
     expect(within(menu).getByRole("menuitem", { name: "한국어" })).toHaveAttribute("href", "/ko");
+  });
+
+  // #110: 자동 판별로 `/` 에서 넘어와도 한국어의 정본 URL 은 `/ko` 다 — 그래야 한국어 페이지가
+  // 영어 `/` 로 흡수되지 않고 따로 색인된다.
+  it("SEO: canonical 은 /ko 이고 hreflang 이 en·ko·x-default 를 모두 가리킨다", () => {
+    expect(metadata.alternates?.canonical).toBe("/ko");
+    expect(metadata.alternates?.languages).toEqual({ en: "/", ko: "/ko", "x-default": "/" });
   });
 
   it("a11y: critical/serious 위반이 없다", async () => {

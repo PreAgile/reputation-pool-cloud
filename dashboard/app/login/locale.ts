@@ -1,27 +1,10 @@
-/** 로그인 화면 로케일. 기본은 영어(en); 브라우저가 한국어를 더 선호할 때만 ko. */
-export type LoginLocale = "en" | "ko";
+import type { Locale } from "@/lib/locale";
 
 /**
- * `Accept-Language` 헤더(예: `ko-KR,ko;q=0.9,en-US;q=0.8`)를 파싱해 로케일을 고른다.
- * q 값(사용 우선순위)을 비교해 **한국어가 영어보다 명확히 우선일 때만** ko, 그 외에는 기본 en.
+ * 로그인 화면 사전. 로케일 판별 자체는 `lib/locale.ts` 로 승격됐다(#110) — 여기에 있던
+ * `pickLoginLocale()` 은 랜딩과 정책을 공유해야 해서 `pickLocaleFromAcceptLanguage()` /
+ * `resolveLocale()` 로 옮겼다. 이 파일은 문자열만 갖는다.
  */
-export function pickLoginLocale(acceptLanguage: string | null | undefined): LoginLocale {
-  if (!acceptLanguage) return "en";
-  let ko = 0;
-  let en = 0;
-  for (const part of acceptLanguage.split(",")) {
-    const [rawTag, ...params] = part.trim().split(";");
-    const tag = rawTag.trim().toLowerCase();
-    if (!tag) continue;
-    const qParam = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
-    const q = qParam ? Number.parseFloat(qParam.slice(2)) : 1;
-    const weight = Number.isFinite(q) ? q : 1;
-    if (tag === "ko" || tag.startsWith("ko-")) ko = Math.max(ko, weight);
-    else if (tag === "en" || tag.startsWith("en-")) en = Math.max(en, weight);
-  }
-  return ko > en ? "ko" : "en";
-}
-
 interface LoginDict {
   title: string;
   subtitle: string;
@@ -37,7 +20,7 @@ interface LoginDict {
   languageLabel: string;
 }
 
-export const LOGIN_I18N: Record<LoginLocale, LoginDict> = {
+export const LOGIN_I18N: Record<Locale, LoginDict> = {
   en: {
     title: "reputation·pool console",
     subtitle: "Admin sign-in",

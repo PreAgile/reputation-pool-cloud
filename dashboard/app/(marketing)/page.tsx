@@ -13,7 +13,9 @@ export const metadata: Metadata = {
   title: dict.meta.title,
   description: dict.meta.description,
   // 이중언어 SEO 시그널 — 기본 영어(/) + 한국어(/ko).
-  alternates: { canonical: "/", languages: { en: "/", ko: "/ko" } },
+  // `x-default` 는 "어느 언어도 맞지 않는 방문자/크롤러의 기본 URL"이다(#110). 자동 판별(middleware)이
+  // 붙어도 중립 `Accept-Language` 를 보내는 크롤러는 `/` 에 그대로 남으므로 두 언어가 각각 색인된다.
+  alternates: { canonical: "/", languages: { en: "/", ko: "/ko", "x-default": "/" } },
   openGraph: {
     type: "website",
     title: dict.meta.title,

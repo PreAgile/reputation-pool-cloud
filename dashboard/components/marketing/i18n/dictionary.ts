@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Locale } from "@/lib/locale";
 
 /**
  * 랜딩(#16) 다국어 사전 타입. 기본 로케일은 영어(`/`), 한국어는 `/ko`.
@@ -8,12 +9,10 @@ import type { ReactNode } from "react";
  * **비번역 구조**는 사전에 넣지 않고 컴포넌트 상수로 두고 index 로 결합한다.
  * body 처럼 인라인 `<code>` 강조가 섞인 값은 ReactNode 로 둔다(서버 컴포넌트에서만 소비).
  */
-export type Locale = "en" | "ko";
-
-export const LOCALES: Locale[] = ["en", "ko"];
-
-/** 로케일별 랜딩 경로. 스위처·hreflang 에 공용으로 쓴다. */
-export const LOCALE_PATH: Record<Locale, string> = { en: "/", ko: "/ko" };
+// 로케일 자체(타입·목록·경로)는 `lib/locale.ts` 가 단일 출처다(#110) — 미들웨어·로그인도 같은 값을
+// 쓰므로 마케팅 사전에서 다시 선언하지 않고 그대로 내보낸다.
+export type { Locale } from "@/lib/locale";
+export { LOCALES, LOCALE_PATH } from "@/lib/locale";
 
 /** 스위처에 노출할 사람이 읽는 언어명. */
 export const LOCALE_LABEL: Record<Locale, string> = { en: "English", ko: "한국어" };
