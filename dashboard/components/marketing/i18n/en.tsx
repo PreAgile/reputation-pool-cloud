@@ -1,8 +1,13 @@
 import type { Dict } from "./dictionary";
 
-/** 인라인 코드 강조(악센트) — body ReactNode 안에서 재사용. */
+/**
+ * 인라인 코드 강조(악센트) — body ReactNode 안에서 재사용.
+ *
+ * `whitespace-nowrap`: 브라우저가 하이픈을 줄바꿈 지점으로 보므로 `checkout-us` 같은 토큰이
+ * `checkout-` / `us` 로 쪼개진다. 코드 토큰은 하나의 이름이라 통째로 넘긴다(ko 사전과 동일 처리).
+ */
 const C = ({ children }: { children: React.ReactNode }) => (
-  <code className="font-mono text-[0.92em] text-accent">{children}</code>
+  <code className="whitespace-nowrap font-mono text-[0.92em] text-accent">{children}</code>
 );
 
 /** 영어 사전(기본 로케일). 기존 하드코딩 문자열을 그대로 이전한다. */
