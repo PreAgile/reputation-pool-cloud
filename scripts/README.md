@@ -5,6 +5,14 @@
 - `bootstrap.sh` — 빈 리눅스 호스트를 스택이 도는 상태로 만든다(멱등, 재실행이 곧 재배포).
   작은 호스트면 오버레이를 인자로 넘긴다: `./scripts/bootstrap.sh compose.prod.6gb.yaml`.
   절차와 배경은 [`docs/engineering/deployment.md`](../docs/engineering/deployment.md).
+- `pull-deploy.sh` — **서버가 GitHub 에 물어봐서** 배포한다(풀 방식). `origin/main` 에 새 커밋이 있으면
+  이미지 발행을 확인한 뒤 체크아웃·태그를 맞추고 `bootstrap.sh` 를 부르며, 헬스 확인이 실패하면 직전
+  커밋·태그로 **자동 롤백**한다. 인바운드 SSH 가 필요 없어 22 번을 좁힌 채로 자동 배포가 된다 —
+  Actions → SSH 를 쓰지 않는 이유는 [`deployment.md` §7-1](../docs/engineering/deployment.md) 참고.
+  `.env` 의 `PULL_DEPLOY_ENABLED=true` 가 없으면 아무것도 하지 않는다(fail closed·킬 스위치).
+- `install-pull-deploy.sh` — 위 스크립트를 주기 실행하는 systemd 서비스·타이머를 설치한다.
+  **서버에서** 실행한다. 유닛을 커밋해 두지 않고 생성하는 이유는 `User=`·`WorkingDirectory=` 가
+  호스트마다 달라서다 — 박아 두면 다른 호스트에서 조용히 틀린 디렉터리를 배포한다.
 - `harden-ssh.sh` — sshd 인증 정책을 확정하고 브루트포스 표면을 닫는다(키 전용 기본, fail2ban,
   무인 보안 업데이트). **서버에서** 실행한다. `SSH_PASSWORD_AUTH=1` 로 비밀번호 인증을 켤 수도 있지만
   기본은 끈다 — 22 번이 열려 있는 동안 비밀번호는 추측 가능한 자격이다.
