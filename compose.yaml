@@ -111,8 +111,13 @@ services:
     image: prom/prometheus:v3.1.0
     container_name: reputation-pool-prometheus
     depends_on:
+      # service_healthy 가 아니라 service_started 다 (#79 리뷰). app 이 최초 기동부터 unhealthy 이면
+      # (DB 연결 실패, Flyway 마이그레이션 실패 등) service_healthy 조건은 영원히 충족되지 않아
+      # Prometheus 자체가 시작하지 않는다. 그러면 스크레이프가 없어 up 시계열도 없고, 하필 그 상황을
+      # 알리려고 만든 TargetDown/TargetMissing 이 무동작한다 — "앱이 망가졌는데 조용하다"가 정확히
+      # 재현된다. Prometheus 는 대상이 죽어 있어도 정상 동작하는 것이 본래 설계이므로 함께 띄운다.
       app:
-        condition: service_healthy
+        condition: service_started
       alertmanager:
         condition: service_started
     # command 를 주면 이미지 기본 인자가 전부 대체되므로 설정 경로도 함께 적어야 한다.

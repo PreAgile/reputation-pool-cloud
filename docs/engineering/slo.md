@@ -92,12 +92,12 @@ Grafana "gRPC 지연 p99" 패널이 담당한다.
 
 각 SLI마다 네 티어. `monitoring/alerts.yml`의 `reputation-pool-error-budget` 그룹.
 
-| 티어 | 긴 창 | 짧은 창 | 소진율 | 소진 의미 | 등급 | 게이트 |
-|---|---|---|---|---|---|---|
-| Fast | 1h | 5m | 14.4× | 1시간에 버짓 2% | `critical` | `bad_events_1h ≥ 5` |
-| Medium | 6h | 30m | 6× | 6시간에 버짓 5% | `critical` | `bad_events_1h ≥ 5` |
-| Slow | 1d | 2h | 3× | 1일에 버짓 10% | `warning` | `bad_events_6h ≥ 5` |
-| Chronic | 3d | 6h | 1× | 3일에 버짓 10% | `warning` | `bad_events_6h ≥ 5` |
+| 티어 | `tier` 라벨 | 긴 창 | 짧은 창 | 소진율 | 소진 의미 | 등급 | 게이트 |
+|---|---|---|---|---|---|---|---|
+| Fast | `fast` | 1h | 5m | 14.4× | 1시간에 버짓 2% | `critical` | `bad_events_1h ≥ 5` |
+| Medium | `medium` | 6h | 30m | 6× | 6시간에 버짓 5% | `critical` | `bad_events_1h ≥ 5` |
+| Slow | `slow` | 1d | 2h | 3× | 1일에 버짓 10% | `warning` | `bad_events_6h ≥ 5` |
+| Chronic | `chronic` | 3d | 6h | 1× | 3일에 버짓 10% | `warning` | `bad_events_6h ≥ 5` |
 
 **창이 두 개인 이유**: 긴 창은 "충분히 오래 나빴다"를 보증해 순간 튐을 걸러내고, 짧은 창은 "아직도
 나쁘다"를 보증해 이미 끝난 사고로 계속 울리지 않게 한다(긴 창은 사건이 지나간 뒤에도 한동안 높다).
@@ -113,8 +113,21 @@ Grafana "gRPC 지연 p99" 패널이 담당한다.
 **Chronic 티어가 가장 중요한 신설분이다.** 에러율 0.7% 같은 만성 열화는 어떤 단순 임계 룰도 볼 수 없지만
 목표 99.5%를 지킬 수 없는 속도다. `alerts-test.yml`의 "만성 소진" 케이스가 이걸 고정한다.
 
-**티어는 의도적으로 겹친다.** 에러율 5%는 Medium·Slow·Chronic 임계를 동시에 넘는다. Alertmanager의
-`inhibit_rules`가 같은 `slo` 라벨의 `critical`이 떠 있으면 그 SLO의 `warning`을 통지하지 않는다.
+**티어는 의도적으로 겹친다.** 에러율 33%는 네 티어 임계를 **동시에** 넘고, 그 중 둘은 `critical`이라
+page가 두 번 울린다. `severity`만으로는 이걸 표현할 수 없다 — Fast와 Medium은 둘 다 `critical`이라
+등급 비교로 우열이 없다.
+
+그래서 알림마다 `tier` 라벨을 달고 Alertmanager의 `inhibit_rules`로 캐스케이드를 만든다
+(`fast → medium|slow|chronic`, `medium → slow|chronic`, `slow → chronic`, 모두 `equal: ['slo']`).
+사건 하나에 가장 급한 티어 하나만 통지된다.
+
+`equal: ['slo']`이므로 **다른 SLO는 서로 억제하지 않는다**(데이터 플레인 장애가 컨트롤 플레인 알림을
+묻지 않는다). `tier` 라벨이 없는 알림 — `TargetDown`, 도메인 급증, 체크포인트, 워치독 — 은 이 규칙에
+아예 걸리지 않는다. `severity` 기준으로 짰던 초안은 **`equal`이 "라벨이 양쪽 모두 없음"도 같다고 보기
+때문에** `TargetDown`이 도메인 `warning` 전부를 묻을 수 있었다. `tier` 기준은 그 위험이 구조적으로 없다.
+
+실제 Alertmanager에 일곱 알림을 주입해 확인했다: `grpc_availability`의 네 티어 중 Fast만 통지,
+`http_latency`의 Chronic은 통지(다른 SLO), `TargetDown`·`UpstreamBlockingSurge`도 통지.
 
 ## 4. 버짓이 소진되면 무엇을 하는가
 
@@ -157,6 +170,11 @@ CI의 `deploy-config` 잡이 앞의 둘을 자동으로 돌린다. 룰 파일을
 
 ## 7. 알려진 한계
 
+- **`TargetDown`은 `for: 5m`이다.** compose가 Prometheus를 app과 **함께** 띄우므로
+  (`depends_on: service_started`) 정상 부팅 중에도 `up=0` 구간이 있다. `service_healthy`로 두면 app이
+  최초 기동부터 unhealthy일 때 Prometheus 자체가 시작하지 않아 **이 룰이 무동작한다** — 하필 알리려던
+  상황에서 침묵한다. app 헬스체크가 정상으로 인정하는 최대 시간이 140초(`start_period 40s` +
+  `interval 10s × retries 10`)이므로 5분은 그 위다. 대가로 실제 장애 통지가 최대 5분 늦다.
 - **트래픽이 0이면 SLI가 빈 벡터다.** 요청이 없으면 위반도 없으니 맞는 동작이지만, 그래서 SLI에
   `absent()` 워치독을 붙일 수 없다(한가한 시간대에 정상적으로 사라진다). 앱이 죽은 경우는 `TargetDown`이,
   지표 이름이 바뀌는 회귀는 `PrometheusScrapeIT`가 각각 맡는다.

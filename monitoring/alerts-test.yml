@@ -326,17 +326,21 @@ tests:
   # 부재), 값 자체를 단정하는 promql_expr_test 를 함께 쓴다.
   # ══════════════════════════════════════════════════════════════════════════════════════════════════
 
-  # 스크레이프 대상이 죽으면 → for: 2m 뒤 critical 로 발화한다 (죽은 지 1분은 아직 조용하다)
+  # 스크레이프 대상이 죽으면 → for: 5m 뒤 critical 로 발화한다 (죽은 지 4분은 아직 조용하다)
+  #
+  # for 가 5분인 이유는 alerts.yml 주석 참고 — Prometheus 가 app 과 함께 뜨므로(그래야 최초 기동부터
+  # unhealthy 인 경우에도 이 룰이 동작한다) 정상 부팅 중에도 up=0 구간이 있고, app 헬스체크가 정상으로
+  # 인정하는 최대 시간이 140초다. 여기서 "4분에는 조용하다"를 함께 단정해 그 여유를 고정한다.
   - interval: 1m
     name: "생존: 대상이 죽으면 TargetDown 이 발화한다"
     input_series:
       - series: 'up{job="reputation-pool-app"}'
-        values: "1 1 1 0 0 0 0 0 0 0"
+        values: "1 1 1 0x20"
     alert_rule_test:
-      - eval_time: 4m
+      - eval_time: 7m
         alertname: TargetDown
         exp_alerts: []
-      - eval_time: 6m
+      - eval_time: 10m
         alertname: TargetDown
         exp_alerts:
           - exp_labels:
@@ -408,6 +412,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+              tier: fast
               slo: grpc_availability
             exp_annotations:
               summary: "[SLO] 데이터 플레인 가용성 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
@@ -430,6 +435,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+              tier: medium
               slo: grpc_availability
             exp_annotations:
               summary: "[SLO] 데이터 플레인 가용성 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
@@ -514,6 +520,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+              tier: fast
               slo: grpc_latency
             exp_annotations:
               summary: "[SLO] 데이터 플레인 지연 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
@@ -559,6 +566,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+              tier: fast
               slo: http_availability
             exp_annotations:
               summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
@@ -585,6 +593,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
+              tier: chronic
               slo: grpc_availability
             exp_annotations:
               summary: "[SLO] 데이터 플레인 가용성 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"

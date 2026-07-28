@@ -38,9 +38,14 @@ groups:
   # slo-rules.yml 상단 주석 참고).
   - name: reputation-pool-liveness
     rules:
+      # for: 5m 인 이유 — compose 가 Prometheus 를 app 과 **함께** 띄우므로(depends_on: service_started,
+      # 그래야 최초 기동부터 unhealthy 인 경우에도 이 룰이 동작한다) 정상 부팅 중에도 up=0 구간이 있다.
+      # app 의 헬스체크가 정상으로 인정하는 최대 시간은 start_period 40s + interval 10s × retries 10 =
+      # 140초다. 5분은 그보다 넉넉히 위이므로 느린 부팅에 오탐하지 않고, 그러면서 "계속 죽어 있다"는
+      # 판단은 충분히 빠르다(스크레이프 자체는 15초 간격이라 신호는 즉시 쌓인다 — 기다리는 것은 알림뿐).
       - alert: TargetDown
         expr: up{job="reputation-pool-app"} == 0
-        for: 2m
+        for: 5m
         labels:
           severity: critical
         annotations:
@@ -248,6 +253,7 @@ groups:
           and slo:grpc_availability:bad_events_1h >= 5
         labels:
           severity: critical
+          tier: fast
           slo: grpc_availability
         annotations:
           summary: "[SLO] 데이터 플레인 가용성 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
@@ -259,6 +265,7 @@ groups:
           and slo:grpc_availability:bad_events_1h >= 5
         labels:
           severity: critical
+          tier: medium
           slo: grpc_availability
         annotations:
           summary: "[SLO] 데이터 플레인 가용성 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
@@ -270,6 +277,7 @@ groups:
           and slo:grpc_availability:bad_events_6h >= 5
         labels:
           severity: warning
+          tier: slow
           slo: grpc_availability
         annotations:
           summary: "[SLO] 데이터 플레인 가용성 에러버짓을 3배 속도로 소진 중 — 이 속도면 10일 뒤 소진"
@@ -281,6 +289,7 @@ groups:
           and slo:grpc_availability:bad_events_6h >= 5
         labels:
           severity: warning
+          tier: chronic
           slo: grpc_availability
         annotations:
           summary: "[SLO] 데이터 플레인 가용성 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
@@ -294,6 +303,7 @@ groups:
           and slo:grpc_latency:bad_events_1h >= 5
         labels:
           severity: critical
+          tier: fast
           slo: grpc_latency
         annotations:
           summary: "[SLO] 데이터 플레인 지연 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
@@ -305,6 +315,7 @@ groups:
           and slo:grpc_latency:bad_events_1h >= 5
         labels:
           severity: critical
+          tier: medium
           slo: grpc_latency
         annotations:
           summary: "[SLO] 데이터 플레인 지연 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
@@ -316,6 +327,7 @@ groups:
           and slo:grpc_latency:bad_events_6h >= 5
         labels:
           severity: warning
+          tier: slow
           slo: grpc_latency
         annotations:
           summary: "[SLO] 데이터 플레인 지연 에러버짓을 3배 속도로 소진 중 — 이 속도면 10일 뒤 소진"
@@ -327,6 +339,7 @@ groups:
           and slo:grpc_latency:bad_events_6h >= 5
         labels:
           severity: warning
+          tier: chronic
           slo: grpc_latency
         annotations:
           summary: "[SLO] 데이터 플레인 지연 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
@@ -340,6 +353,7 @@ groups:
           and slo:http_availability:bad_events_1h >= 5
         labels:
           severity: critical
+          tier: fast
           slo: http_availability
         annotations:
           summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
@@ -351,6 +365,7 @@ groups:
           and slo:http_availability:bad_events_1h >= 5
         labels:
           severity: critical
+          tier: medium
           slo: http_availability
         annotations:
           summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
@@ -362,6 +377,7 @@ groups:
           and slo:http_availability:bad_events_6h >= 5
         labels:
           severity: warning
+          tier: slow
           slo: http_availability
         annotations:
           summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 3배 속도로 소진 중 — 이 속도면 10일 뒤 소진"
@@ -373,6 +389,7 @@ groups:
           and slo:http_availability:bad_events_6h >= 5
         labels:
           severity: warning
+          tier: chronic
           slo: http_availability
         annotations:
           summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
@@ -386,6 +403,7 @@ groups:
           and slo:http_latency:bad_events_1h >= 5
         labels:
           severity: critical
+          tier: fast
           slo: http_latency
         annotations:
           summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
@@ -397,6 +415,7 @@ groups:
           and slo:http_latency:bad_events_1h >= 5
         labels:
           severity: critical
+          tier: medium
           slo: http_latency
         annotations:
           summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
@@ -408,6 +427,7 @@ groups:
           and slo:http_latency:bad_events_6h >= 5
         labels:
           severity: warning
+          tier: slow
           slo: http_latency
         annotations:
           summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 3배 속도로 소진 중 — 이 속도면 10일 뒤 소진"
@@ -419,6 +439,7 @@ groups:
           and slo:http_latency:bad_events_6h >= 5
         labels:
           severity: warning
+          tier: chronic
           slo: http_latency
         annotations:
           summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
