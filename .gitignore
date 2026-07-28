@@ -9,4 +9,8 @@ out/
 
 # Local environment (secrets for docker compose) — never commit; use .env.example as the template.
 .env
+
+# 풀 기반 배포가 "끝까지 성공한 커밋" 을 적어 두는 표식(#15). 호스트마다 다르고 커밋 대상이 아니다.
+# git reset --hard 는 untracked 파일을 지우지 않으므로 배포를 거쳐도 남는다.
+.pull-deploy-state
 .claude/
