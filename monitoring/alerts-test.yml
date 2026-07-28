@@ -280,6 +280,26 @@ tests:
             exp_annotations:
               summary: "기동 시 풀 복원 실패 — 해당 테넌트의 저장본이 빈 스냅샷으로 덮어써질 수 있다"
 
+  # 체크포인트 주기 지표가 없으면 → CheckpointStale 은 조용해지고 워치독이 그 사실을 알린다
+  # (신선도가 계속 증가하는 "진짜 장애" 상황을 함께 준다 — 그래도 CheckpointStale 이 울리지 못한다는 것,
+  #  즉 임계값을 지표로 뺀 대가로 생긴 구멍을 워치독이 실제로 막는지를 고정한다.)
+  - interval: 30s
+    name: "워치독: 주기 지표가 없으면 CheckpointStale 이 무동작이고 워치독이 발화한다"
+    input_series:
+      - series: "reputation_pool_checkpoint_age_seconds"
+        values: "0+30x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CheckpointStale
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: CheckpointIntervalMetricMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "체크포인트 주기 지표가 없다 — CheckpointStale 이 무동작 중일 수 있다"
+
   # 임계값 지표가 아예 없으면 → 급증 룰은 조용해지고 워치독이 그 사실을 알린다
   # (이 설계가 새로 만든 fail-open 구멍을 워치독이 실제로 막는지 고정한다.)
   - interval: 1m

@@ -200,3 +200,15 @@ groups:
           severity: warning
         annotations:
           summary: "급증 알림 임계값 지표가 없다 — ResourceCoolingSurge/UpstreamBlockingSurge 가 무동작 중일 수 있다"
+
+      # 워치독 (#80): 위 워치독과 같은 이유로 CheckpointStale 에도 필요하다. 그 룰은 임계를
+      # scalar(max(reputation_pool_checkpoint_interval_seconds)) 로 파생시키는데, 그 게이지가 사라지면
+      # scalar() 가 NaN 이 되어 비교가 조용히 거짓이 된다 — 하필 신선도가 계속 증가하는 진짜 장애
+      # 상황에서 정확히 침묵한다. 임계값을 지표로 빼서 얻은 유연함의 대가이므로 같이 막는다.
+      - alert: CheckpointIntervalMetricMissing
+        expr: absent(reputation_pool_checkpoint_interval_seconds)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "체크포인트 주기 지표가 없다 — CheckpointStale 이 무동작 중일 수 있다"
