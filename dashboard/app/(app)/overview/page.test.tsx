@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { setupServer } from "msw/node";
 import { http, HttpResponse, delay } from "msw";
@@ -46,15 +46,54 @@ describe("풀 오버뷰 화면 (integration + MSW)", () => {
     expect(badIdx).toBeLessThan(goodIdx);
   });
 
-  it("리소스 값이 상세 페이지로 가는 링크이고, 드로어는 열리지 않는다", async () => {
+  // 아래 세 개가 #52 P4(quick-drawer)를 페이지 레벨에서 고정한다. drawer.tsx 의 단위 테스트만 있으면
+  // 컴포넌트는 멀쩡한데 화면에서 사라져도 CI 가 초록이다 — 실제로 그렇게 한 번 유실됐다(#69 로 들어온
+  // 기능이 #72 의 라우트 이전에서 빠졌고, 컴포넌트와 그 단위 테스트만 남아 아무도 눈치채지 못했다).
+
+  it("행을 클릭하면 리스트를 벗어나지 않고 미리보기 드로어를 연다", async () => {
+    const user = userEvent.setup();
     render(<OverviewPage />, { wrapper: ToastProvider });
     await screen.findByText("proxy-bad");
 
-    // 값은 곧바로 상세로 가는 링크다(드로어 없음).
+    // 값 링크가 아니라 행 자체를 클릭한다. "Blocked" 는 KPI 타일에도 있으므로 텍스트로 찾지 않고
+    // proxy-bad 링크가 속한 <tr> 을 집어 그 행을 누른다.
+    const row = screen.getByRole("link", { name: "proxy-bad" }).closest("tr");
+    expect(row).not.toBeNull();
+    await user.click(row!);
+
+    const drawer = await screen.findByRole("dialog");
+    expect(drawer).toBeInTheDocument();
+    // 요약이 드로어 안에 있고, 상세로 가는 길은 명시적 링크로만 열려 있다.
+    expect(within(drawer).getByText("최근 판정")).toBeInTheDocument();
+    expect(within(drawer).getByRole("link", { name: /전체 상세 보기/ })).toHaveAttribute(
+      "href",
+      "/resources/proxy/proxy-bad",
+    );
+    // 리스트는 그대로 남아 있다 — 맥락을 잃지 않는 것이 이 패턴의 목적이다.
+    expect(screen.getByText("proxy-good")).toBeInTheDocument();
+  });
+
+  it("값 셀은 여전히 상세로 가는 링크이고, 그 클릭은 드로어를 열지 않는다", async () => {
+    render(<OverviewPage />, { wrapper: ToastProvider });
+    await screen.findByText("proxy-bad");
+
+    // 키보드·중간클릭·새 탭을 위해 값 셀은 실제 링크로 남아 있어야 한다.
     const link = screen.getByRole("link", { name: "proxy-bad" });
     expect(link).toHaveAttribute("href", "/resources/proxy/proxy-bad");
 
-    // 미리보기 드로어(dialog)는 어디에도 없다.
+    // 아직 아무 행도 클릭하지 않았으므로 드로어는 닫힌 상태다.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("오버플로 메뉴를 열어도 드로어가 같이 열리지는 않는다", async () => {
+    const user = userEvent.setup();
+    render(<OverviewPage />, { wrapper: ToastProvider });
+    await screen.findByText("proxy-good");
+
+    // 메뉴 td 는 stopPropagation 으로 행 클릭과 분리돼 있다.
+    await user.click(screen.getByRole("button", { name: "proxy-good 작업 메뉴 열기" }));
+    await screen.findByRole("menuitem", { name: "영구 차단" });
+
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
