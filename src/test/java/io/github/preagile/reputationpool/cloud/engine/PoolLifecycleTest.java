@@ -19,6 +19,8 @@ import io.github.preagile.reputationpool.core.pool.WeightedRandomSelectionStrate
 import io.github.preagile.reputationpool.core.port.ResourceStore;
 import io.github.preagile.reputationpool.grpc.EventBroadcaster;
 import io.github.preagile.reputationpool.persistence.PostgresAuditTrail;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -60,6 +62,11 @@ class PoolLifecycleTest {
     private final EventBroadcaster broadcaster = new EventBroadcaster();
     private final PostgresAuditTrail auditTrail = new PostgresAuditTrail(mock(DataSource.class));
 
+    // Real freshness tracker on a real (in-memory) registry, not a mock: what matters is that the
+    // lifecycle reports the *right* outcome to it (#80), and a mock would happily accept a wrong one.
+    private final MeterRegistry meters = new SimpleMeterRegistry();
+    private final CheckpointFreshness freshness = new CheckpointFreshness(clock, meters, Duration.ofSeconds(30));
+
     @AfterEach
     void closeAuditTrail() {
         auditTrail.close();
@@ -99,7 +106,20 @@ class PoolLifecycleTest {
 
     private PoolLifecycle lifecycle(
             PerTenantPoolRegistry registry, Duration retention, AuditPurger purger, GlobalResourceBudget budget) {
-        return new PoolLifecycle(registry, purger, clock, propsWithRetention(retention), budget);
+        return new PoolLifecycle(registry, purger, clock, propsWithRetention(retention), budget, freshness);
+    }
+
+    /** The value the freshness gauge currently reports, for asserting the lifecycle wired it up (#80). */
+    private double checkpointAge() {
+        return meters.get(CheckpointFreshness.AGE).gauge().value();
+    }
+
+    private double checkpointFailures() {
+        return meters.get(CheckpointFreshness.CHECKPOINT_FAILURES).counter().count();
+    }
+
+    private double restoreFailures() {
+        return meters.get(CheckpointFreshness.RESTORE_FAILURES).counter().count();
     }
 
     private static TenantRepository tenants(String... ids) {
@@ -155,6 +175,37 @@ class PoolLifecycleTest {
 
             assertThat(lifecycle.isRunning()).isTrue();
             assertThat(registry.poolFor("good").snapshot().registered()).containsExactly(proxy("g1"));
+        }
+
+        @Test
+        @DisplayName("복원이 실패한 테넌트가 있으면 → 리스토어 실패 카운터가 증가한다 (#80)")
+        void start_countsAFailedRestore() {
+            PerTenantPoolRegistry registry = registry(tenants("bad", "good"));
+            stores.put("bad", RecordingStore.failingLoad());
+            stores.put("good", RecordingStore.loadedWith(snapshotWith(proxy("g1"))));
+
+            lifecycle(registry, Duration.ZERO, cutoff -> 0).start();
+
+            assertThat(restoreFailures()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("복원이 실패한 테넌트를 그대로 체크포인트하면 → 저장은 성공해 신선도는 0 이다 (신선도만으로는 이 손실을 볼 수 없다는 사실 자체를 고정한다)")
+        void start_failedRestoreIsInvisibleToFreshnessBecauseTheSaveSucceeds() {
+            PerTenantPoolRegistry registry = registry(tenants("bad"));
+            // load 만 실패하고 save 는 정상인 스토어 — 복원이 깨진 뒤에도 체크포인트는 성공한다.
+            stores.put("bad", RecordingStore.failingLoad());
+
+            PoolLifecycle lifecycle = lifecycle(registry, Duration.ZERO, cutoff -> 0);
+            lifecycle.start();
+            lifecycle.checkpoint();
+
+            // 빈 풀이 정상 스냅샷 위에 저장됐는데도 신선도는 건강하게 보인다.
+            assertThat(stores.get("bad").lastSaved().registered()).isEmpty();
+            assertThat(checkpointAge()).isZero();
+            assertThat(checkpointFailures()).isZero();
+            // 이 상황을 드러내는 유일한 신호가 리스토어 실패 카운터다.
+            assertThat(restoreFailures()).isEqualTo(1);
         }
 
         @Test
@@ -216,6 +267,48 @@ class PoolLifecycleTest {
             assertThatCode(lifecycle::checkpoint).doesNotThrowAnyException();
 
             assertThat(stores.get("good").lastSaved().registered()).containsExactly(proxy("g1"));
+        }
+
+        // 아래 세 개는 #80 의 배선을 고정한다. CheckpointFreshness 자체의 규칙은 그 클래스의 단위테스트가
+        // 검증하고, 여기서는 "생명주기가 그 규칙에 맞는 사실을 보고하는가"를 본다 — 삼킨 실패를 라운드
+        // 결과로 넘기지 않으면 지표가 조용히 거짓말을 하게 되는데, 그건 여기서만 잡힌다.
+
+        @Test
+        @DisplayName("모든 테넌트가 저장에 성공하면 → 신선도 지표가 0 으로 갱신된다")
+        void checkpoint_reportsAFullySuccessfulRoundToFreshness() {
+            PerTenantPoolRegistry registry = registry(tenants("tenant-a", "tenant-b"));
+            registry.poolFor("tenant-a").register(proxy("a1"));
+            registry.poolFor("tenant-b").register(proxy("b1"));
+
+            lifecycle(registry, Duration.ZERO, cutoff -> 0).checkpoint();
+
+            assertThat(checkpointAge()).isZero();
+            assertThat(checkpointFailures()).isZero();
+        }
+
+        @Test
+        @DisplayName("한 테넌트의 저장이 실패하면 → 실패 수가 집계되고 그 라운드는 전체 성공으로 치지 않는다")
+        void checkpoint_reportsAFailedTenantToFreshness() {
+            PerTenantPoolRegistry registry = registry(tenants("bad", "good"));
+            stores.put("bad", RecordingStore.failingSave());
+            registry.poolFor("bad").register(proxy("x"));
+            registry.poolFor("good").register(proxy("g1"));
+
+            lifecycle(registry, Duration.ZERO, cutoff -> 0).checkpoint();
+
+            assertThat(checkpointFailures()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("정상 종료 시 마지막 체크포인트가 성공하면 → 신선도 지표도 갱신된다 (stop 경로도 배선돼 있다)")
+        void stop_alsoReportsItsFinalCheckpoint() {
+            PerTenantPoolRegistry registry = registry(tenants("tenant-a"));
+            registry.poolFor("tenant-a").register(proxy("a1"));
+
+            lifecycle(registry, Duration.ZERO, cutoff -> 0).stop();
+
+            assertThat(checkpointAge()).isZero();
+            assertThat(checkpointFailures()).isZero();
         }
     }
 
