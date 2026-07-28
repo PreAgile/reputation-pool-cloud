@@ -18,6 +18,72 @@ const CTA = "inline-flex items-center justify-center";
  */
 type SectionProps = { dict: Dict; locale: Locale };
 
+/**
+ * 본문 한 줄 길이(측정값). `ch` 는 라틴 글자 하나 폭 기준이라 **같은 `ch` 값이 로케일에 따라 전혀 다른
+ * 글자 수**를 담는다 — 한글 글리프는 라틴의 약 두 배 폭이므로 `52ch` 짜리 단에는 한글이 절반밖에 안 들어가고,
+ * 그래서 마지막 줄에 한 단어만 남는 고아 줄바꿈("있습니다." 처럼)이 생긴다. 로케일별로 따로 주고, 여기에
+ * `text-pretty` 를 함께 써서 브라우저가 마지막 줄을 혼자 남기지 않게 한다.
+ *
+ * 이전에는 이 조정이 필요한 곳마다 `locale === "ko" ? ... : ...` 를 인라인으로 흩뿌려 놨고(히어로·기능 헤딩),
+ * 정작 본문 단락 세 곳은 두 로케일 공용 `52ch` 라 한글에서만 깨졌다. 한 곳으로 모은다.
+ */
+const MEASURE_BODY: Record<Locale, string> = { ko: "max-w-[36rem]", en: "max-w-[52ch]" };
+/** 헤딩 측정값 — 본문보다 넉넉하게. 헤딩은 짧고 크므로 좁은 단에 넣으면 어색하게 두 줄로 접힌다. */
+const MEASURE_HEAD: Record<Locale, string> = { ko: "max-w-[44rem]", en: "max-w-[38rem]" };
+
+/**
+ * 섹션 머리(eyebrow + 헤딩 + 선택 본문)를 가운데로 펼친다.
+ *
+ * 쇼케이스 섹션의 헤딩을 좁은 단에 좌측 정렬로 두면 오른쪽 절반이 비어 화면이 한쪽으로 쏠려 보인다.
+ * 가운데 정렬 + 넉넉한 측정값이면 헤딩이 가로로 펼쳐지고, 아래 콘텐츠(같은 폭의 스크린샷들)와 축이 맞는다.
+ */
+function SectionHead({
+  label,
+  heading,
+  body,
+  locale,
+  tone = "light",
+}: {
+  label: string;
+  heading: string;
+  body?: React.ReactNode;
+  locale: Locale;
+  tone?: "light" | "dark";
+}) {
+  return (
+    <div className={cn("mx-auto text-center", MEASURE_HEAD[locale])}>
+      {/* 다크 배경에서는 본문 accent 가 너무 어두워 읽히지 않으므로 밝은 쪽을 쓴다. */}
+      <span
+        className={cn(
+          "font-mono text-[12.5px] font-semibold uppercase tracking-[0.06em]",
+          tone === "dark" ? "text-[#7fb0f5]" : "text-accent",
+        )}
+      >
+        {label}
+      </span>
+      <h2
+        className={cn(
+          "mt-3 text-balance text-3xl font-bold leading-tight tracking-tight sm:text-[38px]",
+          tone === "dark" ? "text-code-ink" : "text-ink",
+        )}
+      >
+        {heading}
+      </h2>
+      {body != null && (
+        <p
+          className={cn(
+            "mx-auto mt-4 text-pretty text-[17px] leading-relaxed",
+            MEASURE_BODY[locale],
+            tone === "dark" ? "text-code-muted" : "text-muted",
+          )}
+        >
+          {body}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ─────────────────────────────  Hero  ───────────────────────────── */
 
 /** 히어로 다크 코드 패널 — acquire → report 루프. 코드/주석은 언어 중립이라 번역하지 않는다. */
@@ -43,9 +109,16 @@ function CodePanel() {
       </div>
       <pre className="overflow-x-auto bg-code-bg px-5 py-5 font-mono text-[13.5px] leading-[1.85] text-code-ink">
         <code>
+          {/* 각 줄은 이 패널 내부 폭(약 50자)에 들어가야 한다. `overflow-x-auto` 라 넘쳐도 깨지지는 않지만,
+              macOS 의 오버레이 스크롤바는 스크롤 전까지 보이지 않으므로 사용자에게는 그냥 "잘린 코드" 로
+              읽힌다 — 히어로에서 가장 중요한 마지막 두 줄(엔진이 알아서 한다는 문구)이 그렇게 잘려 있었다.
+              그래서 주석을 짧게 끊어 스크롤 없이 전부 보이게 한다. */}
+          <div className="whitespace-pre">
+            <Comment>{"// healthiest resource, right now"}</Comment>
+          </div>
           <div className="whitespace-pre">
             <span className="text-[#77c8e0]">var</span> lease = advisor.<M>acquire</M>(
-            <Str>&quot;checkout-us&quot;</Str>); <Comment>{"  // healthiest resource, right now"}</Comment>
+            <Str>&quot;checkout-us&quot;</Str>);
           </div>
           <div className="whitespace-pre">useResource(lease.resource());</div>
           <div className="whitespace-pre">{" "}</div>
@@ -55,11 +128,12 @@ function CodePanel() {
           <div className="whitespace-pre">
             advisor.<M>report</M>(lease, Outcome.<M>success</M>(latency));
           </div>
+          <div className="whitespace-pre">{" "}</div>
           <div className="whitespace-pre">
-            <Comment>{"// on failure? report(lease, Outcome.failure(TIMEOUT))"}</Comment>
+            <Comment>{"// on failure? Outcome.failure(TIMEOUT)"}</Comment>
           </div>
           <div className="whitespace-pre">
-            <Comment>{"// → the engine cools, isolates & re-probes automatically"}</Comment>
+            <Comment>{"// → engine cools, isolates & re-probes"}</Comment>
           </div>
         </code>
       </pre>
@@ -154,37 +228,45 @@ export function TrustSignals({ dict }: SectionProps) {
 
 /* ─────────────────────────────  Features (교차행 + 실제 스크린샷)  ───────────────────────────── */
 
-/** 기능행 구조(비번역): 스크린샷 키·좌우 배치·주소줄 URL. dict.features.items 와 index 로 결합. */
-const FEATURE_STRUCT: { shot: string; url: string; reversed: boolean }[] = [
-  { shot: "overview", url: "app.reputationpool.io/overview", reversed: false },
-  { shot: "detail", url: "app.reputationpool.io/resources/proxy", reversed: true },
-  { shot: "events", url: "app.reputationpool.io/events", reversed: false },
+/** 기능 블록 구조(비번역): 스크린샷 키·주소줄 URL. dict.features.items 와 index 로 결합. */
+const FEATURE_STRUCT: { shot: string; url: string }[] = [
+  { shot: "overview", url: "app.reputationpool.io/overview" },
+  { shot: "detail", url: "app.reputationpool.io/resources/proxy" },
+  { shot: "events", url: "app.reputationpool.io/events" },
 ];
 
+/**
+ * 제품 쇼케이스. 섹션 헤더를 가운데로 넓게 펼치고, 그 아래에 기능 블록을 하나씩 쌓는다 —
+ * 각 블록은 [가운데 정렬 설명 → 컨테이너 전체 폭 스크린샷] 이다.
+ *
+ * <b>왜 좌우 교차(2단) 배치를 버렸나.</b> 이전 구조는 `lg:grid-cols-[1fr_1.15fr]` 에 `lg:order-*` 로
+ * 좌우만 뒤집었는데, 순서만 바뀌고 **컬럼 폭은 그대로**여서 짝수 행 스크린샷이 좁은 `1fr` 쪽에 들어갔다.
+ * 결과적으로 같은 크기(2880×1920)인 세 스크린샷이 화면에서 서로 다른 크기로 보였다. 세 장을 "같은 제품의
+ * 연속된 화면"으로 읽히게 하려면 폭이 같아야 하고, 그건 한 컬럼에 쌓을 때 자동으로 보장된다.
+ * `items-center` 로 텍스트가 행 중앙에 떠서 블록마다 시작 높이가 달라 보이던 문제도 같이 사라진다.
+ */
 export function Features({ dict, locale }: SectionProps) {
   return (
     <section id="features" className="scroll-mt-20 border-b border-line">
       <div className={cn(WRAP, "py-[88px]")}>
-        <span className="font-mono text-[12.5px] font-semibold uppercase tracking-[0.06em] text-accent">
-          {dict.features.label}
-        </span>
-        <h2 className={cn("mt-3 text-balance text-3xl font-bold leading-tight tracking-tight text-ink sm:text-[38px]", locale === "ko" ? "max-w-[24ch]" : "max-w-[16ch]")}>
-          {dict.features.heading}
-        </h2>
+        <SectionHead label={dict.features.label} heading={dict.features.heading} locale={locale} />
 
-        <div className="mt-14 flex flex-col gap-[74px]">
+        <div className="mt-16 flex flex-col gap-[104px]">
           {dict.features.items.map((f, i) => {
             const s = FEATURE_STRUCT[i];
             // 스크린샷은 로케일 일치: EN=영어 목업, KO=실제 대시보드. 테마별 라이트/다크 2종을 BrowserFrame 이 CSS 로 스왑.
             const shot = `/marketing/${s.shot}-${locale}`;
             return (
-              <div key={f.kicker} className="grid items-center gap-14 lg:grid-cols-[1fr_1.15fr]">
-                <div className={cn(s.reversed && "lg:order-2")}>
+              <article key={f.kicker}>
+                <div className={cn("mx-auto text-center", MEASURE_BODY[locale])}>
                   <span className="font-mono text-xs uppercase tracking-[0.05em] text-muted">{f.kicker}</span>
-                  <h3 className="mt-3.5 text-[23px] font-semibold tracking-tight text-ink">{f.title}</h3>
-                  <p className="mt-3 text-[15.5px] leading-relaxed text-muted">{f.body}</p>
+                  <h3 className="mt-3 text-balance text-[26px] font-semibold leading-snug tracking-tight text-ink">
+                    {f.title}
+                  </h3>
+                  <p className="mt-3.5 text-pretty text-[15.5px] leading-relaxed text-muted">{f.body}</p>
                 </div>
-                <div className={cn(s.reversed && "lg:order-1")}>
+                {/* 컨테이너 전체 폭 — 세 스크린샷이 같은 비율(3:2)이라 높이까지 정확히 같아진다. */}
+                <div className="mt-9">
                   <BrowserFrame
                     srcLight={`${shot}-light.png`}
                     srcDark={`${shot}-dark.png`}
@@ -194,7 +276,7 @@ export function Features({ dict, locale }: SectionProps) {
                     closeLabel={dict.a11y.closeDialog}
                   />
                 </div>
-              </div>
+              </article>
             );
           })}
         </div>
@@ -227,16 +309,12 @@ const CAP_ICONS: React.ReactNode[] = [
   />,
 ];
 
-export function Capabilities({ dict }: SectionProps) {
+export function Capabilities({ dict, locale }: SectionProps) {
   return (
     <section className="border-b border-line">
       <div className={cn(WRAP, "py-[88px]")}>
-        <span className="font-mono text-[12.5px] font-semibold uppercase tracking-[0.06em] text-accent">
-          {dict.caps.label}
-        </span>
-        <h2 className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-[38px]">{dict.caps.heading}</h2>
-        <p className="mt-3.5 max-w-[52ch] text-[17px] text-muted">{dict.caps.intro}</p>
-        <div className="mt-11 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+        <SectionHead label={dict.caps.label} heading={dict.caps.heading} body={dict.caps.intro} locale={locale} />
+        <div className="mt-12 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
           {dict.caps.items.map((c, i) => (
             <div key={c.title} className="rounded-[13px] border border-line bg-surface p-5">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="mb-3 size-[22px] text-accent" aria-hidden="true">
@@ -261,15 +339,11 @@ const STEP_META: { n: string; code: string }[] = [
   { n: "3", code: "report(lease, success)" },
 ];
 
-export function HowItWorks({ dict }: SectionProps) {
+export function HowItWorks({ dict, locale }: SectionProps) {
   return (
     <section id="how" className="scroll-mt-20 border-b border-line">
       <div className={cn(WRAP, "py-[88px]")}>
-        <span className="font-mono text-[12.5px] font-semibold uppercase tracking-[0.06em] text-accent">
-          {dict.steps.label}
-        </span>
-        <h2 className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-[38px]">{dict.steps.heading}</h2>
-        <p className="mt-3.5 max-w-[52ch] text-[17px] text-muted">{dict.steps.intro}</p>
+        <SectionHead label={dict.steps.label} heading={dict.steps.heading} body={dict.steps.intro} locale={locale} />
         <ol className="mt-12 grid gap-7 md:grid-cols-3">
           {dict.steps.items.map((s, i) => (
             <li key={STEP_META[i].n}>
@@ -291,16 +365,12 @@ export function HowItWorks({ dict }: SectionProps) {
 
 /* ─────────────────────────────  Docs  ───────────────────────────── */
 
-export function Docs({ dict }: SectionProps) {
+export function Docs({ dict, locale }: SectionProps) {
   return (
     <section id="docs" className="scroll-mt-20 border-b border-line">
       <div className={cn(WRAP, "py-[88px]")}>
-        <span className="font-mono text-[12.5px] font-semibold uppercase tracking-[0.06em] text-accent">
-          {dict.docs.label}
-        </span>
-        <h2 className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-[38px]">{dict.docs.heading}</h2>
-        <p className="mt-3.5 max-w-[52ch] text-[17px] text-muted">{dict.docs.intro}</p>
-        <div className="mt-11 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <SectionHead label={dict.docs.label} heading={dict.docs.heading} body={dict.docs.intro} locale={locale} />
+        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {dict.docs.items.map((d) => (
             // 전용 docs 라우트는 후속 슬라이스 → 실제 문서가 사는 공개 레포로 연결(404 회피).
             <a
@@ -326,15 +396,17 @@ export function Docs({ dict }: SectionProps) {
 
 /* ─────────────────────────────  Contact (결제 없음 — mailto)  ───────────────────────────── */
 
-export function Contact({ dict }: SectionProps) {
+export function Contact({ dict, locale }: SectionProps) {
   return (
     <section id="contact" className="scroll-mt-20 border-b border-line bg-code-bg text-center">
       <div className={cn(WRAP, "py-[84px]")}>
-        <span className="font-mono text-[12.5px] font-semibold uppercase tracking-[0.06em] text-[#7fb0f5]">
-          {dict.contact.label}
-        </span>
-        <h2 className="mt-3 text-3xl font-bold tracking-tight text-code-ink sm:text-[38px]">{dict.contact.heading}</h2>
-        <p className="mx-auto mt-4 max-w-[46ch] text-[17px] leading-relaxed text-code-muted">{dict.contact.body}</p>
+        <SectionHead
+          label={dict.contact.label}
+          heading={dict.contact.heading}
+          body={dict.contact.body}
+          locale={locale}
+          tone="dark"
+        />
         <a
           href={CONTACT_MAILTO}
           className={cn(CTA, "mt-7 rounded-[11px] bg-white px-5 py-2.5 text-[15px] font-bold text-code-bg transition hover:brightness-95")}
