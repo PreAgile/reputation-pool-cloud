@@ -136,6 +136,43 @@ describe("resolveLocale: 신호 우선순위 — 사용자의 명시적 선택�
     expect(resolveLocale({ country: "KR" })).toEqual({ locale: "ko", source: "country" });
   });
 
+  // 아래 4개는 "명시적 거부(q=0)가 추론 신호(국가)를 이긴다"는 계약을 고정한다. 처음 구현에서는
+  // q=0 을 "선호 신호가 아니다"로만 처리해 **거부라는 정보를 버렸고**, 그래서 한국어를 명시적으로
+  // 거부한 방문자가 한국 IP 라는 이유로 한국어 랜딩을 받았다(PR #113 리뷰 지적).
+  // RFC 9110 에서 q=0 은 "이 언어는 받지 않겠다"는 뜻이므로, 브라우저가 그렇게 말한 언어를
+  // IP 추측으로 되살려서는 안 된다.
+
+  it("한국어를 q=0 으로 거부했으면 → IP 가 KR 이어도 영어다 (명시적 거부가 국가 추론을 이긴다)", () => {
+    expect(resolveLocale({ acceptLanguage: "ko;q=0", country: "KR" })).toEqual({
+      locale: "en",
+      source: "default",
+    });
+  });
+
+  it("아는 언어가 없고 한국어만 q=0 으로 거부됐으면 → IP 가 KR 이어도 영어다", () => {
+    // 한국에 체류하는 일본어 사용자가 한국어를 명시적으로 뺀 경우.
+    expect(resolveLocale({ acceptLanguage: "ja,ko;q=0", country: "KR" })).toEqual({
+      locale: "en",
+      source: "default",
+    });
+  });
+
+  it("영어만 q=0 으로 거부됐으면 → IP 가 KR 이면 한국어다 (거부는 그 언어에만 적용된다)", () => {
+    // 거부 하나가 국가 폴백 전체를 끄면 안 된다 — 거부된 언어만 후보에서 빠진다.
+    expect(resolveLocale({ acceptLanguage: "ja,en;q=0", country: "KR" })).toEqual({
+      locale: "ko",
+      source: "country",
+    });
+  });
+
+  it("일반 태그를 거부하고 더 구체적인 태그를 선호하면 → 그 선호를 따른다 (ko;q=0, ko-KR;q=0.9 → 한국어)", () => {
+    // 거부를 언어 단위로 뭉개면 이 정상 헤더가 영어로 뒤집힌다.
+    expect(resolveLocale({ acceptLanguage: "ko;q=0,ko-KR;q=0.9", country: "US" })).toEqual({
+      locale: "ko",
+      source: "accept-language",
+    });
+  });
+
   it("아무 신호도 없으면 → 안전한 기본값 영어다 (중립 헤더로 오는 크롤러가 여기로 온다)", () => {
     expect(resolveLocale({})).toEqual({ locale: "en", source: "default" });
     expect(resolveLocale({ acceptLanguage: null, country: null, cookie: null })).toEqual({

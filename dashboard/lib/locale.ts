@@ -48,32 +48,66 @@ export function isLocale(value: string | null | undefined): value is Locale {
   return value === "en" || value === "ko";
 }
 
+/** `Accept-Language` 한 줄에서 읽어낸 두 가지 사실 — 무엇을 선호하는가, 무엇을 거부하는가. */
+interface AcceptLanguageMatch {
+  /** q 가중치로 고른 로케일. 아는 언어에 양의 가중치가 하나도 없으면 `null`. */
+  preferred: Locale | null;
+  /**
+   * `q=0` 으로 **명시적으로 거부**된 로케일. `preferred` 가 있으면 호출자가 그 자리에서 끝내므로
+   * 의미가 없어 항상 빈 배열이다 — 이 좁은 계약 덕분에 "선호가 있는데 거부도 있다"는 모순 상태를
+   * 다룰 필요가 없다(`ko;q=0,ko-KR;q=0.9` 는 거부가 아니라 정상 선호다).
+   */
+  rejected: Locale[];
+}
+
 /**
- * `Accept-Language`(예: `ko-KR,ko;q=0.9,en-US;q=0.8`)에서 로케일을 고른다.
+ * `Accept-Language`(예: `ko-KR,ko;q=0.9,en-US;q=0.8`)를 읽는다.
  * q 값을 비교해 **한국어가 영어보다 명확히 우선일 때만** ko, 동점이면 기본값(en) 쪽으로 기운다.
  *
- * 아는 언어(ko·en)가 하나도 없거나 헤더가 비었으면 `null` — "판단할 근거가 없다"와 "영어를 선호한다"를
- * 구분해야 국가(`CF-IPCountry`) 폴백을 그 자리에만 끼울 수 있다.
+ * 아는 언어(ko·en)가 하나도 없거나 헤더가 비었으면 `preferred` 가 `null` — "판단할 근거가 없다"와
+ * "영어를 선호한다"를 구분해야 국가(`CF-IPCountry`) 폴백을 그 자리에만 끼울 수 있다.
+ *
+ * **`rejected` 를 따로 돌려주는 이유.** `q=0` 은 RFC 9110 에서 "이 언어는 받지 않겠다"는 뜻이므로
+ * 선호로 셀 수 없다. 그런데 그것을 단순히 건너뛰기만 하면 *거부했다는 사실 자체가 사라져서*, 한국어를
+ * 명시적으로 거부한 방문자가 한국 IP 라는 이유로 한국어를 받게 된다(PR #113 리뷰 지적). 명시적 거부는
+ * IP 추측보다 강한 신호이므로 호출자가 그 정보를 볼 수 있어야 한다.
+ *
+ * 거부는 **언어 단위가 아니라 "양의 가중치가 전혀 없을 때"** 로 판정한다 — `ko;q=0,ko-KR;q=0.9` 는
+ * 더 구체적인 태그를 선호한다는 정상 헤더이고, 이걸 거부로 뭉개면 한국어 사용자가 영어를 받는다.
  */
-function matchAcceptLanguage(acceptLanguage: string | null | undefined): Locale | null {
-  if (!acceptLanguage) return null;
+function matchAcceptLanguage(acceptLanguage: string | null | undefined): AcceptLanguageMatch {
+  const none: AcceptLanguageMatch = { preferred: null, rejected: [] };
+  if (!acceptLanguage) return none;
   let ko = -1;
   let en = -1;
+  let koRefused = false;
+  let enRefused = false;
   for (const part of acceptLanguage.split(",")) {
     const [rawTag, ...params] = part.trim().split(";");
     const tag = rawTag.trim().toLowerCase();
     if (!tag) continue;
+    const locale: Locale | null =
+      tag === "ko" || tag.startsWith("ko-") ? "ko" : tag === "en" || tag.startsWith("en-") ? "en" : null;
+    if (!locale) continue;
     const qParam = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
     const q = qParam ? Number.parseFloat(qParam.slice(2)) : 1;
     const weight = Number.isFinite(q) ? q : 1;
-    // q=0 은 "이 언어는 받지 않겠다"는 뜻이므로 신호로 세지 않는다(있는 것으로 세면 `ko;q=0` 이
-    // 한국어 선호로 뒤집힌다).
-    if (weight <= 0) continue;
-    if (tag === "ko" || tag.startsWith("ko-")) ko = Math.max(ko, weight);
-    else if (tag === "en" || tag.startsWith("en-")) en = Math.max(en, weight);
+    if (weight <= 0) {
+      if (locale === "ko") koRefused = true;
+      else enRefused = true;
+      continue;
+    }
+    if (locale === "ko") ko = Math.max(ko, weight);
+    else en = Math.max(en, weight);
   }
-  if (ko < 0 && en < 0) return null;
-  return ko > en ? "ko" : "en";
+  // 양의 가중치가 하나라도 있으면 그걸로 정하고 끝난다 — 이 경우 거부 목록은 조회되지 않으므로
+  // 계산하지 않는다(같은 언어에 양의 가중치가 있으면 애초에 거부가 아니다).
+  if (ko >= 0 || en >= 0) return { preferred: ko > en ? "ko" : "en", rejected: [] };
+
+  const rejected: Locale[] = [];
+  if (koRefused) rejected.push("ko");
+  if (enRefused) rejected.push("en");
+  return { preferred: null, rejected };
 }
 
 /**
@@ -81,7 +115,7 @@ function matchAcceptLanguage(acceptLanguage: string | null | undefined): Locale 
  * 승격 전 `pickLoginLocale()` 과 계약이 동일하다 — 기존 8케이스 단위테스트가 그대로 이 함수를 검증한다.
  */
 export function pickLocaleFromAcceptLanguage(acceptLanguage: string | null | undefined): Locale {
-  return matchAcceptLanguage(acceptLanguage) ?? DEFAULT_LOCALE;
+  return matchAcceptLanguage(acceptLanguage).preferred ?? DEFAULT_LOCALE;
 }
 
 /**
@@ -133,11 +167,18 @@ export function resolveLocale(signals: LocaleSignals): { locale: Locale; source:
   // 방식이므로 여기서 즉시 끝낸다.
   if (isLocale(cookie)) return { locale: cookie, source: "cookie" };
 
-  const fromHeader = matchAcceptLanguage(acceptLanguage);
-  if (fromHeader) return { locale: fromHeader, source: "accept-language" };
+  const { preferred, rejected } = matchAcceptLanguage(acceptLanguage);
+  if (preferred) return { locale: preferred, source: "accept-language" };
 
+  // 국가는 **추론** 신호이므로 브라우저의 **명시적 거부**(q=0)를 이기지 못한다. 이 조건이 없으면
+  // `ko;q=0` 을 보낸 방문자가 한국 IP 라는 이유로 한국어를 받는다.
+  //
+  // 두 언어를 모두 거부했다면(`ko;q=0,en;q=0`) 줄 수 있는 언어가 없으므로 기본값으로 간다 —
+  // RFC 9110 도 수용 가능한 표현이 없을 때 서버가 하나를 골라 보내는 것을 허용한다.
   const fromCountry = pickLocaleFromCountry(country);
-  if (fromCountry) return { locale: fromCountry, source: "country" };
+  if (fromCountry && !rejected.includes(fromCountry)) {
+    return { locale: fromCountry, source: "country" };
+  }
 
   return { locale: DEFAULT_LOCALE, source: "default" };
 }
