@@ -14,7 +14,8 @@ Oracle Cloud Always Free A1(arm64) 단일 호스트 + Docker Compose 배포 절�
 
 관련 파일:
 
-- [`.github/workflows/release.yml`](../../.github/workflows/release.yml) — app·dashboard arm64 이미지를 GHCR에 발행
+- [`.github/workflows/release.yml`](../../.github/workflows/release.yml) — app·dashboard 이미지를 GHCR에 멀티아치 발행
+- [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) — 발행 성공 후 서버에 SSH로 붙어 `bootstrap.sh` 호출(§7-1)
 - [`compose.prod.yaml`](../../compose.prod.yaml) — 프로덕션 오버레이(발행 이미지·메모리 상한·80/443·db 비공개)
 - [`Caddyfile.prod`](../../Caddyfile.prod) — 도메인 + 자동 HTTPS + XFF 덮어쓰기
 - [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) — 빈 호스트 → 스택 기동 (멱등, 재실행이 곧 재배포)
@@ -257,14 +258,82 @@ header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
 
 ## 7. 재배포 · 롤백
 
+`main` 에 머지하면 **자동으로 배포된다**(아래 §7-1). 아래 수동 절차는 자동 배포가 꺼져 있거나
+서버에서 직접 손볼 때 쓴다.
+
 ```bash
-# 재배포 (main 머지 후 release.yml이 latest 를 갱신한 뒤)
+# 수동 재배포 (main 머지 후 release.yml이 latest 를 갱신한 뒤)
 ./scripts/bootstrap.sh
 
 # 롤백 — release.yml이 커밋마다 sha-<커밋> 태그를 남긴다
 echo 'APP_IMAGE_TAG=sha-<커밋>' >> .env
 ./scripts/bootstrap.sh
 ```
+
+### 7-1. 자동 배포 (GitHub Actions → SSH → bootstrap.sh)
+
+`main` 머지 → `Release Images` 가 GHCR 에 이미지 발행 → **`Deploy to production` 이 서버에 SSH 로 붙어
+`bootstrap.sh` 를 호출**한다. 발행 성공을 기다리는 `workflow_run` 트리거라, 아직 없는 이미지를 pull 하려는
+경쟁이 생기지 않는다.
+
+배포가 하는 일은 두 가지다:
+
+1. **서버 체크아웃을 그 커밋으로 맞춘다** (`git fetch` + `git reset --hard <sha>`). 이미지 pull 만으로는
+   부족하다 — `compose*.yaml`·`monitoring/*`(알림 룰)·`Caddyfile.prod` 는 이미지 안이 아니라 **서버
+   체크아웃에서 bind-mount** 되므로, 이미지만 갱신하면 알림 룰이나 리버스 프록시 변경이 반영되지 않는다.
+   `reset --hard` 는 서버의 로컬 수정을 버린다(배포 대상은 항상 레포의 그 커밋이다). `.env` 는 gitignore
+   대상이라 지워지지 않는다.
+2. **이미지 태그를 그 커밋으로 고정한다** — 서버 `.env` 의 `APP_IMAGE_TAG`·`DASHBOARD_IMAGE_TAG` 를
+   `sha-<7자리>` 로 갱신한 뒤(있으면 교체, 없으면 추가) `bootstrap.sh` 를 부른다. `latest` 를 쓰면 배포가
+   도는 사이 다음 머지로 태그가 옮겨가 "체크아웃 커밋 ≠ 실행 이미지" 조합이 될 수 있다.
+
+   두 가지가 이 방식의 이유다:
+
+   - **7자리다.** `release.yml` 의 merge 잡이 매니페스트 리스트를 `sha-${SHA:0:7}` 로 발행한다. 40자리
+     `sha-<full>-<arch>` 는 아치별 단일 이미지 태그이고 compose 가 쓸 대상이 아니다 — 40자리를 요청하면
+     존재하지 않는 매니페스트를 pull 하려다 실패한다. 배포 워크플로는 SSH 전에 그 태그가 GHCR 에 실제로
+     발행됐는지 먼저 확인한다.
+   - **환경변수가 아니라 `.env` 다.** `bootstrap.sh` 는 도커 그룹이 이번 세션에 아직 반영되지 않았으면
+     `sudo docker compose` 로 실행하는데, sudo 는 기본 `env_reset` 이라 export 한 변수를 버린다. 그러면
+     compose 가 `${APP_IMAGE_TAG:-latest}` 의 기본값으로 떨어져 **"체크아웃은 대상 커밋인데 이미지는
+     latest"** 인 조합이 조용히 만들어진다. compose 는 프로젝트 디렉터리의 `.env` 를 sudo 와 무관하게 직접
+     읽으므로 그쪽이 안전하고, 아래 §7 수동 롤백과도 같은 메커니즘이다. 부수 효과로 나중에 서버에서
+     `bootstrap.sh` 를 수동 재실행해도 같은 이미지가 뜬다.
+
+오버레이(TLS·6GB)는 **CI 가 결정하지 않는다.** 모드는 호스트의 성질이므로 서버 `.env` 의
+`DEPLOY_OVERLAYS` 가 정하고, 빠지면 `bootstrap.sh` 의 다운그레이드 가드가 막는다.
+
+#### 필요한 시크릿 · 변수
+
+시크릿이 하나라도 없으면 배포 잡은 **실패가 아니라 건너뜀**으로 끝난다(이 레포의 "설정 없으면 no-op"
+관례와 같다). 설정 전까지 머지마다 빨간 X 가 뜨지 않는다.
+
+| 종류 | 이름 | 값 |
+|---|---|---|
+| Secret | `DEPLOY_SSH_KEY` | 배포용 SSH **개인키**(전문). 배포 전용 키를 새로 만들고 서버의 `~/.ssh/authorized_keys` 에 공개키를 넣는다 |
+| Secret | `DEPLOY_HOST` | 서버 호스트명 또는 공인 IP |
+| Secret | `DEPLOY_USER` | SSH 사용자 |
+| Secret | `DEPLOY_SSH_KNOWN_HOSTS` | `ssh-keyscan -H <호스트>` 출력. **필수다** — 없으면 배포를 건너뛴다 |
+| Variable | `DEPLOY_PATH` | 서버의 레포 경로. 기본 `~/reputation-pool-cloud` |
+| Variable | `DEPLOY_HEALTH_URL` | 배포 후 확인할 공개 URL(예: `https://<도메인>/actuator/health`). 비우면 이 확인을 건너뛴다 |
+
+`known_hosts` 를 필수로 둔 이유: `StrictHostKeyChecking=no` 로 넘기면 중간자가 끼어들어도 배포 명령을
+그대로 넘겨준다 — 배포 키를 쥔 세션이라 대가가 크다.
+
+```bash
+# known_hosts 값 만들기 (로컬에서)
+ssh-keyscan -H <호스트>
+```
+
+#### 승인 게이트를 넣고 싶으면
+
+배포 잡은 GitHub Environment `production` 을 쓴다. **설정 → Environments → production** 에
+required reviewers 를 걸면 워크플로 파일을 고치지 않고도 배포 전 승인을 요구할 수 있다.
+
+#### 자동 배포로 롤백하기
+
+`Actions → Deploy to production → Run workflow` 에서 `sha` 에 되돌릴 커밋을 넣는다. 그 커밋의 코드와
+그 커밋의 이미지(`sha-<커밋>`)가 함께 적용되므로, 서버에 들어가 `.env` 를 고치지 않아도 된다.
 
 > `docker compose down -v`를 프로덕션에서 쓰지 않는다. `caddy-data` 볼륨의 인증서가 사라져 재발급이 일어나고
 > Let's Encrypt 레이트리밋을 소모한다. DB 볼륨도 함께 지워진다.
@@ -359,7 +428,8 @@ Always Free 인스턴스는 7일간 CPU 95백분위 < 20%, 네트워크 < 20%, �
 - 시크릿 스토어 (#6) — 현재는 서버의 `.env` 파일
 - 복원 리허설을 **실 서버에서** 한 번 통과시키기 (`RestoreRehearsalIT`는 CI에서 경로만 검증한다)
 - 데모 전용 읽기 계정 + 시드 데이터 주기 리셋 (공개 회원가입은 열지 않는다)
-- 자동 배포(CI → 서버)
+- 자동 배포의 **첫 실 배포 확인** — 워크플로는 들어갔지만(§7-1) 시크릿 4개를 넣고 한 번 돌려봐야
+  SSH·경로·권한이 실제로 맞는지 알 수 있다. 그때까지 배포 잡은 "건너뜀"으로 끝난다.
 - **스테이징/프로덕션 분리는 `container_name` 이 먼저 걸린다.** `compose.yaml` 이 서비스마다 고정
   `container_name`(`reputation-pool-db` 등)을 지정하므로, compose 프로젝트를 분리(`-p`)해도 같은 호스트에서
   두 스택을 동시에 띄울 수 없다(`Conflict. The container name ... is already in use`). 분리를 실제로 하려면
