@@ -54,8 +54,10 @@ test("리소스를 수동 차단하면 상세에 BLOCKLISTED 상태와 차단 �
   });
 
   await page.goto(`/resources/proxy/${res}`);
-  // 차단 배지("차단") + 영구 차단 표기 + 해제 버튼.
-  await expect(page.getByText("영구 차단")).toBeVisible();
+  // 영구 차단 표기 + 해제 버튼. "영구 차단" 은 헤더 배지 옆과 "격리 상태" 타일 **두 곳에 의도적으로**
+  // 표시되므로(제품 동작) 텍스트만으로 찾으면 strict mode 위반이 된다 — 타일로 좁혀 단정한다.
+  // 같은 이유로 StatusBadge("Blocked") 도 헤더와 타일에 각각 있어 텍스트 단독 조회는 쓰지 않는다.
+  await expect(page.getByTitle("수동 차단 여부 / 최악 상태").getByText("영구 차단")).toBeVisible();
   await expect(page.getByRole("button", { name: "차단 해제" })).toBeVisible();
 
   // 정리: 셀 없는 리소스는 해제 시 스냅샷에서 사라지므로 UI 대신 API로 해제(unblock 계약은 ControlPlaneIT가 검증).
