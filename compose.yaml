@@ -115,9 +115,20 @@ services:
         condition: service_healthy
       alertmanager:
         condition: service_started
+    # command 를 주면 이미지 기본 인자가 전부 대체되므로 설정 경로도 함께 적어야 한다.
+    #
+    # 보존 기간(#79): 기본값은 15일이다. 알림만 보면 그걸로 충분하지만(가장 긴 창이 3일),
+    # "이번 달 에러버짓이 얼마 남았나" 는 30일치가 있어야 계산된다 — SLO 창이 30일이라서다.
+    # 그래서 31일 + 하루 여유 = 32일. 늘어나는 건 주로 디스크이고(메모리에 상주하는 head 블록은
+    # 약 2시간분), 실제 크기는 시계열 수에 비례한다: `/api/v1/status/tsdb` 로 확인할 수 있다.
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=32d
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./monitoring/slo-rules.yml:/etc/prometheus/slo-rules.yml:ro
       - reputation-pool-prometheus-data:/prometheus
     restart: unless-stopped
 

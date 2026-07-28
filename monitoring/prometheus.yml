@@ -9,7 +9,12 @@ global:
   evaluation_interval: 15s
 
 rule_files:
+  # 순서는 중요하지 않다(Prometheus 는 recording rule 을 그룹 단위로 평가하고, 알림은 그 결과를 다음
+  # 평가 주기에 읽는다). 다만 파일을 추가하면 compose 의 prometheus 볼륨 마운트와 CI 의
+  # `promtool check rules` 인자에도 같이 넣어야 한다 — 글롭이 아니라 명시 목록이므로 빠뜨리면
+  # 컨테이너가 파일을 못 찾고 기동에 실패한다.
   - /etc/prometheus/alerts.yml
+  - /etc/prometheus/slo-rules.yml
 
 alerting:
   alertmanagers:

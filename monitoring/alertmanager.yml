@@ -25,6 +25,23 @@
 # (docker-config-secrets: `environment:` 소스는 Compose Spec 의 최신 기능이며 docker compose v2.24+
 # 에서 지원된다. 커스텀 entrypoint/envsubst 방식은 검토했으나 이 방식이 더 단순해 채택했다 — 이유는
 # PR 본문 참고.)
+# 같은 SLO 의 critical 이 떠 있으면 그 SLO 의 warning 은 통지하지 않는다 (#79).
+#
+# 멀티 burn-rate 는 티어가 의도적으로 겹친다 — 에러율 5% 는 가용성 목표 99.5% 에서 10배 소진이라
+# Medium(6배)·Slow(3배)·Chronic(1배) 세 티어의 임계를 동시에 넘는다. alertname 이 다르므로
+# group_by 로는 묶이지 않고 통지가 세 번 나간다. 가장 급한 것 하나만 남기는 게 맞다.
+#
+# 양쪽에 `slo =~ ".+"` 를 요구하는 것이 핵심이다. equal 은 라벨이 **양쪽 모두 없을 때도 같다고** 보므로,
+# 이 조건이 없으면 slo 라벨이 없는 critical(TargetDown)이 slo 라벨 없는 warning 전부(도메인 급증·체크포인트·
+# 워치독)를 억제해 버린다. 앱이 죽었을 때 노이즈가 줄긴 하지만 의도한 규칙이 아니고, 무엇이 왜 조용한지
+# 설명할 수 없게 된다.
+#
+# 같은 등급끼리는 억제하지 않는다(Fast 와 Medium 은 둘 다 critical 이고 서로 다른 사실이다).
+inhibit_rules:
+  - source_matchers: ['severity = critical', 'slo =~ ".+"']
+    target_matchers: ['severity = warning', 'slo =~ ".+"']
+    equal: ['slo']
+
 route:
   group_by: ['alertname']
   group_wait: 30s

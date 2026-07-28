@@ -1,0 +1,190 @@
+# SLO 지표(SLI) recording rule (#79). 여기서 계산한 시계열을 alerts.yml 의 에러버짓 소진율 알림과
+# Grafana SLO 패널이 **함께** 소비한다 — 정의를 한 곳에만 두는 것이 이 파일의 존재 이유다. 알림과
+# 패널이 각자 같은 긴 질의를 복사해 들고 있으면 한쪽만 고쳐졌을 때 그래프와 알림이 조용히 갈린다.
+#
+# 목표 수치와 그 근거는 docs/engineering/slo.md 에 있다. 이 파일은 "나쁜 비율"만 계산하고 목표와
+# 비교하지 않는다 — 비교는 알림이 한다.
+#
+# ## 왜 "좋은 비율" 이 아니라 "나쁜 비율" 인가
+# 소진율은 나쁜 비율을 버짓으로 나눈 값이다. 좋은 비율로 기록하면 룰마다 `1 -` 가 붙고, 그 부호를 한 번
+# 잘못 쓰면 알림이 정확히 반대로 동작한다(정상일 때 울리고 장애일 때 조용해진다).
+#
+# ## bad_events_* 는 무엇인가
+# 알림의 "최소 사건 게이트"용 절대 건수다(비율이 아니다). 비율만 보면 요청 2건 중 1건 실패가 50% 로 잡혀
+# 알림이 울리는데, 그건 통계가 아니라 표본 부족이다. 게이트를 **총 트래픽 하한**으로 잡지 않은 이유는
+# alerts.yml 의 에러버짓 그룹 주석에 적었다(완전 장애에서 역설적으로 알림을 삼킨다).
+#
+# ## 창이 7개인 이유
+# 멀티 윈도우 멀티 burn-rate 는 티어마다 (긴 창, 짧은 창) 한 쌍을 쓴다. alerts.yml 의 네 티어가
+# (1h,5m) (6h,30m) (1d,2h) (3d,6h) 를 쓰므로 7개 창이 모두 필요하다.
+#
+# ## 가용성과 지연의 형태가 다른 이유 (중요 — 섣불리 통일하지 말 것)
+# * **가용성**은 분자가 별도 시계열(`statusCode=~"…"` 로 걸러낸 카운터)이다. Micrometer 는 태그 조합을
+#   **처음 발생할 때** 만들므로, 서버 오류가 한 번도 없으면 그 시계열이 **아예 존재하지 않는다.** PromQL
+#   에서 `빈 벡터 / 무엇` 은 빈 벡터라, 가장 건강한 상태에서 SLI 가 사라진다. 그래서 분자를
+#   `or vector(0)` 으로 접는다.
+# * **지연**은 분자를 뺄셈(`전체 − 500ms 이내`)으로 얻는다. 트래픽이 있으면 `_count` 와 `_bucket` 이
+#   함께 존재하므로 접을 필요가 없고, **접으면 오히려 위험하다**: `le="0.5"` 버킷이 사라진 경우가
+#   `전체 − 0 = 전체` 즉 "요청 전부가 느리다(100%)" 로 뒤집혀 오탐 페이지가 된다. 버킷 존재는
+#   PrometheusScrapeIT 가 고정한다(application.yml 의 distribution.slo 설정).
+#
+# 트래픽이 아예 없으면 두 형태 모두 빈 벡터가 되고 알림도 조용하다 — 요청이 없으면 위반도 없으니 맞다.
+# 앱 자체가 죽은 경우는 alerts.yml 의 TargetDown 이 잡는다(SLI 로는 원리적으로 볼 수 없다).
+#
+# ## absent() 워치독을 붙이지 않는 이유
+# #77·#80 은 임계값 게이지가 사라지는 것을 `absent()` 로 막았다. 그게 통한 이유는 그 게이지들이 부팅 시
+# **무조건** 등록되기 때문이다(SurgeThresholdMetrics). 여기 비율은 파생 시계열이라 그 보장이 없고,
+# 한가한 시간대에 정상적으로 사라진다 — 워치독을 붙이면 평상시에 울린다. 지표 이름이 바뀌는 회귀는
+# 알림이 아니라 PrometheusScrapeIT 가 막는다.
+#
+# 이 파일은 CI 에서 promtool check rules 로 문법 검증되고, alerts-test.yml 이 값과 발화를 단정한다.
+groups:
+  - name: reputation-pool-sli
+    rules:
+      # 데이터 플레인 gRPC 가용성 — 서버 귀책 상태코드 비율
+      - record: slo:grpc_availability:bad_ratio_rate5m
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[5m])) or vector(0))
+          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[5m]))
+      - record: slo:grpc_availability:bad_ratio_rate30m
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[30m])) or vector(0))
+          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[30m]))
+      - record: slo:grpc_availability:bad_ratio_rate1h
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[1h])) or vector(0))
+          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[1h]))
+      - record: slo:grpc_availability:bad_ratio_rate2h
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[2h])) or vector(0))
+          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[2h]))
+      - record: slo:grpc_availability:bad_ratio_rate6h
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[6h])) or vector(0))
+          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[6h]))
+      - record: slo:grpc_availability:bad_ratio_rate1d
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[1d])) or vector(0))
+          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[1d]))
+      - record: slo:grpc_availability:bad_ratio_rate3d
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[3d])) or vector(0))
+          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[3d]))
+      # 서버 귀책 응답 건수 — 극저트래픽에서 통계적으로 무의미한 표본에 알림이 울리는 것을 막는 게이트
+      - record: slo:grpc_availability:bad_events_1h
+        expr: >
+          sum(increase(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[1h])) or vector(0)
+      - record: slo:grpc_availability:bad_events_6h
+        expr: >
+          sum(increase(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[6h])) or vector(0)
+
+      # 데이터 플레인 gRPC 지연 — Acquire/Report 중 500ms 를 넘긴 비율
+      - record: slo:grpc_latency:bad_ratio_rate5m
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[5m])) - sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[5m])))
+          / sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[5m]))
+      - record: slo:grpc_latency:bad_ratio_rate30m
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[30m])) - sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[30m])))
+          / sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[30m]))
+      - record: slo:grpc_latency:bad_ratio_rate1h
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[1h])) - sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[1h])))
+          / sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[1h]))
+      - record: slo:grpc_latency:bad_ratio_rate2h
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[2h])) - sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[2h])))
+          / sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[2h]))
+      - record: slo:grpc_latency:bad_ratio_rate6h
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[6h])) - sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[6h])))
+          / sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[6h]))
+      - record: slo:grpc_latency:bad_ratio_rate1d
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[1d])) - sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[1d])))
+          / sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[1d]))
+      - record: slo:grpc_latency:bad_ratio_rate3d
+        expr: >
+          (sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[3d])) - sum(rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[3d])))
+          / sum(rate(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[3d]))
+      # 500ms 초과 건수 — 극저트래픽에서 통계적으로 무의미한 표본에 알림이 울리는 것을 막는 게이트
+      - record: slo:grpc_latency:bad_events_1h
+        expr: >
+          sum(increase(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[1h])) - sum(increase(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[1h]))
+      - record: slo:grpc_latency:bad_events_6h
+        expr: >
+          sum(increase(grpc_server_processing_duration_seconds_count{method=~"Acquire|Report"}[6h])) - sum(increase(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report",le="0.5"}[6h]))
+
+      # 컨트롤 플레인 HTTP 가용성 — 5xx 비율 (actuator 경로 제외)
+      - record: slo:http_availability:bad_ratio_rate5m
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[5m])) or vector(0))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[5m]))
+      - record: slo:http_availability:bad_ratio_rate30m
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[30m])) or vector(0))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[30m]))
+      - record: slo:http_availability:bad_ratio_rate1h
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[1h])) or vector(0))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1h]))
+      - record: slo:http_availability:bad_ratio_rate2h
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[2h])) or vector(0))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[2h]))
+      - record: slo:http_availability:bad_ratio_rate6h
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[6h])) or vector(0))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[6h]))
+      - record: slo:http_availability:bad_ratio_rate1d
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[1d])) or vector(0))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1d]))
+      - record: slo:http_availability:bad_ratio_rate3d
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[3d])) or vector(0))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[3d]))
+      # 5xx 건수 — 극저트래픽에서 통계적으로 무의미한 표본에 알림이 울리는 것을 막는 게이트
+      - record: slo:http_availability:bad_events_1h
+        expr: >
+          sum(increase(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[1h])) or vector(0)
+      - record: slo:http_availability:bad_events_6h
+        expr: >
+          sum(increase(http_server_requests_seconds_count{status=~"5..",uri!~"/actuator.*"}[6h])) or vector(0)
+
+      # 컨트롤 플레인 HTTP 지연 — 500ms 를 넘긴 비율 (actuator 경로 제외)
+      - record: slo:http_latency:bad_ratio_rate5m
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[5m])) - sum(rate(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[5m])))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[5m]))
+      - record: slo:http_latency:bad_ratio_rate30m
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[30m])) - sum(rate(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[30m])))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[30m]))
+      - record: slo:http_latency:bad_ratio_rate1h
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1h])) - sum(rate(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[1h])))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1h]))
+      - record: slo:http_latency:bad_ratio_rate2h
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[2h])) - sum(rate(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[2h])))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[2h]))
+      - record: slo:http_latency:bad_ratio_rate6h
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[6h])) - sum(rate(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[6h])))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[6h]))
+      - record: slo:http_latency:bad_ratio_rate1d
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1d])) - sum(rate(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[1d])))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1d]))
+      - record: slo:http_latency:bad_ratio_rate3d
+        expr: >
+          (sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[3d])) - sum(rate(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[3d])))
+          / sum(rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[3d]))
+      # 500ms 초과 건수 — 극저트래픽에서 통계적으로 무의미한 표본에 알림이 울리는 것을 막는 게이트
+      - record: slo:http_latency:bad_events_1h
+        expr: >
+          sum(increase(http_server_requests_seconds_count{uri!~"/actuator.*"}[1h])) - sum(increase(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[1h]))
+      - record: slo:http_latency:bad_events_6h
+        expr: >
+          sum(increase(http_server_requests_seconds_count{uri!~"/actuator.*"}[6h])) - sum(increase(http_server_requests_seconds_bucket{uri!~"/actuator.*",le="0.5"}[6h]))
