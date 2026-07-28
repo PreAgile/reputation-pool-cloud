@@ -7,10 +7,11 @@
 
 | 서비스 | 역할 | 노출 |
 |--------|------|------|
-| `prometheus` | `app:8083/actuator/prometheus` 를 15초마다 스크레이프, 시계열 저장, `alerts.yml` 규칙 평가 | 호스트 미노출(compose 내부 전용) |
+| `prometheus` | `app:8083/actuator/prometheus` 를 15초마다 스크레이프, 시계열 저장, `slo-rules.yml`(SLI) + `alerts.yml`(알림) 평가. 보존 32일(#79 — 30일 버짓 계산에 필요, 기본값은 15일) | 호스트 미노출(compose 내부 전용) |
 | `alertmanager` | firing 알림을 받아 grouping/dedup/silence/정비창 처리 후 receiver 로 통지(#76) | 호스트 미노출(compose 내부 전용) |
 | `grafana` | Prometheus 데이터소스 + 프로비저닝된 대시보드 | `127.0.0.1:3001` (loopback, 로컬 확인용) |
 
+- SLO 목표와 에러버짓: **[`docs/engineering/slo.md`](../docs/engineering/slo.md)**
 - 대시보드: `http://localhost:3001` (기본 admin/admin — 프로덕션은 `GRAFANA_ADMIN_PASSWORD` 주입)
 - 대시보드 JSON·데이터소스·스크레이프·알림은 전부 `monitoring/` 아래에 코드로 프로비저닝된다.
 
@@ -34,12 +35,34 @@
 - `reputation_alert_*_surge_threshold` — 급증 알림 임계값 자체(#77, 아래 참고)
 - `reputation_pool_checkpoint_*` — 체크포인트 신선도·주기·실패(#80, 아래 참고)
 - `reputation_pool_restore_failures_total` — 기동 시 풀 복원 실패(#80)
+- `slo:*:bad_ratio_rate*` · `slo:*:bad_events_*` — SLI 파생 시계열(#79, `slo-rules.yml` 이 계산)
 
-## 알림(SLO)
+## 알림
 
-`monitoring/alerts.yml` 에 SLO 규칙을 정의한다(가용성·지연·DB풀·차단 급증 등). Prometheus 가 룰을 평가하고
-(Prometheus UI 의 Alerts/ALERTS 시계열로도 확인 가능), firing 알림은 `prometheus.yml` 의
-`alerting.alertmanagers` 배선을 통해 `alertmanager` 서비스로 넘어가 실제 통지 라우팅까지 이어진다(#76).
+룰은 세 갈래다(#79 이후). Prometheus 가 전부 평가하고(Prometheus UI 의 Alerts/ALERTS 시계열로도 확인 가능),
+firing 알림은 `prometheus.yml` 의 `alerting.alertmanagers` 배선을 통해 `alertmanager` 서비스로 넘어가 실제
+통지 라우팅까지 이어진다(#76).
+
+| 갈래 | 파일 · 그룹 | 성격 | 등급 |
+|---|---|---|---|
+| **에러버짓 소진율** | `alerts.yml` · `reputation-pool-error-budget` (지표는 `slo-rules.yml`) | 사용자가 겪는 **증상**을 SLO 목표에서 도출된 소진율로 평가 | `critical`(page) + `warning` |
+| **원인·포화 신호** | `alerts.yml` · `reputation-pool-signals` | 사용자가 겪기 *전에* 또는 *증상 없이* 나빠지는 것(DB풀·도메인 급증·체크포인트) | `warning` |
+| **워치독** | `alerts.yml` · `reputation-pool-liveness` + `*MetricMissing` | 알림 자체가 고장 났음을 알린다 | `critical`/`warning` |
+
+**page 를 울릴 자격이 있는 것은 첫 갈래뿐이다.** 원인 신호를 소진율로 승격하지 않는 이유는
+`alerts.yml` 상단 주석에 있다.
+
+### SLO 목표 수치
+
+**`docs/engineering/slo.md` 가 유일한 출처다.** 목표·버짓·티어 표·조정 절차·알려진 한계가 거기 있다.
+요약하면 데이터 플레인(gRPC) 가용성 99.5%·지연 99%@500ms, 컨트롤 플레인(HTTP) 둘 다 99% — 모두 30일 창.
+
+### 스크레이프 대상 생존 (#79)
+
+`TargetDown` 이 이 룰 집합의 전제다. #79 전까지 모든 룰이 "앱이 내보낸 지표"를 소비했으므로 **앱이 죽으면
+전부 조용해졌다.** `up` 은 Prometheus 가 스스로 만드는 시계열이라 앱과 무관하게 존재하고, 그래서
+`absent()` 워치독을 붙일 수 있는 유일한 지점이다(SLI 비율에는 붙일 수 없다 — 한가한 시간대에 정상적으로
+사라지므로 평상시에 울린다).
 
 ### 룰 검증 (CI 에서 자동)
 
@@ -47,13 +70,17 @@ CI 의 `deploy-config` 잡이 `promtool` 로 두 단계를 돌린다 — 로컬�
 
 ```bash
 docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prometheus:v3.1.0 \
-  check rules alerts.yml            # 문법
+  check rules alerts.yml slo-rules.yml   # 문법
 docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prometheus:v3.1.0 \
   test rules alerts-test.yml        # 의미: 시계열을 주입해 발화 여부·라벨·주석을 단정
 ```
 
 `alerts-test.yml` 이 있는 이유: 문법이 맞는데도 **조용히 발화하지 않는 룰**이 가장 위험하다(임계값 시계열
 이름이 바뀌었거나, 집계에서 라벨을 잃었거나). 룰을 고치면 이 테스트도 같이 고친다.
+
+> **룰 파일을 추가할 때는 세 곳을 함께 고쳐야 한다** — `prometheus.yml` 의 `rule_files`, `compose.yaml` 의
+> prometheus 볼륨 마운트, `ci.yml` 의 `check rules` 인자. 글롭이 아니라 명시 목록이라 하나만 빠뜨리면
+> 컨테이너가 기동에 실패하거나(마운트 누락) 검증을 빠져나간다(CI 인자 누락).
 
 ### 급증 임계값 조정 (운영자)
 
@@ -87,7 +114,7 @@ docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prom
 > 임계값을 **자동 산정**하는 것(#88 이상탐지 → #90 정책 자동 튜닝)은 v2 트랙이다. 데이터가 쌓이기 전에는
 > 계산할 근거가 없고(#88 자체가 "데이터 임계점 전에는 착수 보류"라고 적어 뒀다), *"울리면 임계를 올린다"*
 > 는 방식은 지속형 장애에서 정확히 침묵하게 되므로 채택하지 않는다. 임계값을 목표에서 **도출**하는
-> 정석 경로는 #79(SLO + 에러버짓 + multi-burn-rate)다.
+> 정석 경로는 #79(SLO + 에러버짓 + multi-burn-rate)이고 이제 구현돼 있다 — `docs/engineering/slo.md` 참고.
 >
 > `0` 이나 음수는 부팅 시 거부한다 — 룰을 끄려면 `alerts.yml` 에서 해당 룰을 지운다.
 >
@@ -188,7 +215,9 @@ Alertmanager 자체는 동작하며(라우팅·grouping·dedup 은 살아있음)
 
 - core observability 포트(0.4.0 릴리스 후) Micrometer 어댑터 → 리스 지연 Timer·이용률 Gauge·거절율 카운터 추가
 - Alertmanager severity 별 라우팅 분기(receiver 2개 이상일 때), Grafana 외부 노출·인증(#15)
-- SLO 확정 + 에러버짓·multi-burn-rate 로 단순 임계 룰 승격(#79) — 급증 임계값의 절대 수치도 여기서 재조정
+- 급증 임계값(`surge-thresholds`) 절대 수치 재조정 — **#79 에서 하지 않았다.** 위 "급증 임계값 조정" 절차가
+  1단계로 "평상시 값을 최소 1주 관측"을 요구하는데 프로덕션 트래픽이 없어 실행할 수 없다. SLO 목표는
+  선언으로 정할 수 있지만 급증 임계는 관측이 있어야 정해진다 — 실트래픽 1주 후 별도로 조정한다
 - 복원 실패 시 덮어쓰기 방지(#80 후속) — 지금은 관측만 한다. 저장 건너뛰기 vs 서빙 거부의 가용성 트레이드오프 결정 필요
 - 알림·메트릭 테넌트 귀속(#81) — 지금 도메인 카운터는 테넌트 전역 합산이라, 한 테넌트의 급증이 전체 알림을 울린다
 - 임계값 자동 산정: 시계열 이상탐지(#88) → 정책 자동 튜닝(#90, core advisor). 데이터 축적 후 v2 트랙

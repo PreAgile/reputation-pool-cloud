@@ -224,7 +224,7 @@ jobs:
       - name: Validate Prometheus alert rules
         run: |
           docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prometheus:v3.1.0 \
-            check rules alerts.yml
+            check rules alerts.yml slo-rules.yml
           docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prometheus:v3.1.0 \
             test rules alerts-test.yml
 

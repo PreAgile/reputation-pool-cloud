@@ -1,21 +1,44 @@
 {
   "uid": "reputation-pool-cloud",
   "title": "reputation-pool-cloud · 개요",
-  "tags": ["reputation-pool", "d7b"],
+  "tags": [
+    "reputation-pool",
+    "d7b"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
-  "templating": { "list": [] },
-  "annotations": { "list": [] },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
   "panels": [
     {
       "type": "timeseries",
       "title": "HTTP 요청율 (req/s)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -27,9 +50,23 @@
     {
       "type": "timeseries",
       "title": "HTTP 5xx 비율",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -41,9 +78,23 @@
     {
       "type": "timeseries",
       "title": "HTTP 지연 p99 / p50 (s)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -60,9 +111,23 @@
     {
       "type": "timeseries",
       "title": "JVM 힙 사용 (bytes)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -79,9 +144,23 @@
     {
       "type": "timeseries",
       "title": "DB 커넥션 풀 (HikariCP)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -103,9 +182,23 @@
     {
       "type": "timeseries",
       "title": "도메인 이벤트율 (reputation.*, /s)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -133,9 +226,23 @@
       "type": "timeseries",
       "title": "gRPC 지연 p99 (unary method 별, s) — 이슈 #78",
       "description": "SubscribeEvents 는 서버 스트리밍이라 처리시간이 곧 구독 수명(분 단위)이다 — 같은 축에 그리면 밀리초 단위인 실제 데이터플레인 RPC 들이 바닥에 눌려 안 보이므로 methodType 으로 제외한다.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -148,23 +255,64 @@
       "type": "timeseries",
       "title": "냉각 원인별 비율 (건/분) — 이슈 #77",
       "description": "ResourceCoolingSurge 가 발화하면 여기서 원인을 본다 — 알림은 합산값으로 울리므로(원인별로 쪼개면 여러 원인에 분산된 급증을 놓친다) 어느 원인이 올랐는지는 이 패널만 답할 수 있다. 원인은 진단을 가른다: BLOCKED 는 상대가 우리를 탐지했다는 뜻이고, TIMEOUT/CONNECTION_RESET 은 우리 경로 문제일 수 있다. 점선은 설정된 알림 임계값(surge-thresholds)이라 남은 여유가 바로 보인다 — 룰과 같이 max() 로 접어 인스턴스가 여러 개여도 선이 하나로 그려진다.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "epm", "min": 0 },
+        "defaults": {
+          "unit": "epm",
+          "min": 0
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "임계값 (전체 합산)" },
+            "matcher": {
+              "id": "byName",
+              "options": "임계값 (전체 합산)"
+            },
             "properties": [
-              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
-              { "id": "custom.lineWidth", "value": 2 }
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "임계값 (BLOCKED)" },
+            "matcher": {
+              "id": "byName",
+              "options": "임계값 (BLOCKED)"
+            },
             "properties": [
-              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [4, 6] } },
-              { "id": "custom.lineWidth", "value": 2 }
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    4,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
             ]
           }
         ]
@@ -196,16 +344,42 @@
       "type": "timeseries",
       "title": "체크포인트 신선도 (초) — 이슈 #80",
       "description": "메모리 상태가 DB 에 마지막으로 온전히 저장된 뒤 흐른 시간. 건강하면 0 과 주기(기본 30초) 사이를 톱니처럼 오간다 — 평평한 0 이 아니라 톱니가 정상이다. 저장이 실패하면 메모리로는 계속 정상 응답하므로 다른 지표는 전혀 움직이지 않고 이 선만 단조 증가한다. 점선은 알림 임계(주기 × 3)로, 룰과 같은 식이라 화면과 알림이 어긋나지 않는다.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
-        "defaults": { "unit": "s", "min": 0 },
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "알림 임계 (주기 × 3)" },
+            "matcher": {
+              "id": "byName",
+              "options": "알림 임계 (주기 × 3)"
+            },
             "properties": [
-              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
-              { "id": "custom.lineWidth", "value": 2 }
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
             ]
           }
         ]
@@ -227,9 +401,23 @@
       "type": "timeseries",
       "title": "체크포인트 · 복원 실패율 (건/분) — 이슈 #80",
       "description": "신선도가 '얼마나 낡았나'를 보여준다면 이 패널은 '얼마나 자주 실패하나'를 보여준다 — 만성 실패와 일시적 한 번을 구별하는 데 쓴다. 복원 실패는 특히 중요하다: 신선도로는 보이지 않으면서(읽기만 실패하고 저장은 성공한다) 복원 못 한 테넌트의 빈 풀이 정상 저장본을 덮어쓴다.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "epm", "min": 0 }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "epm",
+          "min": 0
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
@@ -240,6 +428,312 @@
           "refId": "B",
           "expr": "sum(rate(reputation_pool_restore_failures_total[5m])) * 60",
           "legendFormat": "기동 시 복원 실패"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "SLO · 에러버짓 (이슈 #79) — 정의는 docs/engineering/slo.md",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "남은 에러버짓 (30일 창, %)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": -100,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - (avg_over_time(slo:grpc_availability:bad_ratio_rate1h[30d]) / 0.005))",
+          "legendFormat": "데이터 플레인 가용성"
+        },
+        {
+          "refId": "B",
+          "expr": "100 * (1 - (avg_over_time(slo:grpc_latency:bad_ratio_rate1h[30d]) / 0.01))",
+          "legendFormat": "데이터 플레인 지연"
+        },
+        {
+          "refId": "C",
+          "expr": "100 * (1 - (avg_over_time(slo:http_availability:bad_ratio_rate1h[30d]) / 0.01))",
+          "legendFormat": "컨트롤 플레인 가용성"
+        },
+        {
+          "refId": "D",
+          "expr": "100 * (1 - (avg_over_time(slo:http_latency:bad_ratio_rate1h[30d]) / 0.01))",
+          "legendFormat": "컨트롤 플레인 지연"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "소진율 (버짓 대비 배수, 1h 창)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "slo:grpc_availability:bad_ratio_rate1h / 0.005",
+          "legendFormat": "데이터 플레인 가용성"
+        },
+        {
+          "refId": "B",
+          "expr": "slo:grpc_latency:bad_ratio_rate1h / 0.01",
+          "legendFormat": "데이터 플레인 지연"
+        },
+        {
+          "refId": "C",
+          "expr": "slo:http_availability:bad_ratio_rate1h / 0.01",
+          "legendFormat": "컨트롤 플레인 가용성"
+        },
+        {
+          "refId": "D",
+          "expr": "slo:http_latency:bad_ratio_rate1h / 0.01",
+          "legendFormat": "컨트롤 플레인 지연"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "데이터 플레인 가용성 — 창별 소진율 (page 임계 14.4배 / 6배)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "slo:grpc_availability:bad_ratio_rate5m / 0.005",
+          "legendFormat": "5m"
+        },
+        {
+          "refId": "B",
+          "expr": "slo:grpc_availability:bad_ratio_rate30m / 0.005",
+          "legendFormat": "30m"
+        },
+        {
+          "refId": "C",
+          "expr": "slo:grpc_availability:bad_ratio_rate1h / 0.005",
+          "legendFormat": "1h"
+        },
+        {
+          "refId": "D",
+          "expr": "slo:grpc_availability:bad_ratio_rate6h / 0.005",
+          "legendFormat": "6h"
+        },
+        {
+          "refId": "E",
+          "expr": "slo:grpc_availability:bad_ratio_rate1d / 0.005",
+          "legendFormat": "1d"
+        },
+        {
+          "refId": "F",
+          "expr": "slo:grpc_availability:bad_ratio_rate3d / 0.005",
+          "legendFormat": "3d"
+        },
+        {
+          "refId": "G",
+          "expr": "14.4",
+          "legendFormat": "Fast 임계 (14.4배)"
+        },
+        {
+          "refId": "H",
+          "expr": "6",
+          "legendFormat": "Medium 임계 (6배)"
+        },
+        {
+          "refId": "I",
+          "expr": "1",
+          "legendFormat": "정상 상한 (1배)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "데이터 플레인 지연 — 창별 소진율 (500ms 초과 비율 기준)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "slo:grpc_latency:bad_ratio_rate5m / 0.01",
+          "legendFormat": "5m"
+        },
+        {
+          "refId": "B",
+          "expr": "slo:grpc_latency:bad_ratio_rate30m / 0.01",
+          "legendFormat": "30m"
+        },
+        {
+          "refId": "C",
+          "expr": "slo:grpc_latency:bad_ratio_rate1h / 0.01",
+          "legendFormat": "1h"
+        },
+        {
+          "refId": "D",
+          "expr": "slo:grpc_latency:bad_ratio_rate6h / 0.01",
+          "legendFormat": "6h"
+        },
+        {
+          "refId": "E",
+          "expr": "slo:grpc_latency:bad_ratio_rate1d / 0.01",
+          "legendFormat": "1d"
+        },
+        {
+          "refId": "F",
+          "expr": "slo:grpc_latency:bad_ratio_rate3d / 0.01",
+          "legendFormat": "3d"
+        },
+        {
+          "refId": "G",
+          "expr": "14.4",
+          "legendFormat": "Fast 임계 (14.4배)"
+        },
+        {
+          "refId": "H",
+          "expr": "1",
+          "legendFormat": "정상 상한 (1배)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "최소 사건 게이트 (나쁜 사건 건수 — 5건 미만이면 알림이 억제된다)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "slo:grpc_availability:bad_events_1h",
+          "legendFormat": "데이터 플레인 가용성 · 1h"
+        },
+        {
+          "refId": "B",
+          "expr": "slo:grpc_latency:bad_events_1h",
+          "legendFormat": "데이터 플레인 지연 · 1h"
+        },
+        {
+          "refId": "C",
+          "expr": "slo:http_availability:bad_events_1h",
+          "legendFormat": "컨트롤 플레인 가용성 · 1h"
+        },
+        {
+          "refId": "D",
+          "expr": "slo:http_latency:bad_events_1h",
+          "legendFormat": "컨트롤 플레인 지연 · 1h"
+        },
+        {
+          "refId": "E",
+          "expr": "5",
+          "legendFormat": "게이트 임계 (5건)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "발화 중인 알림 (severity 별)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (alertname) (ALERTS{alertstate=\"firing\"})",
+          "legendFormat": "{{alertname}}"
         }
       ]
     }

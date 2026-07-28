@@ -59,6 +59,24 @@ management:
       percentiles-histogram:
         grpc.server.processing.duration: true
         http.server.requests: true
+      # Latency SLI boundary (issue #79). The burn-rate rules measure latency as a good/total ratio —
+      # "what share of requests finished within 500 ms" — which in PromQL reads a single cumulative bucket:
+      # `..._bucket{le="0.5"}`. That series only exists if 500 ms is an actual bucket boundary, and
+      # `percentiles-histogram` above does not produce one: with a Timer's default range (1 ms … 30 s) it
+      # generates 66 buckets whose nearest neighbours are 0.447392 s and 0.536871 s. Verified by running
+      # Micrometer 1.15.1's PercentileHistogramBuckets directly; adding this SLO boundary takes it to 67
+      # buckets including exactly 0.5.
+      #
+      # Without it the ratio's numerator is an empty vector, so the rule evaluates to nothing and the alert
+      # can never fire — the same silent failure that left HighRequestLatencyP99 inert before #78 (see the
+      # comment above). PrometheusScrapeIT pins the rendered `le="0.5"` label so a regression fails a test
+      # rather than quietly disabling an alert.
+      #
+      # One boundary per timer, not a spread: the only threshold any rule compares against is 500 ms, and
+      # each extra boundary is another series per tag combination on every scrape.
+      slo:
+        grpc.server.processing.duration: 500ms
+        http.server.requests: 500ms
 
 server:
   port: ${PORT:8083}

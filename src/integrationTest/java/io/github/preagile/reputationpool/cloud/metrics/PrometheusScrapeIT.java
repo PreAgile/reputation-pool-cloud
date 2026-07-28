@@ -14,6 +14,9 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Metadata;
 import io.grpc.stub.MetadataUtils;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.devh.boot.grpc.server.serverfactory.GrpcServerFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -125,9 +128,10 @@ class PrometheusScrapeIT {
         // net.devh's GrpcServerMetricAutoConfiguration is already active (MeterRegistry + Micrometer's
         // MetricCollectingServerInterceptor are both on the classpath), so every RPC is timed without any
         // cloud-side wiring — these calls just need to happen so the timer records at least one sample.
-        // All three unary RPCs the SLO rules select on (monitoring/alerts.yml: GrpcLatencyP99 filters
-        // method=~"Acquire|Report", GrpcHighErrorRate filters methodType!="SERVER_STREAMING") are exercised,
-        // so this test fails if a tag name or value the rules depend on ever changes.
+        // All three unary RPCs the SLI definitions select on (monitoring/slo-rules.yml: the latency SLI
+        // filters method=~"Acquire|Report", the availability SLI filters methodType!="SERVER_STREAMING")
+        // are exercised, so this test fails if a tag name or value those rules depend on ever changes.
+        // (#79 moved those selectors from alerts.yml into the recording rules; the tags are the same.)
         ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", grpcServerFactory.getPort())
                 .usePlaintext()
                 .build();
@@ -166,4 +170,73 @@ class PrometheusScrapeIT {
                 .contains("methodType=\"UNARY\"")
                 .contains("statusCode=\"OK\"");
     }
+
+    @Test
+    @DisplayName("스크레이프하면 → 지연 SLI 가 읽는 le=\"0.5\" 버킷이 두 타이머 모두에 노출된다" + " (issue #79, distribution.slo)")
+    void scrapeExposesTheExactHalfSecondBucketBothLatencySlisRead() {
+        // 지연 SLO 를 소진율로 재려면 "500ms 이내 비율" 이 필요하고, PromQL 로는 누적 버킷 하나를 읽는다:
+        // ..._bucket{le="0.5"}. 그 시계열은 500ms 가 **실제 버킷 경계일 때만** 존재한다.
+        //
+        // percentiles-histogram 만으로는 생기지 않는다: Timer 기본 범위(1ms~30s)에서 66개 버킷이 만들어지고
+        // 그 중 0.5s 는 없다(인접값 0.447392 / 0.536871). 그래서 application.yml 이 distribution.slo 로
+        // 경계를 하나 추가한다. 그것을 지우면 slo-rules.yml 의 지연 비율 분자가 빈 벡터가 되고
+        // GrpcLatencyBudgetBurn* / HttpLatencyBudgetBurn* 이 **조용히** 무동작한다 — #78 이전
+        // HighRequestLatencyP99 가 겪었던 것과 같은 실패 모드다. 그래서 렌더된 라벨 문자열까지 여기서 고정한다.
+        ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", grpcServerFactory.getPort())
+                .usePlaintext()
+                .build();
+        try {
+            Metadata md = new Metadata();
+            md.put(Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER), "integration-key");
+            ReputationAdvisorGrpc.newBlockingStub(channel)
+                    .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(md))
+                    .register(RegisterRequest.newBuilder()
+                            .setResource(ResourceId.newBuilder()
+                                    .setKind(ResourceKind.PROXY)
+                                    .setValue("slo-bucket-probe")
+                                    .build())
+                            .build());
+        } finally {
+            channel.shutdownNow();
+        }
+
+        String body = rest.getForEntity("/actuator/prometheus", String.class).getBody();
+
+        assertThat(bucketBoundaries(body, "grpc_server_processing_duration_seconds_bucket"))
+                .as("gRPC 타이머의 le 경계 목록")
+                .contains("0.5");
+        assertThat(bucketBoundaries(body, "http_server_requests_seconds_bucket"))
+                .as("HTTP 타이머의 le 경계 목록")
+                .contains("0.5");
+    }
+
+    @Test
+    @DisplayName("actuator 를 호출하면 → uri 라벨에 그 경로가 남는다" + " (issue #79, 컨트롤 플레인 SLI 가 actuator 를 걸러낼 수 있는 근거)")
+    void actuatorRequestsCarryTheirUriLabelSoTheSliCanExcludeThem() {
+        // 앱 헬스체크는 10초마다, Prometheus 스크레이프는 15초마다 actuator 를 때린다 — 합쳐 분당 약 10건의
+        // 인공 요청이고 전부 200 이다. 실사용 트래픽이 적을 때 이것이 분모의 거의 전부가 되면 실제 5xx 가
+        // 비율로 희석되어 컨트롤 플레인 SLI 가 실제보다 좋게 보인다.
+        //
+        // slo-rules.yml 은 `uri!~"/actuator.*"` 로 그것을 걸러내는데, 그 필터가 의미를 가지려면 actuator
+        // 요청에 uri 라벨이 실제로 붙어야 한다. 붙지 않으면 필터는 무해하지만 **아무 것도 걸러내지 못하므로**
+        // 오염이 남는다. 어느 쪽인지 추측하지 않고 여기서 확정한다.
+        rest.getForEntity("/actuator/health", String.class);
+
+        String body = rest.getForEntity("/actuator/prometheus", String.class).getBody();
+
+        assertThat(body).contains("uri=\"/actuator/health\"");
+    }
+
+    /** {@code name} 계열 히스토그램 라인들에서 {@code le} 라벨 값만 뽑아낸다. */
+    private static List<String> bucketBoundaries(String scrapeBody, String name) {
+        return scrapeBody
+                .lines()
+                .filter(line -> line.startsWith(name + "{"))
+                .map(LE_LABEL::matcher)
+                .filter(Matcher::find)
+                .map(m -> m.group(1))
+                .toList();
+    }
+
+    private static final Pattern LE_LABEL = Pattern.compile("le=\"([^\"]+)\"");
 }

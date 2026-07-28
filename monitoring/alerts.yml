@@ -1,7 +1,24 @@
-# SLO 기반 알림 규칙 (#14 / D7b). Prometheus 가 룰을 평가하고(ALERTS 시계열/그래프로도 확인 가능),
+# 알림 규칙 (#14 / D7b). Prometheus 가 룰을 평가하고(ALERTS 시계열/그래프로도 확인 가능),
 # firing 알림은 prometheus.yml 의 alerting.alertmanagers 를 통해 Alertmanager 로 넘어가 grouping·
 # dedup·silence 를 거쳐 통지된다(#76). 지표는 #68 로 이미 노출된 http_server_requests(가용성·지연)와
 # hikaricp(DB 풀), reputation.*(도메인), grpc_server_*(데이터플레인 #78)에서 뽑는다.
+#
+# ## 룰의 세 갈래 (#79 이후)
+#
+# 1. **에러버짓 소진율(SLO 알림)** — `reputation-pool-error-budget` 그룹. 사용자가 겪는 **증상**을 SLO
+#    목표에서 도출된 소진율로 평가한다. SLI 비율은 slo-rules.yml 이 미리 계산하고, 목표 수치와 그 근거는
+#    docs/engineering/slo.md 에 있다. **page 를 울릴 자격이 있는 것은 이 갈래뿐이다.**
+# 2. **원인·포화 신호** — `reputation-pool-signals` 그룹. DB 풀 대기, 도메인 급증, 체크포인트 신선도처럼
+#    사용자가 겪기 *전에* 또는 *증상 없이* 나빠지는 것들이다. 비율 SLI 로는 원리적으로 볼 수 없으므로
+#    소진율로 승격하지 않고 그대로 둔다(진단·티켓용, warning).
+# 3. **워치독** — 알림 자체가 고장 났음을 알리는 룰. 아래 TargetDown 과 임계값 게이지 absent() 들.
+#
+# #79 에서 삭제된 룰: HighServerErrorRate · HighRequestLatencyP99 · GrpcHighErrorRate · GrpcLatencyP99.
+# 네 룰 모두 사실은 소진율 알림이었는데 창 구조가 없었다 — 예를 들어 `histogram_quantile(0.99,…) > 0.5`
+# 는 "500ms 초과가 1% 보다 많다" 이고, 지연 목표 99% 에서 버짓이 정확히 1% 이므로 **소진율 1배 · 창 5분 ·
+# 확인 창 없음**이다(1배는 목표를 딱 맞춰 지키는 정상 상태다). 남겨 두고 소진율 룰을 더하면 같은 사건에
+# alertname 이 달라 Alertmanager 가 묶지 못하고 중복 통지되므로 함께 지웠다. 각 룰이 담고 있던 분자·분모
+# 선택 근거(스트리밍 배제, 클라이언트 귀책 배제 등)는 docs/engineering/slo.md 로 옮겼다.
 #
 # 임계값을 이 파일에 숫자로 박은 룰과, 앱이 게이지로 노출한 설정값을 읽는 룰이 섞여 있다. 후자(#77)는
 # Prometheus 가 룰 파일에서 환경변수를 치환하지 않기 때문에 그렇게 했다 — 자세한 근거는 해당 룰 주석과
@@ -10,30 +27,42 @@
 # 이 파일은 CI 에서 promtool 로 검증된다: `check rules`(문법) + `test rules monitoring/alerts-test.yml`
 # (시계열을 주입해 발화 여부를 단정하는 단위 테스트). 룰을 고치면 그 테스트도 같이 고친다.
 groups:
-  - name: reputation-pool-slo
+  # 스크레이프 대상 생존 (#79). **이 그룹이 다른 모든 룰의 전제다.**
+  #
+  # #79 전까지 이 레포의 룰 12개는 전부 "앱이 내보낸 지표"를 소비했다. 그래서 앱이 죽거나 스크레이프가
+  # 끊기면 모든 비교식이 빈 벡터가 되어 **전부 조용해졌다** — 가장 심각한 장애에서 알림이 하나도 없다.
+  # SLO 전환은 비율 위에 서는 룰을 늘리므로 이 사각지대를 더 키운다.
+  #
+  # up 은 Prometheus 가 스크레이프마다 **스스로** 만드는 시계열이라 앱 코드·트래픽과 무관하게 항상
+  # 존재한다. 그래서 absent() 워치독을 붙일 수 있는 유일한 지점이다(SLI 비율에는 붙일 수 없다 —
+  # slo-rules.yml 상단 주석 참고).
+  - name: reputation-pool-liveness
     rules:
-      # 가용성 SLO: 5xx 비율이 5% 를 5분 이상 초과.
-      - alert: HighServerErrorRate
-        expr: >
-          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
-          / sum(rate(http_server_requests_seconds_count[5m])) > 0.05
+      # for: 5m 인 이유 — compose 가 Prometheus 를 app 과 **함께** 띄우므로(depends_on: service_started,
+      # 그래야 최초 기동부터 unhealthy 인 경우에도 이 룰이 동작한다) 정상 부팅 중에도 up=0 구간이 있다.
+      # app 의 헬스체크가 정상으로 인정하는 최대 시간은 start_period 40s + interval 10s × retries 10 =
+      # 140초다. 5분은 그보다 넉넉히 위이므로 느린 부팅에 오탐하지 않고, 그러면서 "계속 죽어 있다"는
+      # 판단은 충분히 빠르다(스크레이프 자체는 15초 간격이라 신호는 즉시 쌓인다 — 기다리는 것은 알림뿐).
+      - alert: TargetDown
+        expr: up{job="reputation-pool-app"} == 0
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "HTTP 5xx 비율 5% 초과 (최근 5분)"
-          description: "control-plane/actuator 응답의 5xx 비율이 SLO(5%)를 넘었습니다."
+          summary: "앱 스크레이프 대상이 죽었다 — 모든 SLO 룰이 함께 침묵 중이다"
+          description: "지표가 오지 않으므로 에러버짓 알림은 발화할 수 없다. 컨테이너·헬스체크·네트워크를 먼저 본다."
 
-      # 지연 SLO: HTTP p99 가 500ms 를 5분 이상 초과.
-      - alert: HighRequestLatencyP99
-        expr: >
-          histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 0.5
-        for: 5m
+      # 타깃이 목록에서 사라진 경우(설정 실수·job 이름 변경). up 자체가 없으므로 위 룰로는 볼 수 없다.
+      - alert: TargetMissing
+        expr: absent(up{job="reputation-pool-app"})
+        for: 10m
         labels:
-          severity: warning
+          severity: critical
         annotations:
-          summary: "HTTP p99 지연 500ms 초과 (최근 5분)"
+          summary: "앱 스크레이프 타깃이 사라졌다 — prometheus.yml 의 job 설정을 확인한다"
 
+  - name: reputation-pool-signals
+    rules:
       # DB 풀 포화: 커넥션을 기다리는 스레드가 5분 이상 존재.
       - alert: DbConnectionPoolPending
         expr: hikaricp_connections_pending > 0
@@ -51,45 +80,6 @@ groups:
           severity: warning
         annotations:
           summary: "리소스 차단 급증 (분당 10건 초과, 최근 5분)"
-
-      # gRPC 데이터플레인 지연 SLO (#78): Acquire/Report(실제 서빙 경로) p99 가 500ms 를 5분 이상 초과.
-      # net.devh의 GrpcServerMetricAutoConfiguration 이 이미 모든 RPC를 grpc_server_processing_duration_seconds
-      # 로 계측하고 있고, application.yml 의 percentiles-histogram 설정으로 _bucket 시계열이 노출된다.
-      #
-      # method 를 유지한 채(`by (le, method)`) 메서드별로 따로 평가한다 — 두 RPC 의 지연 프로파일이 애초에
-      # 다르기 때문이다(Acquire 는 평판 스코어링, Report 는 셀 갱신). 버킷을 합산하면 트래픽이 많고 빠른
-      # Acquire 가 느린 Report 를 가려 알림이 조용히 무동작하게 된다. method 는 6개 RPC 로 유한하니
-      # 카디널리티 부담도 없다.
-      - alert: GrpcLatencyP99
-        expr: >
-          histogram_quantile(0.99, sum by (le, method) (rate(grpc_server_processing_duration_seconds_bucket{method=~"Acquire|Report"}[5m]))) > 0.5
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "gRPC {{ $labels.method }} p99 지연 500ms 초과 (최근 5분)"
-
-      # gRPC 에러율 SLO (#78): 서버 귀책 상태코드 비율이 5% 를 5분 이상 초과.
-      #
-      # `statusCode != "OK"` 를 그대로 쓰지 않는 이유 — 이 타이머는 6개 RPC 를 모두 계측하므로 서버가
-      # 정상인데도 non-OK 가 쌓이는 경로가 두 개 있다:
-      #   * SubscribeEvents 는 서버 스트리밍이라 클라이언트가 끊을 때마다 CANCELLED 로 종료된다. 정상
-      #     구독 종료가 영구적으로 에러율을 끌어올려 알림이 상시 firing 이 된다 → methodType 으로 배제.
-      #   * UNAUTHENTICATED/INVALID_ARGUMENT/RESOURCE_EXHAUSTED 는 클라이언트 귀책이거나 설계된 거절이다
-      #     (잘못된 API 키, 잘못된 요청, #84 전역 예산 거절). 서버는 정상 동작 중이므로 가용성 SLO 위반이
-      #     아니다 — 예산 소진은 별도 도메인 신호로 다룰 문제고 여기서 페이지를 울릴 사안이 아니다.
-      # 그래서 서버 귀책 코드만 분자로 센다. 또 메서드별로 쪼개지 않고 데이터플레인 전체 비율로 평가한다:
-      # critical 페이지라 트래픽이 적은 메서드(예: 하루 몇 건의 Report)에서 단 1건의 에러가 100% 로 잡혀
-      # 울리는 걸 막아야 한다. 메서드별 분해는 Grafana 대시보드가 담당한다.
-      - alert: GrpcHighErrorRate
-        expr: >
-          sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING",statusCode=~"UNKNOWN|INTERNAL|UNAVAILABLE|DATA_LOSS|DEADLINE_EXCEEDED"}[5m]))
-          / sum(rate(grpc_server_processing_duration_seconds_count{methodType!="SERVER_STREAMING"}[5m])) > 0.05
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "gRPC 서버 귀책 에러율 5% 초과 (최근 5분)"
 
       # 도메인 신호: 리소스 냉각 급증 (#77). COOLING 은 정상 사이클의 한 칸이므로(core ResourceState:
       # HEALTHY → COOLING → RECOVERING → HEALTHY) 개별 전이는 알리지 않는다 — 짧은 시간에 여러 자원이
@@ -147,11 +137,7 @@ groups:
           summary: "업스트림 차단 급증 (BLOCKED 원인 냉각이 분당 임계 초과, 최근 5분)"
           description: "상대가 우리를 차단하기 시작했을 가능성. 임계값은 surge-thresholds.blocking-per-minute."
 
-      # 워치독 (#77): 위 두 룰이 비교 대상으로 쓰는 임계값 게이지가 사라지면, 비교식이 빈 결과/NaN 이
-      # 되어 두 알림이 "조용히" 꺼진다 — 깨졌는데 조용한 것이 가장 위험한 실패 모드다. 앱이 부팅 시
-      # 무조건 등록하므로(SurgeThresholdMetrics) 이 알림이 켜지는 건 스크레이프가 끊겼거나 메트릭
-      # 이름이 바뀐 것이다. 급증 알림 자체보다 먼저 고쳐야 하므로 severity 를 같은 warning 으로 둔다.
-      # 체크포인트 신선도 SLO (#80): 저장본이 주기의 3배 넘게 낡은 상태로 5분 지속.
+      # 체크포인트 신선도 (#80): 저장본이 주기의 3배 넘게 낡은 상태로 5분 지속.
       #
       # 이 앱의 풀 상태는 메모리에 살고 30초마다 통째로 DB 에 저장된다. 저장이 실패해도 메모리로 계속
       # 정상 응답하므로 지연·에러율·도메인 지표가 전혀 움직이지 않는다 — 증상 없는 고장이고, 피해는
@@ -191,6 +177,14 @@ groups:
         annotations:
           summary: "기동 시 풀 복원 실패 — 해당 테넌트의 저장본이 빈 스냅샷으로 덮어써질 수 있다"
 
+      # 워치독 (#77): ResourceCoolingSurge·UpstreamBlockingSurge 가 비교 대상으로 쓰는 임계값 게이지가
+      # 사라지면, 비교식이 빈 결과/NaN 이 되어 두 알림이 "조용히" 꺼진다 — 깨졌는데 조용한 것이 가장
+      # 위험한 실패 모드다. 앱이 부팅 시 무조건 등록하므로(SurgeThresholdMetrics) 이 알림이 켜지는 건
+      # 스크레이프가 끊겼거나 메트릭 이름이 바뀐 것이다. 급증 알림 자체보다 먼저 고쳐야 하므로 severity
+      # 를 같은 warning 으로 둔다.
+      #
+      # (#79 에서 위치를 고쳤다: 이 주석 블록이 #80 룰 삽입으로 자기 룰에서 떨어져 CheckpointStale 의
+      # 설명처럼 읽히고 있었다.)
       - alert: SurgeThresholdMetricMissing
         expr: >
           absent(reputation_alert_cooling_surge_threshold)
@@ -212,3 +206,241 @@ groups:
           severity: warning
         annotations:
           summary: "체크포인트 주기 지표가 없다 — CheckpointStale 이 무동작 중일 수 있다"
+
+  # ── 에러버짓 소진율 (#79) ────────────────────────────────────────────────────────────────────────
+  #
+  # SLI 비율은 slo-rules.yml 이 계산하고, 여기서는 그것을 **버짓의 몇 배 속도인가**로 읽는다.
+  #   소진율 = 나쁜 비율 ÷ 버짓        (버짓 = 1 − 목표)
+  # 목표 99.5% 면 버짓이 0.005 이고, 나쁜 비율 7.2% 는 14.4배 → 30일 버짓을 약 2일에 태운다.
+  # 목표 수치·SLI 정의·대응 절차는 docs/engineering/slo.md 에 있다.
+  #
+  # ## 왜 창이 두 개인가
+  # * **긴 창**이 "충분히 오래 나빴다"를 보증한다 → 순간 튐에 페이지하지 않는다.
+  # * **짧은 창**이 "아직도 나쁘다"를 보증한다 → 이미 끝난 사고로 계속 울리지 않는다(긴 창은 사건이
+  #   지나간 뒤에도 한동안 높게 남는다).
+  #
+  # ## for: 가 없는 이유 (이 파일의 다른 룰과 정반대다 — 의도된 것이다)
+  # 지속성 보증은 긴 창이 이미 한다. 여기에 `for: 5m` 을 더하면 페이지가 5분 더 늦어질 뿐이고, 그만큼
+  # 버짓을 더 태운다.
+  #
+  # ## 최소 사건 게이트
+  # 비율만 보면 요청 2건 중 1건 실패가 50% 로 잡혀 즉시 critical 이 된다. 그건 통계가 아니라 표본 부족이다.
+  # 그래서 모든 티어가 "나쁜 사건이 5건 이상"을 함께 요구한다.
+  #
+  # 게이트를 **총 트래픽 하한**으로 잡지 않은 것이 중요하다: 완전 장애가 나면 클라이언트가 포기해 요청
+  # 자체가 멈추므로 총 트래픽이 0 으로 떨어지고, 그러면 하필 최악의 순간에 게이트가 페이지를 삼킨다.
+  # 나쁜 사건의 **절대 개수**로 잡으면 그 역설이 없다(진짜 장애는 나쁜 사건을 많이 만든다). 요청이 아예
+  # 오지 않는 경우는 TargetDown 과 도메인 신호가 맡는다.
+  #
+  # 게이트 창은 티어마다 다르다: page(1h·6h 티어)는 `bad_events_1h`, ticket(1d·3d 티어)은
+  # `bad_events_6h` 를 본다. ticket 티어가 잡으려는 것은 애초에 **조금씩 새는 만성 열화**라서 1시간
+  # 창으로는 5건이 안 쌓인다 — 트래픽 10/분에 에러율 0.6% 면 시간당 3.6건이라 잡아야 할 바로 그 경우가
+  # 게이트에 걸려 조용해진다. 6시간이면 같은 상황이 21건이 되어 통과하고, 총 두어 건뿐인 극저트래픽은
+  # 여전히 걸러진다. 만성 열화는 이 파일의 다른 룰이 원리적으로 볼 수 없는 유일한 종류이므로 조용해지는
+  # 쪽이 더 나쁘다.
+  #
+  # ## and 의 양변이 모두 비교식인 이유
+  # `slo:x:a and slo:x:b` 처럼 metric 을 그대로 쓰면 두 시계열의 라벨셋이 __name__ 때문에 달라 매칭이
+  # 실패하고 결과가 **빈 벡터**가 된다(=조용히 무동작). 비교(`> …`)는 결과에서 metric 이름을 떨어뜨리므로
+  # 양변이 라벨 없는 시계열이 되어 매칭된다. 그래서 세 조건 모두 비교식 형태를 유지해야 한다.
+  - name: reputation-pool-error-budget
+    rules:
+      # ── 데이터 플레인 가용성 (목표 99.5%/30일, 버짓 0.005)
+      - alert: GrpcAvailabilityBudgetBurnFast
+        expr: >
+          slo:grpc_availability:bad_ratio_rate1h > 14.4 * 0.005
+          and slo:grpc_availability:bad_ratio_rate5m > 14.4 * 0.005
+          and slo:grpc_availability:bad_events_1h >= 5
+        labels:
+          severity: critical
+          tier: fast
+          slo: grpc_availability
+        annotations:
+          summary: "[SLO] 데이터 플레인 가용성 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
+          description: "목표 99.5%/30일. 1h·5m 창이 모두 소진율 14.4배를 넘었다 (최근 1h 서버 귀책 응답 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: GrpcAvailabilityBudgetBurnMedium
+        expr: >
+          slo:grpc_availability:bad_ratio_rate6h > 6 * 0.005
+          and slo:grpc_availability:bad_ratio_rate30m > 6 * 0.005
+          and slo:grpc_availability:bad_events_1h >= 5
+        labels:
+          severity: critical
+          tier: medium
+          slo: grpc_availability
+        annotations:
+          summary: "[SLO] 데이터 플레인 가용성 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
+          description: "목표 99.5%/30일. 6h·30m 창이 모두 소진율 6배를 넘었다 (최근 1h 서버 귀책 응답 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: GrpcAvailabilityBudgetBurnSlow
+        expr: >
+          slo:grpc_availability:bad_ratio_rate1d > 3 * 0.005
+          and slo:grpc_availability:bad_ratio_rate2h > 3 * 0.005
+          and slo:grpc_availability:bad_events_6h >= 5
+        labels:
+          severity: warning
+          tier: slow
+          slo: grpc_availability
+        annotations:
+          summary: "[SLO] 데이터 플레인 가용성 에러버짓을 3배 속도로 소진 중 — 이 속도면 10일 뒤 소진"
+          description: "목표 99.5%/30일. 1d·2h 창이 모두 소진율 3배를 넘었다 (최근 6h 서버 귀책 응답 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: GrpcAvailabilityBudgetBurnChronic
+        expr: >
+          slo:grpc_availability:bad_ratio_rate3d > 1 * 0.005
+          and slo:grpc_availability:bad_ratio_rate6h > 1 * 0.005
+          and slo:grpc_availability:bad_events_6h >= 5
+        labels:
+          severity: warning
+          tier: chronic
+          slo: grpc_availability
+        annotations:
+          summary: "[SLO] 데이터 플레인 가용성 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
+          description: "목표 99.5%/30일. 3d·6h 창이 모두 소진율 1배를 넘었다 (최근 6h 서버 귀책 응답 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+
+      # ── 데이터 플레인 지연 (목표 99%/30일, 버짓 0.01)
+      - alert: GrpcLatencyBudgetBurnFast
+        expr: >
+          slo:grpc_latency:bad_ratio_rate1h > 14.4 * 0.01
+          and slo:grpc_latency:bad_ratio_rate5m > 14.4 * 0.01
+          and slo:grpc_latency:bad_events_1h >= 5
+        labels:
+          severity: critical
+          tier: fast
+          slo: grpc_latency
+        annotations:
+          summary: "[SLO] 데이터 플레인 지연 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
+          description: "목표 99%/30일. 1h·5m 창이 모두 소진율 14.4배를 넘었다 (최근 1h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: GrpcLatencyBudgetBurnMedium
+        expr: >
+          slo:grpc_latency:bad_ratio_rate6h > 6 * 0.01
+          and slo:grpc_latency:bad_ratio_rate30m > 6 * 0.01
+          and slo:grpc_latency:bad_events_1h >= 5
+        labels:
+          severity: critical
+          tier: medium
+          slo: grpc_latency
+        annotations:
+          summary: "[SLO] 데이터 플레인 지연 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
+          description: "목표 99%/30일. 6h·30m 창이 모두 소진율 6배를 넘었다 (최근 1h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: GrpcLatencyBudgetBurnSlow
+        expr: >
+          slo:grpc_latency:bad_ratio_rate1d > 3 * 0.01
+          and slo:grpc_latency:bad_ratio_rate2h > 3 * 0.01
+          and slo:grpc_latency:bad_events_6h >= 5
+        labels:
+          severity: warning
+          tier: slow
+          slo: grpc_latency
+        annotations:
+          summary: "[SLO] 데이터 플레인 지연 에러버짓을 3배 속도로 소진 중 — 이 속도면 10일 뒤 소진"
+          description: "목표 99%/30일. 1d·2h 창이 모두 소진율 3배를 넘었다 (최근 6h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: GrpcLatencyBudgetBurnChronic
+        expr: >
+          slo:grpc_latency:bad_ratio_rate3d > 1 * 0.01
+          and slo:grpc_latency:bad_ratio_rate6h > 1 * 0.01
+          and slo:grpc_latency:bad_events_6h >= 5
+        labels:
+          severity: warning
+          tier: chronic
+          slo: grpc_latency
+        annotations:
+          summary: "[SLO] 데이터 플레인 지연 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
+          description: "목표 99%/30일. 3d·6h 창이 모두 소진율 1배를 넘었다 (최근 6h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+
+      # ── 컨트롤 플레인 가용성 (목표 99%/30일, 버짓 0.01)
+      - alert: HttpAvailabilityBudgetBurnFast
+        expr: >
+          slo:http_availability:bad_ratio_rate1h > 14.4 * 0.01
+          and slo:http_availability:bad_ratio_rate5m > 14.4 * 0.01
+          and slo:http_availability:bad_events_1h >= 5
+        labels:
+          severity: critical
+          tier: fast
+          slo: http_availability
+        annotations:
+          summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
+          description: "목표 99%/30일. 1h·5m 창이 모두 소진율 14.4배를 넘었다 (최근 1h 5xx 응답 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: HttpAvailabilityBudgetBurnMedium
+        expr: >
+          slo:http_availability:bad_ratio_rate6h > 6 * 0.01
+          and slo:http_availability:bad_ratio_rate30m > 6 * 0.01
+          and slo:http_availability:bad_events_1h >= 5
+        labels:
+          severity: critical
+          tier: medium
+          slo: http_availability
+        annotations:
+          summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
+          description: "목표 99%/30일. 6h·30m 창이 모두 소진율 6배를 넘었다 (최근 1h 5xx 응답 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: HttpAvailabilityBudgetBurnSlow
+        expr: >
+          slo:http_availability:bad_ratio_rate1d > 3 * 0.01
+          and slo:http_availability:bad_ratio_rate2h > 3 * 0.01
+          and slo:http_availability:bad_events_6h >= 5
+        labels:
+          severity: warning
+          tier: slow
+          slo: http_availability
+        annotations:
+          summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 3배 속도로 소진 중 — 이 속도면 10일 뒤 소진"
+          description: "목표 99%/30일. 1d·2h 창이 모두 소진율 3배를 넘었다 (최근 6h 5xx 응답 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: HttpAvailabilityBudgetBurnChronic
+        expr: >
+          slo:http_availability:bad_ratio_rate3d > 1 * 0.01
+          and slo:http_availability:bad_ratio_rate6h > 1 * 0.01
+          and slo:http_availability:bad_events_6h >= 5
+        labels:
+          severity: warning
+          tier: chronic
+          slo: http_availability
+        annotations:
+          summary: "[SLO] 컨트롤 플레인 가용성 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
+          description: "목표 99%/30일. 3d·6h 창이 모두 소진율 1배를 넘었다 (최근 6h 5xx 응답 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+
+      # ── 컨트롤 플레인 지연 (목표 99%/30일, 버짓 0.01)
+      - alert: HttpLatencyBudgetBurnFast
+        expr: >
+          slo:http_latency:bad_ratio_rate1h > 14.4 * 0.01
+          and slo:http_latency:bad_ratio_rate5m > 14.4 * 0.01
+          and slo:http_latency:bad_events_1h >= 5
+        labels:
+          severity: critical
+          tier: fast
+          slo: http_latency
+        annotations:
+          summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 14.4배 속도로 소진 중 — 이 속도면 약 2일 뒤 소진"
+          description: "목표 99%/30일. 1h·5m 창이 모두 소진율 14.4배를 넘었다 (최근 1h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: HttpLatencyBudgetBurnMedium
+        expr: >
+          slo:http_latency:bad_ratio_rate6h > 6 * 0.01
+          and slo:http_latency:bad_ratio_rate30m > 6 * 0.01
+          and slo:http_latency:bad_events_1h >= 5
+        labels:
+          severity: critical
+          tier: medium
+          slo: http_latency
+        annotations:
+          summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 6배 속도로 소진 중 — 이 속도면 5일 뒤 소진"
+          description: "목표 99%/30일. 6h·30m 창이 모두 소진율 6배를 넘었다 (최근 1h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: HttpLatencyBudgetBurnSlow
+        expr: >
+          slo:http_latency:bad_ratio_rate1d > 3 * 0.01
+          and slo:http_latency:bad_ratio_rate2h > 3 * 0.01
+          and slo:http_latency:bad_events_6h >= 5
+        labels:
+          severity: warning
+          tier: slow
+          slo: http_latency
+        annotations:
+          summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 3배 속도로 소진 중 — 이 속도면 10일 뒤 소진"
+          description: "목표 99%/30일. 1d·2h 창이 모두 소진율 3배를 넘었다 (최근 6h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+      - alert: HttpLatencyBudgetBurnChronic
+        expr: >
+          slo:http_latency:bad_ratio_rate3d > 1 * 0.01
+          and slo:http_latency:bad_ratio_rate6h > 1 * 0.01
+          and slo:http_latency:bad_events_6h >= 5
+        labels:
+          severity: warning
+          tier: chronic
+          slo: http_latency
+        annotations:
+          summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
+          description: "목표 99%/30일. 3d·6h 창이 모두 소진율 1배를 넘었다 (최근 6h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
