@@ -68,6 +68,22 @@ jobs:
     name: Playwright e2e (compose stack)
     runs-on: ubuntu-latest
     continue-on-error: true
+    # compose 변수는 잡 레벨에 둔다. up 만이 아니라 logs·down 도 같은 파일을 해석하므로, 스텝 하나에만
+    # 두면 기동이 실패했을 때 로그 덤프와 정리까지 보간 오류로 같이 죽어 진단이 불가능해진다(실제로 그랬다).
+    env:
+      # e2e 로그인 스펙이 admin/admin1234 를 쓰므로 관리자 콘솔을 켠다. API 키는 compose 가 `:?` 로
+      # 필수 요구하고(미설정 시 즉시 실패), JWT 시크릿은 32바이트 이상이어야 한다.
+      REPUTATION_POOL_API_KEY: ci-local-dev-key
+      REPUTATION_POOL_ADMIN_USERNAME: admin
+      REPUTATION_POOL_ADMIN_PASSWORD: admin1234
+      REPUTATION_POOL_ADMIN_JWT_SECRET: ci0123456789abcdef0123456789abcdef
+      # Grafana(#14) 관리자 비번은 compose 필수값 — CI 스택 기동용 throwaway.
+      GRAFANA_ADMIN_PASSWORD: ci-local-dev-admin
+      # Alertmanager(#76) webhook. 값은 비어도 되지만 *정의*는 있어야 한다 — compose 의
+      # `secrets: <name>: environment:` 소스는 컨테이너 생성 시점에 변수를 요구하고, 미정의면
+      # "environment variable ... required by secret ... is not set" 으로 스택이 아예 뜨지 않는다.
+      # ci.yml 의 deploy-config 잡은 이미 이렇게 하고 있는데 이 잡이 빠져 있었다.
+      REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -86,17 +102,9 @@ jobs:
       - name: Install Playwright browser (chromium)
         run: corepack pnpm exec playwright install --with-deps chromium
 
-      # 전체 스택 기동. e2e 로그인 스펙이 admin/admin1234를 쓰므로 관리자 콘솔을 켠다.
-      # API 키는 compose가 필수로 요구(미설정 시 즉시 실패), JWT 시크릿은 32바이트 이상이어야 한다.
+      # 전체 스택 기동. 필요한 compose 변수는 잡 레벨 env 에 있다(위 주석 참고).
       - name: Start stack (docker compose)
         working-directory: .
-        env:
-          REPUTATION_POOL_API_KEY: ci-local-dev-key
-          REPUTATION_POOL_ADMIN_USERNAME: admin
-          REPUTATION_POOL_ADMIN_PASSWORD: admin1234
-          REPUTATION_POOL_ADMIN_JWT_SECRET: ci0123456789abcdef0123456789abcdef
-          # Grafana(#14) 관리자 비번은 compose 필수값 — CI 스택 기동용 throwaway.
-          GRAFANA_ADMIN_PASSWORD: ci-local-dev-admin
         run: docker compose up -d --build
 
       # Caddy 한 오리진(:8080)이 대시보드를 서빙할 때까지 대기(최대 ~2분).
