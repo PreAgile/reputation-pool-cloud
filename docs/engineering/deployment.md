@@ -302,16 +302,33 @@ echo 'APP_IMAGE_TAG=sha-<커밋>' >> .env
 
 `scripts/pull-deploy.sh` (systemd 타이머가 기본 5분마다 호출):
 
-1. `origin/main` 의 최신 커밋을 확인한다. 로컬 HEAD 와 같으면 **아무것도 하지 않는다**(대부분의 실행).
-2. 다르면 그 커밋의 이미지가 GHCR 에 실제로 발행됐는지 **먼저** 확인한다. 없으면 체크아웃을 건드리지 않고
-   끝내고 다음 주기에 다시 본다 — 릴리스 워크플로가 아직 도는 중일 수 있다. 이 확인이 없으면
-   `bootstrap.sh` 의 pull 이 실패하는데 그 메시지는 "GHCR 패키지가 public 인지 확인하라"로 나와 원인을
-   오도한다.
-3. **서버 체크아웃을 그 커밋으로 맞춘다** (`git reset --hard`). 이미지 pull 만으로는 부족하다 —
+1. `origin/main` 의 최신 커밋을 확인한다. **마지막으로 배포에 성공한 커밋**(`.pull-deploy-state`)과 같으면
+   아무것도 하지 않는다(대부분의 실행).
+
+   HEAD 로 비교하지 않는 이유: `git reset --hard` 가 `bootstrap.sh` 보다 먼저 일어나므로 그 사이에
+   프로세스가 죽으면(TimeoutStartSec 초과·OOM·재부팅) **HEAD 는 새 커밋인데 컨테이너는 옛 이미지**로 남는다.
+   HEAD 기준이면 그 상태가 "최신" 으로 보여 다음 주기가 아무것도 하지 않고, 스택은 영원히 뒤처진 채 로그는
+   "배포할 것이 없다" 라고 말한다. 표식은 **끝까지 성공한 뒤에만** 갱신하므로 그 창이 없다. 롤백하면 표식도
+   되돌려 다음 주기가 재시도한다. (`.gitignore` 대상 — 호스트마다 다르고, `git reset --hard` 는 untracked
+   파일을 지우지 않아 배포를 거쳐도 남는다.)
+2. **그 커밋의 CI 가 통과했는지** GitHub check-runs API 로 확인한다.
+
+   필요한 이유: `release.yml` 은 `push: branches: [main]` 로 돌고 **`ci.yml` 의 결과에 의존하지 않는다.**
+   게다가 이 레포의 `main` 에는 **브랜치 보호가 없다**(확인: `/branches/main/protection` → 404). 즉 테스트가
+   실패한 커밋도 이미지가 발행되고, 이미지 존재만 보면 그대로 프로덕션에 올라간다.
+
+   판정을 "필수 체크 이름 목록" 으로 하지 않는다 — 이름이 바뀌거나 추가되면 조건이 영원히 충족되지 않아
+   **배포가 조용히 멈춘다**(반대 방향의 같은 실패). 대신 *실패가 하나라도 있으면 중단 / 진행 중이 있으면
+   다음 주기 / 전부 끝났고 실패 없으면 배포*. public 레포라 토큰이 필요 없고, 새 커밋이 있을 때만 호출하므로
+   익명 한도(시간당 60회)와 무관하다. **API 에 닿지 못하면 배포하지 않는다**(fail closed).
+3. 그 커밋의 이미지가 GHCR 에 실제로 발행됐는지 확인한다. 없으면 체크아웃을 건드리지 않고 끝내고 다음 주기에
+   다시 본다. 이 확인이 없으면 `bootstrap.sh` 의 pull 이 실패하는데 그 메시지는 "GHCR 패키지가 public 인지
+   확인하라"로 나와 원인을 오도한다.
+4. **서버 체크아웃을 그 커밋으로 맞춘다** (`git reset --hard`). 이미지 pull 만으로는 부족하다 —
    `compose*.yaml`·`monitoring/*`(알림 룰)·`Caddyfile.prod` 는 이미지 안이 아니라 **서버 체크아웃에서
    bind-mount** 되므로, 이미지만 갱신하면 알림 룰이나 리버스 프록시 변경이 반영되지 않는다.
    서버의 로컬 수정은 버려진다. `.env` 는 gitignore 대상이라 남는다.
-4. **이미지 태그를 그 커밋으로 고정한다** — `.env` 의 `APP_IMAGE_TAG`·`DASHBOARD_IMAGE_TAG` 를
+5. **이미지 태그를 그 커밋으로 고정한다** — `.env` 의 `APP_IMAGE_TAG`·`DASHBOARD_IMAGE_TAG` 를
    `sha-<7자리>` 로 갱신한 뒤 `bootstrap.sh` 를 부른다.
 
    - **7자리다.** `release.yml` 의 merge 잡이 매니페스트 리스트를 `sha-${SHA:0:7}` 로 발행한다. 40자리
@@ -321,8 +338,12 @@ echo 'APP_IMAGE_TAG=sha-<커밋>' >> .env
      compose 가 `${APP_IMAGE_TAG:-latest}` 의 기본값으로 떨어져 **"체크아웃은 대상 커밋인데 이미지는
      latest"** 인 조합이 조용히 만들어진다. compose 는 프로젝트 디렉터리의 `.env` 를 sudo 와 무관하게 직접
      읽는다. 부수 효과로 나중에 `bootstrap.sh` 를 수동 재실행해도 같은 이미지가 뜬다.
-5. **헬스 확인이 실패하면 직전 커밋·태그로 되돌려 다시 올린다**(자동 롤백). Actions 화면이 없는 대신
-   "배포가 조용히 깨져 있음"을 이걸로 막는다.
+6. **공개 URL 들이 전부 200 인지 확인하고, 하나라도 실패하면 직전 커밋·태그로 되돌려 다시 올린다**
+   (자동 롤백). 성공하면 그때 표식을 갱신한다.
+
+   **URL 을 목록으로 받는 이유**: `app` 과 `dashboard` 는 별개 컨테이너다. `/actuator/health` 는 app 이
+   응답하므로, 대시보드 컨테이너가 뜨지 못해 Caddy 가 502 를 내고 있어도 그 확인은 통과하고 배포가 "성공"
+   으로 끝나며 롤백도 일어나지 않는다 — 사람이 화면을 열어볼 때까지 아무도 모른다. 두 경로를 모두 넣는다.
 
 오버레이(TLS·6GB)는 스크립트가 결정하지 않는다. 모드는 호스트의 성질이므로 `.env` 의 `DEPLOY_OVERLAYS` 가
 정하고, 빠지면 `bootstrap.sh` 의 다운그레이드 가드가 막는다.
@@ -338,7 +359,7 @@ cd ~/reputation-pool-cloud
 # 1. .env 에 키 추가 (ENABLED 가 true 가 아니면 스크립트는 아무것도 하지 않는다 — fail closed)
 cat >> .env <<'EOF'
 PULL_DEPLOY_ENABLED=true
-PULL_DEPLOY_HEALTH_URL=https://app.poolroost.com/actuator/health
+PULL_DEPLOY_HEALTH_URLS="https://app.poolroost.com/actuator/health https://app.poolroost.com/login"
 EOF
 
 # 2. systemd 서비스 + 타이머 설치
@@ -350,7 +371,7 @@ EOF
 |---|---|---|
 | `PULL_DEPLOY_ENABLED` | 없음(=끔) | `true` 여야 배포한다. **타이머를 지우지 않고 배포만 멈추는 킬 스위치** |
 | `PULL_DEPLOY_BRANCH` | `main` | 따라갈 브랜치 |
-| `PULL_DEPLOY_HEALTH_URL` | 없음 | 배포 후 확인할 공개 URL. 비우면 로컬 헬스(`bootstrap.sh` 가 이미 확인)만 본다 |
+| `PULL_DEPLOY_HEALTH_URLS` | 없음 | 배포 후 확인할 공개 URL **목록**(공백 구분). **전부** 200 이어야 성공. 비우면 로컬 헬스(`bootstrap.sh` 가 이미 확인)만 본다. app·dashboard 경로를 모두 넣는다 |
 
 #### 확인 · 운영
 
