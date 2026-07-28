@@ -15,7 +15,8 @@ Oracle Cloud Always Free A1(arm64) 단일 호스트 + Docker Compose 배포 절�
 관련 파일:
 
 - [`.github/workflows/release.yml`](../../.github/workflows/release.yml) — app·dashboard 이미지를 GHCR에 멀티아치 발행
-- [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) — 발행 성공 후 서버에 SSH로 붙어 `bootstrap.sh` 호출(§7-1)
+- [`scripts/pull-deploy.sh`](../../scripts/pull-deploy.sh) — 서버의 systemd 타이머가 새 커밋을 발견해 스스로 배포(§7-1). GitHub 이 SSH 로 들어오지 않는다
+- [`scripts/install-pull-deploy.sh`](../../scripts/install-pull-deploy.sh) — 그 systemd 서비스·타이머 설치
 - [`compose.prod.yaml`](../../compose.prod.yaml) — 프로덕션 오버레이(발행 이미지·메모리 상한·80/443·db 비공개)
 - [`Caddyfile.prod`](../../Caddyfile.prod) — 도메인 + 자동 HTTPS + XFF 덮어쓰기
 - [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) — 빈 호스트 → 스택 기동 (멱등, 재실행이 곧 재배포)
@@ -270,72 +271,119 @@ echo 'APP_IMAGE_TAG=sha-<커밋>' >> .env
 ./scripts/bootstrap.sh
 ```
 
-### 7-1. 자동 배포 (GitHub Actions → SSH → bootstrap.sh)
+### 7-1. 자동 배포 (서버가 GitHub 에 물어본다 — 풀 방식)
 
-`main` 머지 → `Release Images` 가 GHCR 에 이미지 발행 → **`Deploy to production` 이 서버에 SSH 로 붙어
-`bootstrap.sh` 를 호출**한다. 발행 성공을 기다리는 `workflow_run` 트리거라, 아직 없는 이미지를 pull 하려는
-경쟁이 생기지 않는다.
+`main` 머지 → `Release Images` 가 GHCR 에 이미지 발행 → **서버의 systemd 타이머가 새 커밋을 발견해 스스로
+배포**한다. GitHub 이 서버로 들어오지 않는다.
 
-배포가 하는 일은 두 가지다:
+#### 왜 풀 방식인가 (Actions → SSH 를 쓰지 않는 이유)
 
-1. **서버 체크아웃을 그 커밋으로 맞춘다** (`git fetch` + `git reset --hard <sha>`). 이미지 pull 만으로는
-   부족하다 — `compose*.yaml`·`monitoring/*`(알림 룰)·`Caddyfile.prod` 는 이미지 안이 아니라 **서버
-   체크아웃에서 bind-mount** 되므로, 이미지만 갱신하면 알림 룰이나 리버스 프록시 변경이 반영되지 않는다.
-   `reset --hard` 는 서버의 로컬 수정을 버린다(배포 대상은 항상 레포의 그 커밋이다). `.env` 는 gitignore
-   대상이라 지워지지 않는다.
-2. **이미지 태그를 그 커밋으로 고정한다** — 서버 `.env` 의 `APP_IMAGE_TAG`·`DASHBOARD_IMAGE_TAG` 를
-   `sha-<7자리>` 로 갱신한 뒤(있으면 교체, 없으면 추가) `bootstrap.sh` 를 부른다. `latest` 를 쓰면 배포가
-   도는 사이 다음 머지로 태그가 옮겨가 "체크아웃 커밋 ≠ 실행 이미지" 조합이 될 수 있다.
+처음에는 GitHub Actions 가 SSH 로 붙는 방식으로 만들었다(PR #112). 그 방식은 **22 번 인그레스가 열려
+있어야** 하는데, 이 서버는 `oci-ssh-allow.sh` 로 22 번을 운영자 IP 두 개로 좁혀 뒀다(근거: §6 SSH 하드닝 —
+`0.0.0.0/0` 이면 상시 스캔 대상이고, sshd 의 pre-auth 취약점은 키 인증이 막아주지 못한다).
 
-   두 가지가 이 방식의 이유다:
+세 가지를 검토했다:
+
+| 방법 | 판정 |
+|---|---|
+| Actions 러너 IP 를 22 번 허용 목록에 추가 | **불가능.** `api.github.com/meta` 의 `actions` 범위가 IPv4 만 5,600개 이상이고 수시로 바뀐다. Security List 에 넣을 수 없다 |
+| 셀프호스티드 러너 | **쓰지 않는다.** 이 레포는 **public** 이라 포크 PR 의 워크플로가 러너에서 임의 코드를 실행할 수 있다(GitHub 이 공개 레포에 셀프호스티드 러너를 쓰지 말라고 명시한다). 배포 권한을 가진 서버에서는 대가가 너무 크다 |
+| Tailscale / Cloudflare Tunnel | 가능하다. Actions 화면의 배포 기록과 `production` environment 승인 게이트를 유지하고 싶으면 이쪽이다. 대가는 상주 에이전트 하나 |
+
+방향을 뒤집으면 이 제약이 전부 사라진다. 서버는 GitHub 에 **아웃바운드**로만 접근하고(확인: `api.github.com`
+200), 열어야 할 포트가 없다. 부품이 가장 적어 이 방식을 골랐다 — 단일 서버·단일 운영자에 배포 빈도가 낮은
+지금 단계에서는 "새로 관리할 에이전트가 없는 것"이 Actions 화면 기록보다 가치가 크다.
+
+**Actions 방식의 구현은 지우되 이력에 남겨 뒀다** — 나중에 Tailscale 로 갈 때 PR #112 (`883bc4c`) 의
+`.github/workflows/deploy.yml` 을 되살리고 `DEPLOY_HOST` 만 tailnet IP 로 바꾸면 된다. 지운 이유: 시크릿이
+없으면 그 잡은 **매 머지마다 "건너뜀"으로 초록 체크**가 되어 "배포됐다"는 오해를 만든다.
+
+#### 배포가 하는 일
+
+`scripts/pull-deploy.sh` (systemd 타이머가 기본 5분마다 호출):
+
+1. `origin/main` 의 최신 커밋을 확인한다. 로컬 HEAD 와 같으면 **아무것도 하지 않는다**(대부분의 실행).
+2. 다르면 그 커밋의 이미지가 GHCR 에 실제로 발행됐는지 **먼저** 확인한다. 없으면 체크아웃을 건드리지 않고
+   끝내고 다음 주기에 다시 본다 — 릴리스 워크플로가 아직 도는 중일 수 있다. 이 확인이 없으면
+   `bootstrap.sh` 의 pull 이 실패하는데 그 메시지는 "GHCR 패키지가 public 인지 확인하라"로 나와 원인을
+   오도한다.
+3. **서버 체크아웃을 그 커밋으로 맞춘다** (`git reset --hard`). 이미지 pull 만으로는 부족하다 —
+   `compose*.yaml`·`monitoring/*`(알림 룰)·`Caddyfile.prod` 는 이미지 안이 아니라 **서버 체크아웃에서
+   bind-mount** 되므로, 이미지만 갱신하면 알림 룰이나 리버스 프록시 변경이 반영되지 않는다.
+   서버의 로컬 수정은 버려진다. `.env` 는 gitignore 대상이라 남는다.
+4. **이미지 태그를 그 커밋으로 고정한다** — `.env` 의 `APP_IMAGE_TAG`·`DASHBOARD_IMAGE_TAG` 를
+   `sha-<7자리>` 로 갱신한 뒤 `bootstrap.sh` 를 부른다.
 
    - **7자리다.** `release.yml` 의 merge 잡이 매니페스트 리스트를 `sha-${SHA:0:7}` 로 발행한다. 40자리
-     `sha-<full>-<arch>` 는 아치별 단일 이미지 태그이고 compose 가 쓸 대상이 아니다 — 40자리를 요청하면
-     존재하지 않는 매니페스트를 pull 하려다 실패한다. 배포 워크플로는 SSH 전에 그 태그가 GHCR 에 실제로
-     발행됐는지 먼저 확인한다.
+     `sha-<full>-<arch>` 는 아치별 단일 이미지 태그이고 compose 가 쓸 대상이 아니다.
    - **환경변수가 아니라 `.env` 다.** `bootstrap.sh` 는 도커 그룹이 이번 세션에 아직 반영되지 않았으면
      `sudo docker compose` 로 실행하는데, sudo 는 기본 `env_reset` 이라 export 한 변수를 버린다. 그러면
      compose 가 `${APP_IMAGE_TAG:-latest}` 의 기본값으로 떨어져 **"체크아웃은 대상 커밋인데 이미지는
      latest"** 인 조합이 조용히 만들어진다. compose 는 프로젝트 디렉터리의 `.env` 를 sudo 와 무관하게 직접
-     읽으므로 그쪽이 안전하고, 아래 §7 수동 롤백과도 같은 메커니즘이다. 부수 효과로 나중에 서버에서
-     `bootstrap.sh` 를 수동 재실행해도 같은 이미지가 뜬다.
+     읽는다. 부수 효과로 나중에 `bootstrap.sh` 를 수동 재실행해도 같은 이미지가 뜬다.
+5. **헬스 확인이 실패하면 직전 커밋·태그로 되돌려 다시 올린다**(자동 롤백). Actions 화면이 없는 대신
+   "배포가 조용히 깨져 있음"을 이걸로 막는다.
 
-오버레이(TLS·6GB)는 **CI 가 결정하지 않는다.** 모드는 호스트의 성질이므로 서버 `.env` 의
-`DEPLOY_OVERLAYS` 가 정하고, 빠지면 `bootstrap.sh` 의 다운그레이드 가드가 막는다.
+오버레이(TLS·6GB)는 스크립트가 결정하지 않는다. 모드는 호스트의 성질이므로 `.env` 의 `DEPLOY_OVERLAYS` 가
+정하고, 빠지면 `bootstrap.sh` 의 다운그레이드 가드가 막는다.
 
-#### 필요한 시크릿 · 변수
+#### 설치
 
-시크릿이 하나라도 없으면 배포 잡은 **실패가 아니라 건너뜀**으로 끝난다(이 레포의 "설정 없으면 no-op"
-관례와 같다). 설정 전까지 머지마다 빨간 X 가 뜨지 않는다.
-
-| 종류 | 이름 | 값 |
-|---|---|---|
-| Secret | `DEPLOY_SSH_KEY` | 배포용 SSH **개인키**(전문). 배포 전용 키를 새로 만들고 서버의 `~/.ssh/authorized_keys` 에 공개키를 넣는다 |
-| Secret | `DEPLOY_HOST` | 서버 호스트명 또는 공인 IP |
-| Secret | `DEPLOY_USER` | SSH 사용자 |
-| Secret | `DEPLOY_SSH_KNOWN_HOSTS` | `ssh-keyscan -H <호스트>` 출력. **필수다** — 없으면 배포를 건너뛴다 |
-| Variable | `DEPLOY_PATH` | 서버의 레포 경로. 기본 `~/reputation-pool-cloud` |
-| Variable | `DEPLOY_HEALTH_URL` | 배포 후 확인할 공개 URL(예: `https://<도메인>/actuator/health`). 비우면 이 확인을 건너뛴다 |
-
-`known_hosts` 를 필수로 둔 이유: `StrictHostKeyChecking=no` 로 넘기면 중간자가 끼어들어도 배포 명령을
-그대로 넘겨준다 — 배포 키를 쥔 세션이라 대가가 크다.
+**서버에서** 한 번 실행한다. 유닛 파일을 레포에 커밋하지 않고 생성하는 이유는 `User=`·`WorkingDirectory=` 가
+호스트마다 다르기 때문이다 — 박아 두면 다른 호스트에서 조용히 틀린 디렉터리를 배포한다.
 
 ```bash
-# known_hosts 값 만들기 (로컬에서)
-ssh-keyscan -H <호스트>
+cd ~/reputation-pool-cloud
+
+# 1. .env 에 키 추가 (ENABLED 가 true 가 아니면 스크립트는 아무것도 하지 않는다 — fail closed)
+cat >> .env <<'EOF'
+PULL_DEPLOY_ENABLED=true
+PULL_DEPLOY_HEALTH_URL=https://app.poolroost.com/actuator/health
+EOF
+
+# 2. systemd 서비스 + 타이머 설치
+./scripts/install-pull-deploy.sh            # 기본 5분 주기
+./scripts/install-pull-deploy.sh --interval 10m
 ```
 
-#### 승인 게이트를 넣고 싶으면
+| `.env` 키 | 기본값 | 의미 |
+|---|---|---|
+| `PULL_DEPLOY_ENABLED` | 없음(=끔) | `true` 여야 배포한다. **타이머를 지우지 않고 배포만 멈추는 킬 스위치** |
+| `PULL_DEPLOY_BRANCH` | `main` | 따라갈 브랜치 |
+| `PULL_DEPLOY_HEALTH_URL` | 없음 | 배포 후 확인할 공개 URL. 비우면 로컬 헬스(`bootstrap.sh` 가 이미 확인)만 본다 |
 
-배포 잡은 GitHub Environment `production` 을 쓴다. **설정 → Environments → production** 에
-required reviewers 를 걸면 워크플로 파일을 고치지 않고도 배포 전 승인을 요구할 수 있다.
+#### 확인 · 운영
 
-#### 자동 배포로 롤백하기
+```bash
+systemctl list-timers reputation-pool-deploy.timer
+journalctl -u reputation-pool-deploy.service -n 50 --no-pager
 
-`Actions → Deploy to production → Run workflow` 에서 `sha` 에 되돌릴 커밋을 넣는다. 그 커밋의 코드와
-그 커밋의 이미지(`sha-<커밋>`)가 함께 적용되므로, 서버에 들어가 `.env` 를 고치지 않아도 된다.
+./scripts/pull-deploy.sh --dry-run          # 무엇을 할지만 출력, 아무것도 바꾸지 않는다
+./scripts/pull-deploy.sh --force            # HEAD 가 같아도 재배포
+sudo systemctl start reputation-pool-deploy.service   # 주기를 기다리지 않고 즉시 한 번
 
-> `docker compose down -v`를 프로덕션에서 쓰지 않는다. `caddy-data` 볼륨의 인증서가 사라져 재발급이 일어나고
+./scripts/install-pull-deploy.sh --uninstall
+```
+
+배포가 폴링 간격보다 오래 걸려도 겹치지 않는다 — 스크립트가 `flock` 으로 잠근다. 서버가 꺼져 있던 동안
+지나간 주기는 타이머의 `Persistent=true` 로 부팅 후 한 번에 합쳐 실행된다.
+
+#### 롤백하기
+
+```bash
+# 서버에서: 되돌릴 커밋으로 고정한 뒤 재실행
+cd ~/reputation-pool-cloud
+git reset --hard <되돌릴-sha>
+sed -i 's|^APP_IMAGE_TAG=.*|APP_IMAGE_TAG=sha-<7자리>|' .env
+sed -i 's|^DASHBOARD_IMAGE_TAG=.*|DASHBOARD_IMAGE_TAG=sha-<7자리>|' .env
+./scripts/bootstrap.sh
+```
+
+**주의**: 이 상태로 두면 다음 폴링 주기가 다시 `origin/main` 으로 올려 버린다. 원인을 고칠 시간이 필요하면
+`.env` 의 `PULL_DEPLOY_ENABLED` 를 `false` 로 바꿔 타이머를 멈춘 뒤 작업한다. 되돌릴 것이 코드 자체라면
+`main` 에 revert 를 머지하는 것이 정석이다 — 그러면 다음 주기가 그걸 배포한다.
+
+> `docker compose down -v` 를 프로덕션에서 쓰지 않는다. `caddy-data` 볼륨의 인증서가 사라져 재발급이 일어나고
 > Let's Encrypt 레이트리밋을 소모한다. DB 볼륨도 함께 지워진다.
 
 ### 새 `.env` 키가 생긴 릴리스로 재배포할 때

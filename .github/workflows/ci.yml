@@ -213,7 +213,8 @@ jobs:
       - name: Shellcheck deploy scripts
         run: |
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 \
-            scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh
+            scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh \
+            scripts/pull-deploy.sh scripts/install-pull-deploy.sh
 
       # Alert rules have the same exposure as the deploy artefacts above: nothing loads alerts.yml until
       # Prometheus reloads it on the server, so a typo — or worse, a rule that parses but can never fire —
