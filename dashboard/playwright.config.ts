@@ -18,8 +18,16 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
-    { name: "e2e", testMatch: "e2e/**/*.spec.ts", use: { ...devices["Desktop Chrome"] } },
-    { name: "visual", testMatch: "visual/**/*.spec.ts", use: { ...devices["Desktop Chrome"] } },
+    // locale 을 명시하는 이유: 로그인 화면만 다국어이고(`app/login/locale.ts`) 브라우저의
+    // Accept-Language 로 언어를 고르는데 기본이 **영어**다. 로그인 이후 콘솔은 한국어 전용이라
+    // 두 스펙 모두 한글 라벨(로그인·풀 오버뷰·라이브 이벤트…)을 전제한다. locale 을 지정하지 않으면
+    // 러너의 기본값에 좌우된다 — CI 의 Chromium 은 en-US 를 보내므로 로그인 버튼이 "Sign in" 으로
+    // 렌더되고 `getByRole("button", { name: "로그인" })` 이 30초 타임아웃으로 죽는다(실제로 e2e 6개가
+    // 전부 그렇게 실패했다). 스펙의 암묵적 가정을 설정으로 끌어올려 러너와 무관하게 결정적으로 만든다.
+    //
+    // shots 프로젝트에는 일부러 넣지 않는다 — 마케팅 스크린샷(#16)은 영어 기준이다.
+    { name: "e2e", testMatch: "e2e/**/*.spec.ts", use: { ...devices["Desktop Chrome"], locale: "ko-KR" } },
+    { name: "visual", testMatch: "visual/**/*.spec.ts", use: { ...devices["Desktop Chrome"], locale: "ko-KR" } },
     // shots: 마케팅 랜딩(#16)용 실제 대시보드 스크린샷을 public/marketing/ 에 저장(비교 아님).
     // 레티나(deviceScaleFactor=2) · 모션 감소 · 넓은 뷰포트로 결정론적 캡처.
     {
