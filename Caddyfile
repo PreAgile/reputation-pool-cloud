@@ -26,6 +26,26 @@
 	}
 }
 
+# 로케일 자동 판별(#110) 경로의 `Vary`. `/` 와 `/login` 은 응답 본문이 `Accept-Language`·`rp_locale`
+# 쿠키·`CF-IPCountry` 에 따라 달라지므로, 중간 캐시가 한 언어 응답을 다른 언어 방문자에게 주지 않도록
+# 알려야 한다.
+#
+# 왜 앱이 아니라 Caddy 에서 붙이는가: Next 15.5 는 app-router 페이지 응답의 `Vary` 를 자신의 RSC 값
+# (`rsc, next-router-state-tree, …`)으로 **덮어쓴다**. middleware 로 넣어도, `next.config.ts` 의
+# `headers()` 로 넣어도 200 응답에서는 사라진다(실측 확인, `dashboard/middleware.ts` 주석 참고).
+# 그래서 캐시 경계 바로 앞인 리버스 프록시에서 붙인다 — 여기 붙이면 Caddy 자신과 그 앞의 Cloudflare가
+# 모두 본다. `+` 는 기존 값을 지우지 않고 필드를 추가한다(앱의 RSC Vary 를 날리면 클라이언트 라우터
+# 캐시가 깨진다).
+#
+# 307 리다이렉트(`/` → `/ko`) 응답에는 앱이 넣은 같은 값이 이미 남아 있어 `Vary` 가 두 번 출력된다.
+# `Vary` 는 목록 헤더라 중복은 합쳐져 해석되므로 무해하다.
+#
+# (Caddyfile.prod 와 동일하게 유지할 것.)
+(locale_vary) {
+	header / +Vary "Accept-Language, Cookie, CF-IPCountry"
+	header /login +Vary "Accept-Language, Cookie, CF-IPCountry"
+}
+
 :80 {
 	# REST 컨트롤 플레인 (#11).
 	handle /api/* {
@@ -43,6 +63,7 @@
 	}
 	# 그 외 전부 대시보드.
 	handle {
+		import locale_vary
 		reverse_proxy dashboard:3000
 	}
 }

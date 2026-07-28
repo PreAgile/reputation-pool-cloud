@@ -11,7 +11,8 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: dict.meta.title,
   description: dict.meta.description,
-  alternates: { canonical: "/ko", languages: { en: "/", ko: "/ko" } },
+  // canonical 은 `/ko` — 자동 판별로 `/` 에서 넘어왔더라도 이 URL 이 한국어의 정본이다(#110).
+  alternates: { canonical: "/ko", languages: { en: "/", ko: "/ko", "x-default": "/" } },
   openGraph: {
     type: "website",
     title: dict.meta.title,

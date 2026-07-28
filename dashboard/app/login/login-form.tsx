@@ -7,11 +7,12 @@ import { ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/cn";
-import { LOGIN_I18N, type LoginLocale } from "./locale";
+import { LOGIN_I18N } from "./locale";
+import type { Locale } from "@/lib/locale";
 
-/** 로그인 화면 언어 토글 — EN / 한국어. 서버가 Accept-Language 로 고른 기본값을 사용자가 덮어쓸 수 있다. */
-function LangToggle({ locale, onChange, label }: { locale: LoginLocale; onChange: (l: LoginLocale) => void; label: string }) {
-  const opts: { key: LoginLocale; text: string }[] = [
+/** 로그인 화면 언어 토글 — EN / 한국어. 서버가 신호로 고른 기본값(#110)을 사용자가 이 화면에서 덮어쓴다. */
+function LangToggle({ locale, onChange, label }: { locale: Locale; onChange: (l: Locale) => void; label: string }) {
+  const opts: { key: Locale; text: string }[] = [
     { key: "en", text: "EN" },
     { key: "ko", text: "한국어" },
   ];
@@ -35,10 +36,10 @@ function LangToggle({ locale, onChange, label }: { locale: LoginLocale; onChange
   );
 }
 
-export function LoginForm({ initialLocale }: { initialLocale: LoginLocale }) {
+export function LoginForm({ initialLocale }: { initialLocale: Locale }) {
   const { login } = useAuth();
   const router = useRouter();
-  const [locale, setLocale] = useState<LoginLocale>(initialLocale);
+  const [locale, setLocale] = useState<Locale>(initialLocale);
   const t = LOGIN_I18N[locale];
 
   const [username, setUsername] = useState("");

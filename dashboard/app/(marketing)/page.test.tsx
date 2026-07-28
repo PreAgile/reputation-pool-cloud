@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within, fireEvent } from "@testing-library/react";
 import { seriousViolations } from "@/test/a11y";
-import MarketingPage from "./page";
+import MarketingPage, { metadata } from "./page";
 
 // next-themes 훅(ThemeToggle)만 대체. 랜딩은 라우팅 훅을 쓰지 않는다(Link 만 사용).
 vi.mock("next-themes", () => ({
@@ -100,6 +100,13 @@ describe("랜딩 페이지 (#16)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close menu" }));
     expect(screen.queryByRole("navigation", { name: "Mobile" })).not.toBeInTheDocument();
+  });
+
+  // #110: `/` 는 미들웨어가 한국어 선호 방문자를 `/ko` 로 보낸다. 중립 `Accept-Language` 로 오는
+  // 크롤러는 `/` 에 남지만, 두 언어가 각각 색인되려면 hreflang 이 양쪽을 가리켜야 한다.
+  it("SEO: canonical 은 / 이고 hreflang 이 en·ko·x-default 를 모두 가리킨다", () => {
+    expect(metadata.alternates?.canonical).toBe("/");
+    expect(metadata.alternates?.languages).toEqual({ en: "/", ko: "/ko", "x-default": "/" });
   });
 
   it("a11y: critical/serious 위반이 없다", async () => {
