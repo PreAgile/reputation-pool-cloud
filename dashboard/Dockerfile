@@ -7,6 +7,10 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
+# 사이트 정본 오리진. `NEXT_PUBLIC_*` 는 빌드 시점에 정적 프리렌더 산출물로 인라인되므로 런타임 환경변수로는
+# canonical·hreflang·OG 를 바꿀 수 없다 — 반드시 build arg 로 넣어야 한다(CI 는 release.yml 의 build-args).
+ARG NEXT_PUBLIC_SITE_URL=https://app.poolroost.com
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 RUN pnpm run build
 
 FROM node:22-slim AS run

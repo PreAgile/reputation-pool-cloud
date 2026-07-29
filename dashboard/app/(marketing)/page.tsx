@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import { Landing } from "@/components/marketing/landing";
 import { HtmlLang } from "@/components/html-lang";
 import { getDict } from "@/components/marketing/i18n";
+import { SITE_URL } from "@/lib/site";
 
 const dict = getDict("en");
 
-// 도메인은 후속(#15) 확정 전까지 env(NEXT_PUBLIC_SITE_URL) 또는 임시값. OG/Twitter 이미지 절대경로 해석용.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://reputationpool.io";
-
 export const metadata: Metadata = {
+  // canonical·hreflang·OG 의 절대 URL 은 모두 이 오리진 위에서 해석된다 — 값이 틀리면(과거: DNS 없는 도메인)
+  // 색인 자체가 안 된다. 단일 출처는 lib/site.ts, 배포 시 주입 경로는 Dockerfile 의 build arg.
   metadataBase: new URL(SITE_URL),
   title: dict.meta.title,
   description: dict.meta.description,

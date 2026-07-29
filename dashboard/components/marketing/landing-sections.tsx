@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { SITE_HOST } from "@/lib/site";
 import { BrowserFrame } from "./browser-frame";
 import { Brand } from "./logo";
 import { CONTACT_EMAIL, CONTACT_MAILTO, GITHUB_REPO_URL } from "./constants";
@@ -228,11 +229,14 @@ export function TrustSignals({ dict }: SectionProps) {
 
 /* ─────────────────────────────  Features (교차행 + 실제 스크린샷)  ───────────────────────────── */
 
-/** 기능 블록 구조(비번역): 스크린샷 키·주소줄 URL. dict.features.items 와 index 로 결합. */
+/**
+ * 기능 블록 구조(비번역): 스크린샷 키·주소줄 URL. dict.features.items 와 index 로 결합.
+ * 주소줄은 실제 서비스 호스트를 쓴다 — 이전에는 DNS 가 없는 `app.reputationpool.io` 를 보여줬다.
+ */
 const FEATURE_STRUCT: { shot: string; url: string }[] = [
-  { shot: "overview", url: "app.reputationpool.io/overview" },
-  { shot: "detail", url: "app.reputationpool.io/resources/proxy" },
-  { shot: "events", url: "app.reputationpool.io/events" },
+  { shot: "overview", url: `${SITE_HOST}/overview` },
+  { shot: "detail", url: `${SITE_HOST}/resources/proxy` },
+  { shot: "events", url: `${SITE_HOST}/events` },
 ];
 
 /**

@@ -57,6 +57,12 @@ describe("랜딩 페이지 한국어 (/ko, #16)", () => {
     expect(metadata.alternates?.languages).toEqual({ en: "/", ko: "/ko", "x-default": "/" });
   });
 
+  // 상대 canonical 이 절대 URL 로 펴질 때의 오리진. 기본값이 DNS 없는 도메인이던 탓에 색인이 0건이었다 —
+  // 영어 랜딩과 같은 단일 출처(lib/site.ts)를 쓰는지 양쪽에서 각각 잠근다.
+  it("SEO: metadataBase 가 실제 서비스 오리진(app.poolroost.com)이다", () => {
+    expect(metadata.metadataBase?.origin).toBe("https://app.poolroost.com");
+  });
+
   it("a11y: critical/serious 위반이 없다", async () => {
     const { container } = render(<MarketingPageKo />);
     expect(await seriousViolations(container)).toEqual([]);
