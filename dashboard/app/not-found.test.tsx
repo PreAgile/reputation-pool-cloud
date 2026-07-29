@@ -27,20 +27,26 @@ describe("404 페이지 (#134)", () => {
     requestHeaders.clear();
   });
 
-  it("아무 신호도 없으면 → 영어 404 와 영어 랜딩(/) 링크가 나온다", async () => {
+  it("아무 신호도 없으면 → 영어 404 와 랜딩(apex) 링크가 나온다", async () => {
     await renderNotFound();
 
     expect(screen.getByRole("heading", { level: 1, name: "This page doesn’t exist" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Go home" })).toHaveAttribute(
+      "href",
+      "https://poolroost.com",
+    );
   });
 
-  it("브라우저가 한국어를 선호하면 → 한국어 404 와 한국어 랜딩(/ko) 링크가 나온다", async () => {
+  it("브라우저가 한국어를 선호하면 → 한국어 404 와 랜딩(apex) 링크가 나온다 — 언어는 랜딩이 다시 판별한다", async () => {
     requestHeaders.set("accept-language", "ko-KR,ko;q=0.9,en-US;q=0.8");
 
     await renderNotFound();
 
     expect(screen.getByRole("heading", { level: 1, name: "찾는 페이지가 없습니다" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "홈으로" })).toHaveAttribute("href", "/ko");
+    expect(screen.getByRole("link", { name: "홈으로" })).toHaveAttribute(
+      "href",
+      "https://poolroost.com",
+    );
   });
 
   it("스위처로 고른 언어(쿠키)가 있으면 → 브라우저 선호를 이긴다 (랜딩과 같은 우선순위)", async () => {

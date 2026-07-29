@@ -43,7 +43,9 @@
 # (Next 15.5 가 app-router 200 응답의 `Vary` 를 RSC 값으로 덮어써서 앱에서는 붙일 수 없다).
 # 프로덕션은 Cloudflare 뒤에 있으므로 이 헤더가 엣지까지 도달하는 것이 특히 중요하다.
 (locale_vary) {
-	header / +Vary "Accept-Language, Cookie, CF-IPCountry"
+	# `/login` 만 남는다. 계층 분리(#15) 전에는 `/` 가 랜딩이라 방문자 신호로 언어가 갈렸지만, 지금
+	# `/` 는 `/overview` 로 보내는 콘솔 진입점이라 갈릴 것이 없다 — 랜딩의 언어 판별과 그 `Vary` 는
+	# apex(Cloudflare Pages)로 함께 옮겨 갔다.
 	header /login +Vary "Accept-Language, Cookie, CF-IPCountry"
 }
 

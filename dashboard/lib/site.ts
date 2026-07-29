@@ -1,17 +1,15 @@
 /**
- * 사이트의 정본 오리진 — 랜딩 `metadataBase`(canonical·hreflang·OG 절대 URL 해석)와 robots/sitemap 이
- * 모두 이 한 값을 쓴다. 두 랜딩 페이지가 각자 상수를 들고 있으면 한쪽만 고치는 사고가 나므로 단일 출처로 둔다.
+ * 랜딩·문서가 사는 곳. **이 앱이 아니다.**
  *
- * `NEXT_PUBLIC_*` 는 **빌드 시점에 정적 산출물로 인라인**된다. 마케팅 페이지는 프리렌더되므로 컨테이너에
- * 런타임 환경변수를 넣어도 이미 구워진 canonical 은 바뀌지 않는다 — 반드시 Docker build arg 로 넘겨야 한다
- * (dashboard/Dockerfile 의 `ARG NEXT_PUBLIC_SITE_URL`, release.yml 의 `build-args`).
+ * 계층 분리(#15)로 랜딩은 Cloudflare Pages(apex `poolroost.com`)로 나갔고, 이 앱은 콘솔(`app.` 서브
+ * 도메인)만 담당한다. 그래서 여기 남은 용도는 하나뿐이다 — **바깥으로 나가는 링크**(404 화면의
+ * "홈으로", 오리진 다운 화면의 CTA).
  *
- * 기본값이 왜 중요한가: 직전 기본값은 `https://reputationpool.io` 였고 그 도메인은 DNS 레코드 자체가 없다.
- * prod 에서 `NEXT_PUBLIC_SITE_URL` 가 설정된 적이 없어 이 폴백이 그대로 나갔고, 구글은 canonical 을 따라
- * 존재하지 않는 호스트로 갔다가 색인을 포기했다(색인 0건). 실제 서비스 호스트는 `app.poolroost.com` 이다
- * (apex `poolroost.com` 은 아직 DNS 가 없다).
+ * 절대 URL 이어야 하는 이유: 이 앱은 `app.poolroost.com` 에서 서빙되므로 `/` 같은 상대 경로는 랜딩이
+ * 아니라 자기 자신을 가리킨다. 앱이 죽어 404·502 가 뜨는 상황이라면 그 링크는 **살아 있는 곳**을
+ * 가리켜야 의미가 있다.
  */
-export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://app.poolroost.com";
+export const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL ?? "https://poolroost.com";
 
-/** 스킴 없는 호스트. 랜딩 스크린샷 위 가짜 주소줄처럼 "보여주기용 URL" 에 쓴다. */
-export const SITE_HOST = new URL(SITE_URL).host;
+/** 스킴 없는 호스트. 화면에 주소를 문자로 보여줄 때 쓴다. */
+export const LANDING_HOST = new URL(LANDING_URL).host;

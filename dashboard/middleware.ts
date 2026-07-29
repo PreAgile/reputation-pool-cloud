@@ -78,5 +78,8 @@ function withLocaleCacheHeaders(response: NextResponse): NextResponse {
 
 export const config = {
   // 로케일이 응답을 바꾸는 경로만. `/ko` 는 언어가 URL 로 고정돼 있어 판별도 `Vary` 도 필요 없다.
-  matcher: ["/", "/login"],
+  // `/login` 만 남는다. 계층 분리(#15) 전에는 `/` 가 랜딩이라 로케일 판별이 필요했지만, 지금 `/` 는
+  // `/overview` 로 보내는 콘솔 진입점이라 판별할 것이 없다 — 랜딩의 언어 판별은 apex 쪽
+  // Pages Functions 가 담당한다.
+  matcher: ["/login"],
 };

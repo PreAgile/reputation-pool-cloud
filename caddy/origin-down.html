@@ -102,6 +102,17 @@
         font-weight: 700;
         text-decoration: none;
       }
+      /*
+        보조 CTA — 랜딩(apex)은 이 앱과 다른 인프라(Cloudflare Pages)에 있어 **이 화면이 뜨는 순간에도
+        살아 있다**(#15 계층 분리). 주 CTA 인 "다시 시도"는 여전히 죽어 있는 오리진을 향하므로, 갈 수
+        있는 곳을 하나 준다. 색을 낮춰 "재시도가 우선" 이라는 순서를 유지한다.
+      */
+      .cta-secondary {
+        margin-left: 8px;
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
       .code {
         margin: 22px 0 0;
         padding-top: 16px;
@@ -135,6 +146,7 @@
       <!-- 요청 경로를 되돌려 주지 않는다: `{{placeholder "http.request.uri"}}` 를 본문에 심으면 공격자가
            만든 URL 이 그대로 반사돼 XSS 가 된다(Caddy 는 이스케이프하지 않는다). 항상 루트로 보낸다. -->
       <a class="cta" href="/">다시 시도 · Try again</a>
+      <a class="cta cta-secondary" href="https://poolroost.com">poolroost.com · 서비스 소개</a>
 
       <p class="code">
         오류 코드 {{placeholder "http.error.status_code"}} · {{placeholder "http.error.status_text"}}

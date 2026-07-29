@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Brand } from "@/components/marketing/logo";
+import { Brand } from "@/components/logo";
 import type { Locale } from "@/lib/locale";
 
 /**

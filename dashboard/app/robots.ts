@@ -1,18 +1,18 @@
 import type { MetadataRoute } from "next";
-import { SITE_URL } from "@/lib/site";
 
 /**
- * `/robots.txt` — 지금까지 이 경로는 Cloudflare 의 관리형 robots.txt(주석만, `Sitemap:` 줄 없음)가 서빙했다.
- * 오리진이 직접 내려주면 사이트맵 위치를 크롤러에 알릴 수 있다.
+ * 이 호스트(`app.` — 콘솔)는 **통째로 색인 대상이 아니다.**
  *
- * disallow 는 `/api/`·`/actuator/` 로만 유지한다. `/login`·`/overview`·`/preview/*` 같은 비공개 화면을 여기에
- * 넣고 싶어지지만 **넣으면 안 된다**: 그 경로들은 `X-Robots-Tag: noindex`(next.config.ts 의 headers())로
- * 색인에서 빼는데, 크롤러가 noindex 를 보려면 먼저 그 URL 을 가져올 수 있어야 한다. robots.txt 로 막으면
- * 헤더를 읽지 못해 "차단됐지만 색인됨" 상태로 남는다. 둘 중 하나만 골라야 하고, 우리는 noindex 를 골랐다.
+ * 계층 분리(#15) 전에는 여기에 랜딩이 함께 있어서 `/`·`/ko` 만 허용하고 나머지를 막는 형태였다. 이제
+ * 랜딩·문서는 apex(Cloudflare Pages)로 나갔고 여기 남은 것은 로그인과 인증이 필요한 화면뿐이다.
+ *
+ * 크롤러에게 남길 것이 없을 뿐 아니라, **남기면 해롭다**: 보호 화면은 비로그인 크롤러에게 빈 껍데기로
+ * 렌더되므로 soft-404 로 잡혀 도메인 평가가 깎인다.
+ *
+ * sitemap 을 여기서 알리지 않는다 — 색인시킬 페이지가 있는 쪽(랜딩)이 자기 sitemap 을 갖는다.
  */
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: [{ userAgent: "*", allow: "/", disallow: ["/api/", "/actuator/"] }],
-    sitemap: `${SITE_URL}/sitemap.xml`,
+    rules: [{ userAgent: "*", disallow: "/" }],
   };
 }

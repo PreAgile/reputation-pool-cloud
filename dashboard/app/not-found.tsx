@@ -3,8 +3,9 @@ import { cookies, headers } from "next/headers";
 import { ErrorScreen } from "@/components/error-screen";
 import { getErrorMessages } from "@/components/error-messages";
 import { buttonClass } from "@/components/ui/button";
+import { LANDING_URL } from "@/lib/site";
 import { HtmlLang } from "@/components/html-lang";
-import { COUNTRY_HEADER, LOCALE_COOKIE, LOCALE_PATH, resolveLocale } from "@/lib/locale";
+import { COUNTRY_HEADER, LOCALE_COOKIE, resolveLocale } from "@/lib/locale";
 
 /**
  * 404 (#134). 지금까지 오타 하나면 Next 기본 화면(`404: This page could not be found.`, 검정 배경,
@@ -46,9 +47,14 @@ export default async function NotFound() {
         description={messages.notFound.description}
         actions={
           <>
-            <Link href={LOCALE_PATH[locale]} className={buttonClass("primary")}>
+            {/*
+              랜딩은 이제 이 앱이 아니라 apex(Cloudflare Pages)에 있다(#15). 상대 경로 `/` 를 두면
+              콘솔 진입점으로 되돌아와 "홈으로" 가 제자리를 맴돈다. 절대 URL 이어야 한다.
+              `/ko` 여부는 랜딩 쪽 미들웨어가 방문자 신호로 다시 판별하므로 여기서 언어를 붙이지 않는다.
+            */}
+            <a href={LANDING_URL} className={buttonClass("primary")}>
               {messages.actions.home}
-            </Link>
+            </a>
             <Link href="/overview" className={buttonClass("ghost")}>
               {messages.actions.console}
             </Link>
