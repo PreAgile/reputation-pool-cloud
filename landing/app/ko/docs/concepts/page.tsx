@@ -342,7 +342,7 @@ Acquire("checkout-us") → will not return it   (its checkout-us cell is cooling
           </Bullet>
         </Bullets>
         <P>
-          차단은 진행 중인 획득도 이깁니다. 리소스가 선택된 뒤 리스가 확정되기 전에 차단되면, 그 확정은
+          차단은 진행 중인 확보도 이깁니다. 리소스가 선택된 뒤 리스가 확정되기 전에 차단되면, 그 확정은
           존중되지 않고 되돌려집니다 — 이미 응답이 돌아간 <C>block</C> 호출을 우회할 방법은 없습니다. 그리고{" "}
           <C>Renew</C> 는 차단 목록에 오른 리소스의 리스를 연장하지 않으므로, 이미 잡혀 있던 리스는 살아남지
           않고 TTL 에서 끝납니다.
@@ -386,7 +386,7 @@ Acquire("checkout-us") → will not return it   (its checkout-us cell is cooling
           <C>GET /api/events</C> 가 읽는 영구 감사 로그 양쪽으로 갑니다. 보게 될 이벤트 유형은{" "}
           <C>RESOURCE_LEASED</C>, <C>LEASE_RELEASED</C>, <C>RESOURCE_COOLED</C>(원인이 된 실패 유형과 쿨다운
           종료 시각 포함), <C>RESOURCE_RECOVERED</C>, <C>RESOURCE_BLOCKLISTED</C>, <C>RESOURCE_UNBLOCKED</C>{" "}
-          입니다. 자격 있는 후보를 찾지 못한 획득은 실시간 스트림에서 <C>AcquisitionRejected</C> 로 보고됩니다.
+          입니다. 자격 있는 후보를 찾지 못한 확보는 실시간 스트림에서 <C>AcquisitionRejected</C> 로 보고됩니다.
         </P>
       </Section>
 
@@ -416,7 +416,7 @@ Acquire("checkout-us") → will not return it   (its checkout-us cell is cooling
           <Row>
             <Cell>lease TTL</Cell>
             <Cell>30 초</Cell>
-            <Cell>획득한 리스가 유효한 시간.</Cell>
+            <Cell>확보한 리스가 유효한 시간.</Cell>
           </Row>
           <Row>
             <Cell>쿨다운 백오프 상한</Cell>

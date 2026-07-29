@@ -183,7 +183,7 @@ export RP_API_KEY=rp_9Q3xK7bT…`}
         </CodeBlock>
       </Section>
 
-      <Section id="step-4" title="4. 컨텍스트에 맞는 리소스 획득하기">
+      <Section id="step-4" title="4. 컨텍스트에 맞는 리소스 확보하기">
         <P>
           <B>컨텍스트</B>는 지금 하려는 일에 이름을 붙인 문자열입니다 — <C>checkout-us</C>, <C>search-eu</C>{" "}
           처럼, 리소스를 독립적으로 태울 수 있는 목적지나 워크로드마다 하나씩. 이 값을 <C>Acquire</C> 에

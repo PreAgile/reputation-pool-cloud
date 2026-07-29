@@ -91,7 +91,7 @@ export const DOCS_PAGES: DocsPage[] = [
     title: { en: "Quickstart", ko: "퀵스타트" },
     summary: {
       en: "Issue an API key, register a resource, acquire the healthiest one for a context, and report what happened — the full round trip.",
-      ko: "API 키를 발급하고, 리소스를 등록하고, 컨텍스트에 가장 건강한 리소스를 획득하고, 결과를 보고하기까지 — 한 바퀴 전체.",
+      ko: "API 키를 발급하고, 리소스를 등록하고, 컨텍스트에 가장 건강한 리소스를 확보하고, 결과를 보고하기까지 — 한 바퀴 전체.",
     },
     section: "getting-started",
   },

@@ -46,7 +46,7 @@ export default function DocsFaqPageKo() {
         <P>
           예산은 영속 상태를 <B>늘리는</B> 호출에서만 확인합니다. 풀이 본 적 없는 리소스에 대한{" "}
           <C>Register</C>, 또는 셀이 아직 없는 <C>(resource, context)</C> 조합에 대한 <C>Report</C> 가
-          그렇습니다. 이 경우 <C>RESOURCE_EXHAUSTED</C> 로 거절됩니다. 그 밖의 모든 것 — 획득, 기존 셀에 대한
+          그렇습니다. 이 경우 <C>RESOURCE_EXHAUSTED</C> 로 거절됩니다. 그 밖의 모든 것 — 확보, 기존 셀에 대한
           보고, 조회 — 은 계속 동작합니다. 닫히는 게이트가 아니라 안전한 방향의 천장입니다.
         </P>
         <Callout tone="warn" title="이 숫자는 측정된 용량이 아니라 아직 검증되지 않은 가설입니다">
