@@ -126,7 +126,7 @@ docker compose -f compose.yaml -f compose.prod.yaml -f compose.prod.tls.yaml log
 `/actuator/health` 는 **app 이** 응답한다. 대시보드 컨테이너가 못 떠서 Caddy 가 502 를 내도 그 확인은
 통과한다. 그래서 헬스 URL 을 목록으로 받는다:
 
-```
+```dotenv
 PULL_DEPLOY_HEALTH_URLS="https://app.poolroost.com/actuator/health https://app.poolroost.com/login"
 ```
 
@@ -177,7 +177,7 @@ Alertmanager 는 그룹핑·중복제거까지 정상 수행하고 아무 데도
 
 ### `docker compose up` 이 secret 관련 에러로 아예 안 뜬다
 
-```
+```text
 environment variable "REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL" required by secret ... is not set
 ```
 
@@ -319,7 +319,7 @@ echo "테스트" | python3 scripts/notify-mail.py "[reputation-pool] 발송 시�
 
 SPF/DKIM DNS 레코드가 없다. Cloudflare 에 넣는다:
 
-```
+```text
 TXT    poolroost.com                    v=spf1 include:ap.rp.oracleemaildelivery.com ~all
 CNAME  rp2026._domainkey.poolroost.com  rp2026.poolroost.com.dkim.nrt1.oracleemaildelivery.com
 ```

@@ -26,9 +26,12 @@
 ### 파일 권한
 
 ```bash
-chmod 600 ~/.rp-mail.env ~/.a1-hunter.env   # 설치 스크립트가 umask 077 로 만든다
-ls -l <repo>/.env                            # 최소 600
+chmod 600 ~/.rp-mail.env ~/.a1-hunter.env ~/reputation-pool-cloud/.env
+ls -l ~/.rp-mail.env ~/.a1-hunter.env ~/reputation-pool-cloud/.env
 ```
+
+설치 스크립트는 자기가 만드는 파일을 `umask 077` 로 두지만, `.env` 는 `cp .env.example .env` 로 사람이
+만들기 때문에 기본 umask 를 따른다 — 위 명령으로 맞춘다.
 
 ## 2. 시크릿 목록과 회전
 
@@ -45,17 +48,46 @@ ls -l <repo>/.env                            # 최소 600
 | `REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL` | 알림 라우팅 | `.env` 수정 후 alertmanager 재기동 | ❌ |
 | `SMTP_PASS` (`~/.rp-mail.env`) | 메일 알림 | OCI 콘솔에서 새 SMTP 자격증명 발급 → 파일 교체 → 구 자격증명 삭제 | ✅ (다음 발송부터) |
 
+### 2-0. 값을 명령행에 두지 않는다
+
+아래 절차들이 `sed -i 's|...|<새값>|'` 대신 프롬프트를 쓰는 이유다:
+
+- **셸 히스토리에 남는다** — `~/.bash_history` 는 평문이고, 시크릿을 지운 뒤에도 히스토리에는 남는다
+- **`ps` 에 보인다** — 명령행 인자는 같은 호스트의 다른 사용자에게 그대로 노출된다
+- **특수문자가 치환을 깬다** — `|`·`&`·`\` 가 들어간 값은 `sed` 치환식에서 다르게 해석된다.
+  실제로 이 프로젝트에서 SMTP 비밀번호의 `[` 가 셸에 먹혀 인증 실패로만 보인 적이 있다
+
+`read -rs` 는 입력을 에코하지 않고 히스토리에도 남기지 않는다. 값을 자식 프로세스로 넘길 때는
+**환경변수**를 쓴다 — `/proc/<pid>/environ` 은 프로세스 소유자만 읽을 수 있어 명령행 인자보다 낫다.
+쓰고 나면 `unset` 한다.
+
 ### 2-1. gRPC 부트스트랩 키
 
 `REPUTATION_POOL_API_KEY` 는 `ApiKeySeeder` 가 기동 시 심는 **초기 키**다. 운영 중 발급하는 키는
 대시보드(`/keys`)에서 만들고 `ApiKeyManagementService` 가 해시로 저장한다(`ApiKeyHashing`).
 
 ```bash
-# 1) 새 값 준비
-openssl rand -base64 32
+# 1) 값을 프롬프트로 받는다 — 셸 히스토리에도 ps 에도 남기지 않는다 (§2-0)
+read -rsp '새 API 키: ' NEWVAL; echo
 
 # 2) .env 교체 후 재배포 (bootstrap.sh 는 멱등 — 재실행이 곧 재배포다)
-sed -i 's|^REPUTATION_POOL_API_KEY=.*|REPUTATION_POOL_API_KEY=<새값>|' .env
+NEWVAL="$NEWVAL" RP_KEY=REPUTATION_POOL_API_KEY python3 - <<'PY'
+import os, pathlib
+key, val = os.environ["RP_KEY"], os.environ["NEWVAL"]
+p = pathlib.Path(".env")
+lines = p.read_text().splitlines()
+out, seen = [], False
+for line in lines:
+    if line.startswith(key + "="):
+        out.append(f"{key}={val}"); seen = True
+    else:
+        out.append(line)
+if not seen:
+    out.append(f"{key}={val}")
+p.write_text("\n".join(out) + "\n")
+print(f"{key} 갱신 완료 ({len(val)}자)")
+PY
+unset NEWVAL
 ./scripts/bootstrap.sh
 ```
 
@@ -69,15 +101,36 @@ app 과 db 컨테이너가 같은 변수를 읽으므로 **한쪽만 바꾸면 �
 Postgres 가 이미 만들어진 롤의 비밀번호를 환경변수로 갱신하지 않는다는 점도 함께 걸린다.
 
 ```bash
-# 1) 실행 중인 db 에서 롤 비밀번호를 먼저 바꾼다
-docker compose exec db psql -U reputation_pool -c "ALTER USER reputation_pool PASSWORD '<새값>';"
+# 1) 실행 중인 db 에서 롤 비밀번호를 먼저 바꾼다.
+#    psql 의 \password 는 값을 프롬프트로 받아 서버로 보낸다 — SQL 문에도, 히스토리에도 남지 않는다.
+docker compose exec db psql -U reputation_pool
+# psql 안에서:
+#   \password reputation_pool
+#   \q
 
-# 2) .env 를 같은 값으로 맞추고 재배포
-sed -i 's|^REPUTATION_POOL_DB_PASSWORD=.*|REPUTATION_POOL_DB_PASSWORD=<새값>|' .env
+# 2) .env 를 같은 값으로 맞추고 재배포 (§2-1 과 같은 방식, 키 이름만 다르다)
+read -rsp '같은 비밀번호를 다시: ' NEWVAL; echo
+NEWVAL="$NEWVAL" RP_KEY=REPUTATION_POOL_DB_PASSWORD python3 - <<'PY'
+import os, pathlib
+key, val = os.environ["RP_KEY"], os.environ["NEWVAL"]
+p = pathlib.Path(".env")
+out, seen = [], False
+for line in p.read_text().splitlines():
+    if line.startswith(key + "="):
+        out.append(f"{key}={val}"); seen = True
+    else:
+        out.append(line)
+if not seen:
+    out.append(f"{key}={val}")
+p.write_text("\n".join(out) + "\n")
+print(f"{key} 갱신 완료 ({len(val)}자)")
+PY
+unset NEWVAL
 ./scripts/bootstrap.sh
 ```
 
-순서를 뒤집으면 app 이 옛 비밀번호로 붙으려다 실패한다.
+순서를 뒤집으면 app 이 옛 비밀번호로 붙으려다 실패한다. 두 값이 어긋나면 app 이 `FATAL: password
+authentication failed` 로 기동하지 못하므로, `\password` 에 넣은 값과 `.env` 에 넣는 값이 같아야 한다.
 
 ### 2-3. 유출됐다고 판단되면
 
@@ -92,7 +145,7 @@ sed -i 's|^REPUTATION_POOL_DB_PASSWORD=.*|REPUTATION_POOL_DB_PASSWORD=<새값>|'
 
 ### 감사 트레일
 
-```
+```dotenv
 REPUTATION_POOL_AUDIT_RETENTION=P0D     # 기본: 영구 보관 (P0D = 끄기). 유일한 감사 보존 노브다
 ```
 
