@@ -14,3 +14,7 @@ out/
 # git reset --hard 는 untracked 파일을 지우지 않으므로 배포를 거쳐도 남는다.
 .pull-deploy-state
 .claude/
+
+# 파이썬 바이트코드 — scripts/notify-mail.py 를 실행하거나 py_compile 하면 생긴다.
+__pycache__/
+*.pyc

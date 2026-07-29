@@ -3,6 +3,9 @@
 Oracle Cloud Always Free A1(arm64) 단일 호스트 + Docker Compose 배포 절차. 결정 근거는
 [ADR 0002](../decisions/0002-deploy-target-oracle-a1-arm64.md)와 이슈 #15에 있고, 이 문서는 **실행 절차**만 다룬다.
 
+곁가지 두 개는 따로 있다: 변수·시크릿·보존 기간은 [설정과 시크릿](configuration.md), 증상별 대처는
+[트러블슈팅](troubleshooting.md).
+
 ## 구성
 
 | 계층 | 어디 | 비고 |
@@ -471,6 +474,42 @@ sed -i 's|^DASHBOARD_IMAGE_TAG=.*|DASHBOARD_IMAGE_TAG=sha-<7자리>|' .env
 
 > `docker compose down -v` 를 프로덕션에서 쓰지 않는다. `caddy-data` 볼륨의 인증서가 사라져 재발급이 일어나고
 > Let's Encrypt 레이트리밋을 소모한다. DB 볼륨도 함께 지워진다.
+
+### 7-2. 스키마 마이그레이션
+
+**별도 단계가 없다.** Flyway 가 앱 기동 시 자동으로 적용한다(`spring.flyway.enabled: true`). 배포 =
+마이그레이션이고, 실패하면 앱이 뜨지 않으므로 헬스 확인이 그대로 마이그레이션 게이트 역할을 한다.
+
+마이그레이션은 두 곳에서 온다:
+
+| 출처 | 무엇 |
+|---|---|
+| `reputation-pool-persistence` jar (공개 레포) | `V1__snapshot.sql` · `V2__audit.sql` — 엔진 스키마 |
+| 이 레포 `src/main/resources/db/migration/` | `V100__tenant_identity.sql` 이후 — SaaS 스키마 |
+
+번호 대역을 100부터 띄운 것은 업스트림이 `V3`, `V4` 를 추가해도 충돌하지 않게 하기 위해서다.
+
+```bash
+# 적용 이력
+docker compose exec db psql -U reputation_pool \
+  -c 'select installed_rank, version, description, success, installed_on
+      from flyway_schema_history order by installed_rank desc limit 10;'
+```
+
+#### ⚠️ 이미지를 롤백해도 스키마는 되돌아가지 않는다
+
+Flyway 에 down 마이그레이션이 없다. `V104` 가 적용된 DB 에 `V103` 시절 이미지를 올리면 **컬럼이 남아
+있는 상태로 옛 코드가 돈다.** 대개는 무해하지만(추가된 컬럼을 옛 코드가 모를 뿐), 다음 경우는 깨진다:
+
+- `NOT NULL` 컬럼이 추가됐고 옛 코드가 그 컬럼 없이 INSERT 하는 경우
+- 컬럼·테이블 이름이 바뀐 경우
+- 제약이 강화된 경우(옛 코드가 넣던 값이 이제 거부된다)
+
+그래서 **스키마를 바꾸는 릴리스는 롤백 계획이 다르다**: 이미지만 되돌리지 말고 백업에서 복원하거나,
+`main` 에 앞으로 가는 수정 마이그레이션을 머지한다. 파괴적 변경(rename·drop)은 두 릴리스로 나누는 것이
+정석이다 — 먼저 새 컬럼을 추가해 양쪽 코드가 동작하게 하고, 다음 릴리스에서 옛 것을 지운다.
+
+마이그레이션이 실패한 상태의 대처는 [트러블슈팅](troubleshooting.md#flyway-마이그레이션이-실패한다).
 
 ### 새 `.env` 키가 생긴 릴리스로 재배포할 때
 
