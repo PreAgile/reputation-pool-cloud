@@ -8,6 +8,16 @@
 export const GITHUB_REPO_URL = "https://github.com/PreAgile/reputation-pool";
 
 /**
+ * 이 서비스(호스팅 계층) 자체의 공개 레포. 엔진 레포와 **다른 곳**이다 — compose 파일, `.env.example`,
+ * 컨트롤 플레인이 여기 있다.
+ *
+ * 퀵스타트가 이 링크를 쓴다: 호스티드 gRPC 데이터플레인이 아직 공개돼 있지 않아(9093 은 모든 배포에서
+ * loopback 바인딩) 실제로 따라 할 수 있는 경로가 "이 레포를 받아 직접 띄우기" 하나뿐이기 때문이다.
+ * 문서에서 링크가 죽으면 그 경로 전체가 막히므로 주소는 여기 한 곳에만 적는다.
+ */
+export const CLOUD_REPO_URL = "https://github.com/PreAgile/reputation-pool-cloud";
+
+/**
  * GitHub 스타 배지에 쓰는 정적 값. 지금은 플레이스홀더이며, 후속 슬라이스에서 빌드타임에
  * GitHub API 로 주입하도록 교체한다. null 이면 배지에 숫자를 감추고 마크·라벨만 노출.
  */

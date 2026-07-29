@@ -13,29 +13,93 @@ import {
   PageHeader,
   Section,
 } from "@/components/docs/prose";
-import { GITHUB_REPO_URL } from "@/components/marketing/constants";
+import { CLOUD_REPO_URL, CONTACT_EMAIL, GITHUB_REPO_URL } from "@/components/marketing/constants";
 import { docsMetadata, docsPage } from "@/lib/docs-manifest";
+import { TYPESCRIPT_WORKER_EXAMPLE } from "./typescript-example";
 
 const SLUG = "quickstart";
 const PAGE = docsPage(SLUG)!;
 
 export const metadata: Metadata = docsMetadata(SLUG);
 
+/**
+ * 퀵스타트 (#121). **자체 호스팅 스택 기준**으로 쓴다.
+ *
+ * 이 페이지는 원래 `your-grpc.example.com:9093` 이라는 공개 gRPC 주소를 전제로 쓰여 있었는데 그런
+ * 엔드포인트는 존재하지 않는다(PR #130 리뷰 P1). `compose.yaml` 은 9093 을 `127.0.0.1` 에만 바인딩하고,
+ * `compose.prod.yaml` 은 그 바인딩을 그대로 두며, `Caddyfile.prod` 는 `/api` 와 대시보드만 프록시한다 —
+ * gRPC 경로도 TLS 종단도 없다. 게다가 이건 배포 누락이 아니라 이슈 #15 가 못 박은 경계다: 로그인 스로틀이
+ * X-Forwarded-For 를 신뢰하는 근거(#28)가 "앱에 직접 닿을 수 없다" 이므로, 데이터플레인을 여는 것은
+ * 설정 변경이 아니라 방어 재설계다.
+ *
+ * 그래서 따라 하면 실제로 되는 유일한 경로 — 로컬 `docker compose` — 를 정본으로 삼는다. 없는 것을 있는
+ * 것처럼 쓴 문서는 없느니만 못하다. 호스티드 데이터플레인이 열리면 주소와 채널 자격증명만 바뀌고
+ * 나머지는 그대로이므로, 마지막 절에서 그 차이만 따로 적는다.
+ *
+ * TypeScript 예제는 `./typescript-example` 의 문자열 하나에서 온다 — 같은 문자열을 계약 테스트가 진짜
+ * `tsc` 에 걸어 컴파일되는지 확인한다(같은 리뷰의 P2). 여기 인라인으로 다시 적으면 그 검증이 무의미해진다.
+ */
 export default function DocsQuickstartPage() {
   return (
     <>
       <PageHeader title={PAGE.title} summary={PAGE.summary} />
 
-      <Section id="before-you-start" title="Before you start">
+      <Callout tone="warn" title="There is no hosted gRPC endpoint yet — this page runs against your own stack">
         <P>
-          You need two things from onboarding: the <B>control-plane origin</B> (HTTPS, same host as your dashboard) and
-          the <B>data-plane address</B> (gRPC, port <C>9093</C> in the default deployment), plus admin credentials for
-          the dashboard. Access is set up by hand today — there is no self-serve signup.
+          The reputation loop is gRPC, and the hosted deployment does not publish that port. In every compose file in
+          this project the data plane is bound to <C>127.0.0.1:9093</C>, and the public reverse proxy routes only the
+          dashboard and <C>/api</C> — there is no address for a client outside the host to dial, with or without TLS.
         </P>
-        <CodeBlock language="bash" title="the two addresses used throughout this page">
-          {`export RP_HOST=your-console.example.com   # control plane: https://$RP_HOST/api/...
-export RP_GRPC=your-grpc.example.com:9093 # data plane: ReputationAdvisor
-export RP_TENANT=your-tenant-id`}
+        <P>
+          That is a boundary rather than a gap in the rollout. The control plane trusts <C>X-Forwarded-For</C> for its
+          per-IP login throttle precisely because the proxy is the only way in, so publishing the data plane means
+          redesigning that trust first. Until then, hosted access means the dashboard and the REST control plane.
+        </P>
+        <P>
+          So everything below runs against a stack <B>you</B> start, from the same repository and the same images the
+          hosted deployment runs. It is copy-paste runnable end to end. When the data plane does open, only the address
+          and the channel credentials change — see{" "}
+          <a href="#hosted" className="font-medium text-accent hover:underline">
+            what changes on a hosted data plane
+          </a>
+          .
+        </P>
+      </Callout>
+
+      <Section id="step-1" title="1. Start the stack">
+        <P>
+          The service is one <C>docker compose</C> file: the app (REST on <C>8083</C>, gRPC on <C>9093</C>),
+          PostgreSQL, the dashboard, and a Caddy reverse proxy that serves both on a single origin at{" "}
+          <C>:8080</C>. Flyway migrates the schema on first boot, so there is no separate setup step.
+        </P>
+        <CodeBlock language="bash" title="clone, configure, run">
+          {`git clone ${CLOUD_REPO_URL}
+cd reputation-pool-cloud
+cp .env.example .env      # REPUTATION_POOL_API_KEY has no default — compose refuses to start without it
+docker compose up --build -d`}
+        </CodeBlock>
+        <P>
+          Open <C>http://localhost:8080</C> and the dashboard is there. The REST control plane needs one more step:
+          uncomment the three <C>REPUTATION_POOL_ADMIN_*</C> lines in <C>.env</C>. Leaving them unset is{" "}
+          <B>fail-closed on purpose</B> — the admin console stays disabled and every <C>/api/**</C> call is rejected,
+          while the gRPC data plane keeps working.
+        </P>
+        <CodeBlock language="bash" title=".env — enabling the control plane">
+          {`REPUTATION_POOL_ADMIN_USERNAME=admin
+REPUTATION_POOL_ADMIN_PASSWORD=change-me-local-dev
+# HS256 needs a 256-bit key: anything shorter than 32 bytes fails fast at startup.
+REPUTATION_POOL_ADMIN_JWT_SECRET=0123456789abcdef0123456789abcdef
+
+# Then re-create the container. Not \`docker compose restart\` — that reuses the container
+# with the environment it was created with, so the new variables would appear to do nothing.
+docker compose up -d`}
+        </CodeBlock>
+        <P>These are the values the rest of the page uses:</P>
+        <CodeBlock language="bash" title="the addresses and credentials used throughout">
+          {`export RP_ORIGIN=http://localhost:8080     # control plane + dashboard, one origin (Caddy)
+export RP_GRPC=localhost:9093              # data plane — loopback only, by design
+export RP_TENANT=default                   # the tenant compose seeds on startup
+export RP_API_KEY=local-dev-key            # REPUTATION_POOL_API_KEY from your .env`}
         </CodeBlock>
         <Callout title="The two planes use different credentials">
           <P>
@@ -47,26 +111,32 @@ export RP_TENANT=your-tenant-id`}
         </Callout>
       </Section>
 
-      <Section id="step-1" title="1. Get an API key">
+      <Section id="step-2" title="2. Get an API key">
         <P>
-          Log in to obtain a control-plane token. The response is show-once for the token value; it expires after{" "}
-          <C>expiresInSeconds</C> (one hour by default).
+          You already have one. On startup the app seeds <C>REPUTATION_POOL_API_KEY</C> as an active key for the{" "}
+          <C>default</C> tenant, so <C>$RP_API_KEY</C> authenticates gRPC calls immediately. Change the variable and
+          restart and the old key is revoked in the same step — the env var is the single source of truth for that one
+          bootstrap key.
+        </P>
+        <P>
+          For anything beyond a first run you want a key per worker, and those come from the control plane. Log in for a
+          token first; it expires after <C>expiresInSeconds</C> (one hour by default).
         </P>
         <CodeBlock language="bash" title="POST /api/auth/login">
-          {`curl -sS -X POST "https://$RP_HOST/api/auth/login" \\
+          {`curl -sS -X POST "$RP_ORIGIN/api/auth/login" \\
   -H 'Content-Type: application/json' \\
-  -d '{"username":"admin","password":"…"}'
+  -d '{"username":"admin","password":"change-me-local-dev"}'
 
 # {"token":"eyJhbGciOiJIUzI1NiJ9…","tokenType":"Bearer","expiresInSeconds":3600}
 export RP_JWT=eyJhbGciOiJIUzI1NiJ9…`}
         </CodeBlock>
         <P>
-          Now mint an API key for your tenant. The <C>rawToken</C> in the response is the <B>only</B> time the key
-          material is ever available — it is stored as a hash, not encrypted, so it cannot be read back later. Put it
-          straight into your secret store.
+          Now mint a key. The <C>rawToken</C> in the response is the <B>only</B> time the key material is ever
+          available — it is stored as a hash, not encrypted, so it cannot be read back later. Put it straight into your
+          secret store.
         </P>
         <CodeBlock language="bash" title="POST /api/tenants/{tenantId}/api-keys">
-          {`curl -sS -X POST "https://$RP_HOST/api/tenants/$RP_TENANT/api-keys" \\
+          {`curl -sS -X POST "$RP_ORIGIN/api/tenants/$RP_TENANT/api-keys" \\
   -H "Authorization: Bearer $RP_JWT" \\
   -H 'Content-Type: application/json' \\
   -d '{"label":"worker-01"}'
@@ -88,7 +158,7 @@ export RP_API_KEY=rp_9Q3xK7bT…`}
         </P>
       </Section>
 
-      <Section id="step-2" title="2. Register your resources">
+      <Section id="step-3" title="3. Register your resources">
         <P>
           A resource is a <C>kind</C> (<C>PROXY</C>, <C>ACCOUNT</C>, or <C>SESSION</C>) plus an opaque{" "}
           <C>value</C> you choose — a proxy endpoint, an account id, a session handle. Registration is idempotent, so
@@ -96,13 +166,20 @@ export RP_API_KEY=rp_9Q3xK7bT…`}
         </P>
         <P>
           The data plane is gRPC, so the requests below use <A href="https://github.com/fullstorydev/grpcurl">grpcurl</A>{" "}
-          rather than curl. Server reflection is not enabled, so point grpcurl at <C>advisor.proto</C> — it ships inside
-          the published <C>reputation-pool-grpc</C> artifact and lives in{" "}
-          <A href={GITHUB_REPO_URL}>the engine repository</A>.
+          rather than curl. Server reflection is on, so grpcurl can discover the service by itself — no{" "}
+          <C>.proto</C> file to fetch. The interceptor guards reflection too, so the key is required even to list:
+        </P>
+        <CodeBlock language="bash" title="check you can reach the data plane">
+          {`grpcurl -plaintext -H "x-api-key: $RP_API_KEY" "$RP_GRPC" list
+
+# io.github.preagile.reputationpool.grpc.v1.ReputationAdvisor   <-- plus health and reflection`}
+        </CodeBlock>
+        <P>
+          <C>-plaintext</C> is correct here and not a shortcut: the port is on loopback with no TLS in front of it. Drop
+          the flag only when you have actually put a TLS terminator there.
         </P>
         <CodeBlock language="bash" title="ReputationAdvisor/Register">
-          {`grpcurl -proto advisor.proto \\
-  -H "x-api-key: $RP_API_KEY" \\
+          {`grpcurl -plaintext -H "x-api-key: $RP_API_KEY" \\
   -d '{"resource":{"kind":"PROXY","value":"proxy-1.example.net:8080"}}' \\
   "$RP_GRPC" io.github.preagile.reputationpool.grpc.v1.ReputationAdvisor/Register
 
@@ -110,15 +187,14 @@ export RP_API_KEY=rp_9Q3xK7bT…`}
         </CodeBlock>
       </Section>
 
-      <Section id="step-3" title="3. Acquire for a context">
+      <Section id="step-4" title="4. Acquire for a context">
         <P>
           A <B>context</B> is a string naming what you are about to do — <C>checkout-us</C>, <C>search-eu</C>, one per
           destination or workload that can burn a resource independently. You pass it to <C>Acquire</C> and the pool
           returns the healthiest resource <B>for that context</B>, leased exclusively to you.
         </P>
         <CodeBlock language="bash" title="ReputationAdvisor/Acquire">
-          {`grpcurl -proto advisor.proto \\
-  -H "x-api-key: $RP_API_KEY" \\
+          {`grpcurl -plaintext -H "x-api-key: $RP_API_KEY" \\
   -d '{"context":{"value":"checkout-us"}}' \\
   "$RP_GRPC" io.github.preagile.reputationpool.grpc.v1.ReputationAdvisor/Acquire
 
@@ -142,15 +218,14 @@ export RP_API_KEY=rp_9Q3xK7bT…`}
         </Callout>
       </Section>
 
-      <Section id="step-4" title="4. Use the resource, then report the outcome">
+      <Section id="step-5" title="5. Use the resource, then report the outcome">
         <P>
           Do your work with <C>lease.resource</C>, then tell the pool what happened. This is the call that moves
           reputation: a success nudges the score up, a failure pushes it down by an amount that depends on the failure
           type and, past the threshold, benches the resource for a cooldown.
         </P>
         <CodeBlock language="bash" title="ReputationAdvisor/Report — success">
-          {`grpcurl -proto advisor.proto \\
-  -H "x-api-key: $RP_API_KEY" \\
+          {`grpcurl -plaintext -H "x-api-key: $RP_API_KEY" \\
   -d '{
         "resource": {"kind":"PROXY","value":"proxy-1.example.net:8080"},
         "context":  {"value":"checkout-us"},
@@ -160,8 +235,7 @@ export RP_API_KEY=rp_9Q3xK7bT…`}
         </CodeBlock>
         <CodeBlock language="bash" title="ReputationAdvisor/Report — failure">
           {`# type: CONNECTION_RESET | TLS_HANDSHAKE | TIMEOUT | BLOCKED | SLOW
-grpcurl -proto advisor.proto \\
-  -H "x-api-key: $RP_API_KEY" \\
+grpcurl -plaintext -H "x-api-key: $RP_API_KEY" \\
   -d '{
         "resource": {"kind":"PROXY","value":"proxy-1.example.net:8080"},
         "context":  {"value":"checkout-us"},
@@ -180,8 +254,7 @@ grpcurl -proto advisor.proto \\
           busy instead of waiting out TTLs. If your work outlives the TTL, call <C>Renew</C>.
         </P>
         <CodeBlock language="bash" title="ReputationAdvisor/Release">
-          {`grpcurl -proto advisor.proto \\
-  -H "x-api-key: $RP_API_KEY" \\
+          {`grpcurl -plaintext -H "x-api-key: $RP_API_KEY" \\
   -d '{"lease":{"resource":{"kind":"PROXY","value":"proxy-1.example.net:8080"},
                 "context":{"value":"checkout-us"},"token":"1",
                 "leasedAt":"2026-07-29T09:13:02Z","expiresAt":"2026-07-29T09:13:32Z"}}' \\
@@ -217,20 +290,26 @@ import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ReportRequest;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ResourceId;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ResourceKind;
 import io.github.preagile.reputationpool.grpc.v1.ReputationAdvisorGrpc;
+import io.grpc.ChannelCredentials;
 import io.grpc.Grpc;
+import io.grpc.InsecureChannelCredentials;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
-import io.grpc.TlsChannelCredentials;
 import io.grpc.stub.MetadataUtils;
 
 final class Worker {
 
     private final ReputationAdvisorGrpc.ReputationAdvisorBlockingStub advisor;
 
+    /**
+     * Loopback data plane: InsecureChannelCredentials. Behind a TLS terminator this becomes
+     * TlsChannelCredentials.create() and nothing else in this class changes.
+     */
     Worker(String target, String apiKey) {
         var headers = new Metadata();
         headers.put(Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER), apiKey);
-        ManagedChannel channel = Grpc.newChannelBuilder(target, TlsChannelCredentials.create()).build();
+        ChannelCredentials credentials = InsecureChannelCredentials.create();
+        ManagedChannel channel = Grpc.newChannelBuilder(target, credentials).build();
         this.advisor = ReputationAdvisorGrpc.newBlockingStub(channel)
                 .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
     }
@@ -291,72 +370,29 @@ final class Worker {
         <P>
           There is no published JS client yet, so load <C>advisor.proto</C> at runtime with{" "}
           <C>@grpc/proto-loader</C>. <C>keepCase: false</C> gives you the same lowerCamelCase field names the JSON
-          examples above use.
+          examples above use. The proto file ships inside the published <C>reputation-pool-grpc</C> artifact and lives
+          in <A href={GITHUB_REPO_URL}>the engine repository</A>.
         </P>
         <CodeBlock language="typescript" title="worker.ts">
-          {`import { credentials, loadPackageDefinition, Metadata } from "@grpc/grpc-js";
-import { loadSync } from "@grpc/proto-loader";
-
-const definition = loadSync("advisor.proto", { keepCase: false, defaults: true, longs: String });
-const proto = loadPackageDefinition(definition) as never;
-// package io.github.preagile.reputationpool.grpc.v1
-const { ReputationAdvisor } = (proto as Record<string, never>)
-  .io.github.preagile.reputationpool.grpc.v1;
-
-const advisor = new ReputationAdvisor(process.env.RP_GRPC!, credentials.createSsl());
-
-const auth = new Metadata();
-auth.set("x-api-key", process.env.RP_API_KEY!);
-
-const call = <T>(method: string, request: unknown): Promise<T> =>
-  new Promise((resolve, reject) =>
-    advisor[method](request, auth, (err: Error | null, res: T) => (err ? reject(err) : resolve(res))),
-  );
-
-// google.protobuf.Duration accepts the "12.345s" JSON form.
-const seconds = (ms: number) => \`\${(ms / 1000).toFixed(3)}s\`;
-
-export async function runOnce(): Promise<void> {
-  const resource = { kind: "PROXY", value: "proxy-1.example.net:8080" };
-  const context = { value: "checkout-us" };
-
-  await call("Register", { resource }); // idempotent
-
-  const acquired = await call<{ granted: boolean; lease?: { token: string } }>("Acquire", { context });
-  if (!acquired.granted || acquired.lease === undefined) {
-    return; // nothing eligible right now — back off and retry
-  }
-  const lease = acquired.lease;
-
-  const startedAt = Date.now();
-  try {
-    await useProxy(resource.value); // your work
-    await call("Report", {
-      resource,
-      context,
-      outcome: { success: { latency: seconds(Date.now() - startedAt) } },
-    });
-  } catch {
-    await call("Report", {
-      resource,
-      context,
-      outcome: { failure: { type: "TIMEOUT", latency: seconds(Date.now() - startedAt) } },
-    });
-  } finally {
-    await call("Release", { lease: { resource, context, ...lease } });
-  }
-}`}
+          {TYPESCRIPT_WORKER_EXAMPLE}
         </CodeBlock>
+        <Callout title="This snippet is compiled by CI">
+          <P>
+            A contract test writes exactly the code above to a temporary file and runs <C>tsc --noEmit</C> on it under{" "}
+            <C>strict</C>. Documentation examples rot silently otherwise: an earlier draft of this page cast the loaded
+            package to <C>never</C>, which fails to compile on the very next line, and reading it did not reveal that.
+          </P>
+        </Callout>
       </Section>
 
-      <Section id="verify" title="5. Verify it landed">
+      <Section id="verify" title="6. Verify it landed">
         <P>
           Read the pool back over the control plane. Your resource should be there with one cell per context you have
           reported on, and the events feed should show the lease and any cooldown.
         </P>
         <CodeBlock language="bash" title="GET /api/pools/resources and GET /api/events">
-          {`curl -sS "https://$RP_HOST/api/pools/resources" -H "Authorization: Bearer $RP_JWT"
-curl -sS "https://$RP_HOST/api/events?limit=10" -H "Authorization: Bearer $RP_JWT"`}
+          {`curl -sS "$RP_ORIGIN/api/pools/resources" -H "Authorization: Bearer $RP_JWT"
+curl -sS "$RP_ORIGIN/api/events?limit=10" -H "Authorization: Bearer $RP_JWT"`}
         </CodeBlock>
         <Bullets>
           <Bullet>
@@ -368,10 +404,48 @@ curl -sS "https://$RP_HOST/api/events?limit=10" -H "Authorization: Bearer $RP_JW
             <C>Acquire</C>.
           </Bullet>
           <Bullet>
-            <C>401</C> on every REST call? The token expired — log in again. See{" "}
+            <C>401</C> on every REST call? Either the token expired — log in again — or the three admin variables are
+            not set, which disables the console entirely. See{" "}
             <DocsLink href="/docs/api">REST API reference</DocsLink> for the full error table.
           </Bullet>
+          <Bullet>
+            <C>UNAVAILABLE</C> from grpcurl? Nothing is listening on <C>9093</C>. Check <C>docker compose ps</C>; the
+            app publishes that port on <C>127.0.0.1</C> only, so it is unreachable from another machine by design.
+          </Bullet>
         </Bullets>
+      </Section>
+
+      <Section id="hosted" title="What changes on a hosted data plane">
+        <P>
+          Nothing in the loop. The RPCs, the message shapes, the API key header, and the reputation model are the
+          engine&apos;s, and this service consumes the engine as a published dependency rather than a fork — the same
+          code runs in both places. Moving a worker from your stack to a hosted one is two edits:
+        </P>
+        <Bullets>
+          <Bullet>
+            the target address — <C>localhost:9093</C> becomes whatever the hosted endpoint is;
+          </Bullet>
+          <Bullet>
+            the channel credentials — <C>-plaintext</C> / <C>InsecureChannelCredentials</C> /{" "}
+            <C>credentials.createInsecure()</C> become their TLS counterparts.
+          </Bullet>
+        </Bullets>
+        <P>
+          What does <B>not</B> exist yet is the endpoint itself. There is no published hostname, port, or TLS contract
+          for a hosted data plane, and this page will not invent one. If that is what stands between you and using this,
+          say so at{" "}
+          <a href={`mailto:${CONTACT_EMAIL}`} className="font-medium text-accent hover:underline">
+            {CONTACT_EMAIL}
+          </a>{" "}
+          — it is a known gap, and knowing who needs it is what decides when it gets built. Reputation state does not
+          transfer between deployments today either; pools warm up again from live traffic.
+        </P>
+        <P>
+          Everything on this page came from the deployment files in{" "}
+          <A href={CLOUD_REPO_URL}>PreAgile/reputation-pool-cloud</A> — <C>compose.yaml</C>, <C>compose.prod.yaml</C>,{" "}
+          and <C>Caddyfile.prod</C>. If you want to check the claim about the port binding rather than take it on
+          trust, that is where to look.
+        </P>
       </Section>
 
       <DocsPager slug={SLUG} />

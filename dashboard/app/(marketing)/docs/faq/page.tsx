@@ -114,6 +114,14 @@ export default function DocsFaqPage() {
       </Section>
 
       <Section id="self-host" title="Self-host or hosted?">
+        <Callout tone="warn" title="Today this is not fully a choice — the data plane is self-hosted either way">
+          <P>
+            The gRPC port is bound to loopback in every deployment and the public reverse proxy fronts only the
+            dashboard and <C>/api</C>, so there is no hosted address to send <C>Acquire</C> and <C>Report</C> to. What
+            hosting covers right now is the control plane and everything built on it. The comparison below is what the
+            two options are meant to be; <DocsLink href="/docs/quickstart">Quickstart</DocsLink> is what runs today.
+          </P>
+        </Callout>
         <P>
           The engine is open source under Apache-2.0 at <A href={GITHUB_REPO_URL}>PreAgile/reputation-pool</A>: scoring,
           the four states and their transitions, the cooldown curve, lease fencing, the selection strategy, the gRPC
@@ -227,6 +235,16 @@ export default function DocsFaqPage() {
       </Section>
 
       <Section id="misc" title="Anything else">
+        <SubHeading>Why can I not reach the gRPC data plane on your host?</SubHeading>
+        <P>
+          Because it is not published. Compose binds port <C>9093</C> to <C>127.0.0.1</C> and the reverse proxy has no
+          gRPC route and no TLS termination for one. That binding is also load-bearing: the login throttle trusts{" "}
+          <C>X-Forwarded-For</C> on the premise that the app is unreachable except through the proxy, so opening the
+          data plane is a redesign of that defence rather than a port change. Until it happens,{" "}
+          <DocsLink href="/docs/quickstart">Quickstart</DocsLink> runs the loop against a stack you start, and the
+          client code is identical apart from the address and the channel credentials.
+        </P>
+
         <SubHeading>Is there a REST equivalent of Acquire and Report?</SubHeading>
         <P>
           Not today. The data plane is gRPC only — the control plane is REST. If an HTTP data plane is what stands between

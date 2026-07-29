@@ -75,6 +75,14 @@ export default function DocsAuthenticationPage() {
           <C>Authorization</C>; the servlet security chain never looks at <C>x-api-key</C>. Sending the wrong one is
           indistinguishable from sending nothing.
         </P>
+        <Callout tone="warn" title="Where each credential is usable today">
+          <P>
+            The admin JWT works against the hosted control plane. The API key works against a gRPC port that is bound to
+            loopback in every deployment, so today it authenticates calls to a stack you run yourself — see{" "}
+            <DocsLink href="/docs/quickstart">Quickstart</DocsLink>. Everything below about issuing, storage, rotation,
+            and revocation is the same in both cases; keys are minted through the control plane either way.
+          </P>
+        </Callout>
       </Section>
 
       <Section id="api-keys" title="API keys">

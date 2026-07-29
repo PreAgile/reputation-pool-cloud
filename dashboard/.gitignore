@@ -7,6 +7,10 @@ next-env.d.ts
 .env*.local
 .DS_Store
 
+# 퀵스타트 문서 예제를 tsc 에 거는 계약 테스트의 작업 디렉터리. tsc 의 모듈 해석이 위로 올라가며
+# node_modules 를 찾으므로 반드시 여기(dashboard/) 안에 만들어야 하고, 테스트가 중간에 죽으면 남는다.
+/.docs-example-typecheck-*
+
 # Playwright
 /test-results
 /playwright-report

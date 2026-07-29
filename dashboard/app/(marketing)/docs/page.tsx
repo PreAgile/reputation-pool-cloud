@@ -76,6 +76,15 @@ export default function DocsIntroPage() {
           <DocsLink href="/docs/api">REST API reference</DocsLink> covers the control plane, and{" "}
           <DocsLink href="/docs/authentication">Authentication</DocsLink> explains which credential belongs where.
         </P>
+        <Callout tone="warn" title="Only the control plane is reachable over the internet today">
+          <P>
+            The gRPC data plane is bound to loopback in every deployment here, and the public reverse proxy fronts only
+            the dashboard and <C>/api</C>. So hosted access means the dashboard and the REST control plane; to run the{" "}
+            <C>Register</C>/<C>Acquire</C>/<C>Report</C> loop you start the stack yourself, which{" "}
+            <DocsLink href="/docs/quickstart">Quickstart</DocsLink> walks through end to end. It is the same code either
+            way — that section explains why the port is closed and what would change if it opened.
+          </P>
+        </Callout>
       </Section>
 
       <Section id="open-core" title="Hosted API vs the open-source engine">
@@ -117,7 +126,8 @@ export default function DocsIntroPage() {
           </Bullet>
         </Bullets>
         <P>
-          Access is still onboarded by hand — there is no self-serve signup yet. Write to{" "}
+          Access is still onboarded by hand — there is no self-serve signup yet, and what onboarding grants you today is
+          a tenant on the dashboard and the control plane, not a gRPC endpoint. Write to{" "}
           <a href={`mailto:${CONTACT_EMAIL}`} className="font-medium text-accent hover:underline">
             {CONTACT_EMAIL}
           </a>{" "}

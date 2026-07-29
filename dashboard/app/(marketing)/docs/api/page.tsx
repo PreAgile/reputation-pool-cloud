@@ -32,8 +32,9 @@ export default function DocsApiPage() {
       <Section id="conventions" title="Conventions">
         <Bullets>
           <Bullet>
-            <B>Base</B> — <C>https://&lt;your-console-host&gt;/api</C>. The control plane is served from the same origin
-            as the dashboard, so browser tooling needs no CORS setup.
+            <B>Base</B> — <C>https://&lt;your-console-host&gt;/api</C>, or <C>http://localhost:8080/api</C> against a
+            stack you started yourself. The control plane is served from the same origin as the dashboard, so browser
+            tooling needs no CORS setup.
           </Bullet>
           <Bullet>
             <B>Auth</B> — every endpoint except <C>POST /api/auth/login</C> requires{" "}
@@ -106,6 +107,11 @@ export default function DocsApiPage() {
               gRPC summary
             </a>{" "}
             at the bottom of this page.
+          </P>
+          <P>
+            The reverse split matters too: this REST surface is the <B>only</B> plane published to the internet. The
+            gRPC port is bound to loopback in every deployment, so the RPCs below are reachable from a stack you run
+            yourself and not from a hosted address.
           </P>
         </Callout>
       </Section>
@@ -532,7 +538,8 @@ done`}
         <P>
           Not REST, but listed here so the whole surface is in one place. Service{" "}
           <C>io.github.preagile.reputationpool.grpc.v1.ReputationAdvisor</C>, authenticated with <C>x-api-key</C>
-          metadata. Message shapes and runnable calls are in{" "}
+          metadata, served on port <C>9093</C> of the app container — published on <C>127.0.0.1</C> only, so you reach
+          it from a stack you started rather than from a hosted hostname. Message shapes and runnable calls are in{" "}
           <DocsLink href="/docs/quickstart">Quickstart</DocsLink>.
         </P>
         <Table head={["RPC", "Request → response", "Notes"]}>
