@@ -386,8 +386,9 @@ header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
    다시 본다. 이 확인이 없으면 `bootstrap.sh` 의 pull 이 실패하는데 그 메시지는 "GHCR 패키지가 public 인지
    확인하라"로 나와 원인을 오도한다.
 4. **서버 체크아웃을 그 커밋으로 맞춘다** (`git reset --hard`). 이미지 pull 만으로는 부족하다 —
-   `compose*.yaml`·`monitoring/*`(알림 룰)·`Caddyfile.prod` 는 이미지 안이 아니라 **서버 체크아웃에서
-   bind-mount** 되므로, 이미지만 갱신하면 알림 룰이나 리버스 프록시 변경이 반영되지 않는다.
+   `compose*.yaml`·`monitoring/*`(알림 룰)·`Caddyfile.prod`·`caddy/*`(오리진 다운 화면)은 이미지 안이
+   아니라 **서버 체크아웃에서 bind-mount** 되므로, 이미지만 갱신하면 알림 룰이나 리버스 프록시 변경이
+   반영되지 않는다.
    서버의 로컬 수정은 버려진다. `.env` 는 gitignore 대상이라 남는다.
 5. **이미지 태그를 그 커밋으로 고정한다** — `.env` 의 `APP_IMAGE_TAG`·`DASHBOARD_IMAGE_TAG` 를
    `sha-<7자리>` 로 갱신한 뒤 `bootstrap.sh` 를 부른다.

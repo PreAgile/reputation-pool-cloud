@@ -100,6 +100,9 @@ services:
       - "8080:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # 오리진 다운 화면(#134). dashboard 이미지가 아니라 **Caddy 쪽**에 있어야 한다 — 이 화면이 뜨는
+      # 순간은 dashboard 컨테이너가 없는 순간이라, 거기서 서빙되는 것은 무엇이든 함께 사라진다.
+      - ./caddy:/srv/caddy:ro
       - caddy-data:/data
     restart: unless-stopped
 

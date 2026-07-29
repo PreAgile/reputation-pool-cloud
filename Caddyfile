@@ -46,6 +46,60 @@
 	header /login +Vary "Accept-Language, Cookie, CF-IPCountry"
 }
 
+# 오리진 다운 화면 (#134). dashboard 컨테이너가 죽으면 `reverse_proxy` 가 502 를 내는데, 지금까지는
+# **본문 없는 502** 였다 — 브라우저는 빈 화면을 그린다. 앱이 죽어도 Caddy 는 살아 있으므로 이 순간
+# 사용자에게 의미 있는 화면을 줄 수 있는 유일한 자리가 여기다.
+#
+# 화면 자체는 `caddy/origin-down.html`(compose 가 /srv/caddy 로 마운트)이고, 오리진에 아무것도
+# 요청하지 않는 자족 HTML 이다.
+#
+# ## 왜 별도 파일인가(Caddyfile 안에 heredoc 으로 넣지 않은 이유)
+# Caddyfile 은 `{...}` 를 플레이스홀더로 해석한다. 인라인 CSS 를 그대로 넣으면 중괄호를 전부
+# `{{`/`}}` 로 이스케이프해야 하고, 그러면 사람이 읽지도 고치지도 못하는 덩어리가 된다. 파일로 빼면
+# 브라우저로 직접 열어 확인할 수도 있다. 대신 compose 에 마운트가 하나 늘었다(`./caddy:/srv/caddy`) —
+# `compose.prod.tls.yaml` 은 volumes 를 `!override` 로 통째 교체하므로 거기에도 함께 적어야 한다.
+#
+# ## 왜 한 파일에 한국어·영어를 병기하나
+# Caddy 로도 `Accept-Language` 분기는 가능하지만, 그러려면 페이지를 언어 수만큼 복제하고 에러 응답에
+# `Vary` 를 관리해야 한다. 앱이 죽어 있는 경로에 캐시 정합성 문제를 새로 만드는 대가로 얻는 것이
+# "두 줄 중 한 줄이 사라지는 것" 뿐이라 병기를 골랐다(대시보드 404 는 앱이 살아 있으므로 기존 로케일
+# 판별을 그대로 쓴다 — `dashboard/app/not-found.tsx`).
+#
+# ## 계층 분리(#15/#16) 후
+# 랜딩이 별도 호스팅으로 나가면 "이 오리진이 죽어도 랜딩은 살아 있다" 가 된다. 그때는 HTML 의 CTA
+# href 를 랜딩 절대 URL 로 바꾸고 문구를 그쪽으로 안내하게 옮기면 된다 — 그 변경이 한 줄로 끝나도록
+# CTA 는 링크 하나만 두었다.
+#
+# `handle_errors` 는 **모든** 에러를 삼킨다. 502/503/504 만 처리하고 끝내면 나머지(예: 파일 없음)는
+# 본문도 상태코드도 없는 응답이 되므로, 매칭되지 않는 경우를 위한 기본 handle 을 반드시 남긴다.
+#
+# (Caddyfile.prod 와 동일하게 유지할 것.)
+(origin_down) {
+	handle_errors {
+		# 오리진에 닿지 못했거나(502) 대기열이 가득했거나(503) 응답이 늦은(504) 경우 — 셋 다 사용자에게는
+		# "지금은 안 된다, 곧 된다" 로 같은 뜻이다. 4xx 는 앱이 직접 응답하므로 여기 오지 않는다.
+		@origin_down expression {err.status_code} in [502, 503, 504]
+		handle @origin_down {
+			root * /srv/caddy
+			rewrite * /origin-down.html
+			# 본문의 `{{placeholder "http.error.status_code"}}` 를 실제 코드로 채운다. 정적 파일이라
+			# 502/503/504 를 구분해 보여줄 방법이 이것뿐이다.
+			templates
+			# 장애 화면이 캐시에 남아 복구된 뒤에도 계속 보이는 사고를 막는다. 검색 색인도 함께 차단
+			# (HTML 의 meta robots 는 크롤러가 본문을 파싱해야 보이지만 이 헤더는 그 전에 보인다).
+			header Cache-Control "no-store"
+			header X-Robots-Tag "noindex, nofollow"
+			file_server {
+				# 200 으로 내려가면 모니터링·크롤러·`curl -f` 가 전부 정상으로 오판한다. 원래 코드를 유지한다.
+				status {err.status_code}
+			}
+		}
+		handle {
+			respond "{err.status_code} {err.status_text}" {err.status_code}
+		}
+	}
+}
+
 :80 {
 	# REST 컨트롤 플레인 (#11).
 	handle /api/* {
@@ -66,4 +120,6 @@
 		import locale_vary
 		reverse_proxy dashboard:3000
 	}
+
+	import origin_down
 }

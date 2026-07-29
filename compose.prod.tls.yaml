@@ -27,6 +27,9 @@ services:
     # 같은 마운트 지점(/etc/caddy/Caddyfile)에 두 파일이 겹치지 않도록 목록을 통째로 교체한다.
     volumes: !override
       - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      # 목록을 통째로 교체하므로 base 의 마운트도 여기 다시 적어야 한다 — 빠지면 오리진 다운 화면(#134)이
+      # 프로덕션에서만 404 로 나간다(정작 필요한 곳에서만 없는 셈).
+      - ./caddy:/srv/caddy:ro
       # 발급된 인증서가 여기 남는다. 이 볼륨을 지우면 재발급이 일어나 Let's Encrypt 레이트리밋을
       # 소모하므로 `compose down -v` 를 프로덕션에서 쓰지 않는다.
       - caddy-data:/data
