@@ -444,3 +444,32 @@ groups:
         annotations:
           summary: "[SLO] 컨트롤 플레인 지연 에러버짓을 1배 속도로 소진 중 — 이 속도면 30일 뒤 소진"
           description: "목표 99%/30일. 3d·6h 창이 모두 소진율 1배를 넘었다 (최근 6h 500ms 초과 요청 5건 이상). 정의와 대응은 docs/engineering/slo.md 참고."
+
+      # 데이터 플레인 상한 (#132). 거부가 튄다는 것은 둘 중 하나다: 누가 남용하고 있거나, **상한이 너무
+      # 낮아 정상 고객을 막고 있거나.** 후자가 더 흔하고 더 위험하다 — 그 상태는 우리 눈에 "방어가 잘
+      # 되네" 로 보이는데 고객 쪽에서는 제품이 고장난 것으로 보인다. 그래서 warning 이고, 대응은
+      # "막아야 할 트래픽인지 먼저 확인" 이다.
+      #
+      # 기본값(10 req/s · burst 50)은 실측 없는 가설이라(#137 이 실측을 만든다) 임계도 보수적으로 둔다.
+      - alert: DataPlaneRateLimitRejections
+        expr: sum(rate(datapane_rate_limited_total[5m])) * 60 > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "데이터 플레인 상한 거부가 분당 10건을 넘는다 — 남용이거나 상한이 낮다"
+          description: >
+            reputation-pool.rate-limit 설정을 먼저 확인한다. 정상 트래픽이면 상한을 올리고,
+            아니면 해당 API 키를 콘솔에서 폐기한다. 즉시 해제하려면 rate-limit.enabled=false.
+
+      # 제한기 자체가 고장나 통과시키고 있다는 뜻이다(fail-open). 거부가 0 인 것과 **한도가 없는 것**은
+      # 완전히 다른 상태인데 겉보기 신호가 같다 — 이 카운터가 그 둘을 가른다.
+      - alert: DataPlaneRateLimiterFailing
+        expr: sum(rate(datapane_rate_limiter_errors_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "요청 상한이 적용되지 않고 있다 — 제한기가 예외로 통과시키는 중"
+          description: "app 로그에서 'rate limiter failed' 를 확인한다. 상한 없이 열려 있는 상태다."
+

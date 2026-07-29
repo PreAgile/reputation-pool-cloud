@@ -62,6 +62,12 @@ services:
       REPUTATION_POOL_ADMIN_USERNAME: ${REPUTATION_POOL_ADMIN_USERNAME:-}
       REPUTATION_POOL_ADMIN_PASSWORD: ${REPUTATION_POOL_ADMIN_PASSWORD:-}
       REPUTATION_POOL_ADMIN_JWT_SECRET: ${REPUTATION_POOL_ADMIN_JWT_SECRET:-}
+      # Per-tenant request ceiling on the data plane (issue #132). All optional — the app's defaults
+      # apply when unset. ENABLED=false is the escape hatch: it makes the limiter a no-op without a
+      # rebuild, for when the limiter itself is suspected of blocking healthy traffic.
+      REPUTATION_POOL_RATE_LIMIT_ENABLED: ${REPUTATION_POOL_RATE_LIMIT_ENABLED:-}
+      REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND: ${REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND:-}
+      REPUTATION_POOL_RATE_LIMIT_BURST: ${REPUTATION_POOL_RATE_LIMIT_BURST:-}
     ports:
       # Loopback-only: reachable from the host for local dev, but not exposed to the network. This is the
       # premise of the login throttle's X-Forwarded-For trust — see the header comment and #28.
