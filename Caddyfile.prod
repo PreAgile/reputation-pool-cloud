@@ -47,6 +47,29 @@
 	header /login +Vary "Accept-Language, Cookie, CF-IPCountry"
 }
 
+# 오리진 다운 화면 (#134) — base `Caddyfile` 과 동일하게 유지할 것. 상세한 이유는 그쪽 주석 참고.
+# 프로덕션에서 이 화면이 특히 중요한 이유: 풀 배포(`scripts/pull-deploy.sh`)가 dashboard 컨테이너를
+# 교체하는 수십 초 동안, 그리고 롤백이 도는 동안 방문자가 보는 것이 정확히 이 응답이다.
+(origin_down) {
+	handle_errors {
+		@origin_down expression {err.status_code} in [502, 503, 504]
+		handle @origin_down {
+			root * /srv/caddy
+			rewrite * /origin-down.html
+			templates
+			header Cache-Control "no-store"
+			header X-Robots-Tag "noindex, nofollow"
+			file_server {
+				status {err.status_code}
+			}
+		}
+		# handle_errors 는 모든 에러를 삼키므로, 매칭되지 않는 코드를 위한 기본 응답을 반드시 남긴다.
+		handle {
+			respond "{err.status_code} {err.status_text}" {err.status_code}
+		}
+	}
+}
+
 # DOMAIN 미설정이면 compose 가 기동 전에 실패한다(compose.prod.yaml 의 `:?`). 여기서 빈 사이트 주소로
 # Caddy 가 죽는 상황을 만들지 않기 위한 것이다.
 {$DOMAIN} {
@@ -72,4 +95,6 @@
 		import locale_vary
 		reverse_proxy dashboard:3000
 	}
+
+	import origin_down
 }

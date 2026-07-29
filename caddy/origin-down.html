@@ -1,0 +1,144 @@
+<!doctype html>
+<!--
+  오리진(dashboard 컨테이너) 다운 시 Caddy 가 직접 내려주는 화면 — 502/503/504 (#134).
+
+  이 파일을 고칠 때 지켜야 하는 규칙은 하나다: **오리진에 아무것도 요청하지 않는다.**
+  이 화면이 뜨는 상황은 정확히 "dashboard 가 죽었다" 이므로, `/globals.css` 든 `/_next/static/…` 든
+  로고 이미지든 하나라도 참조하면 그 요청도 똑같이 502 가 되어 스타일 없는 흰 화면이 남는다.
+  그래서 CSS 는 인라인, 아이콘은 인라인 SVG, 폰트는 시스템 스택이다(Pretendard 도 오리진이 서빙한다).
+  합격 기준은 "네트워크 탭에 이 문서 하나"다.
+
+  배치·마운트·언어 선택 등 나머지 배경은 레포 루트 `Caddyfile` 의 `(origin_down)` 스니펫 주석에 있다.
+  (이 주석은 방문자에게도 그대로 전송된다 — 길게 쓰지 말고 그쪽에 쓴다.)
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>콘솔을 잠시 이용할 수 없습니다 · reputation·pool</title>
+    <style>
+      /* 토큰 값은 app/globals.css 에서 옮겨 적었다(공유 불가 — 그 CSS 도 오리진이 서빙한다). */
+      :root {
+        color-scheme: light dark;
+        --bg: #f2f4f6;
+        --surface: #ffffff;
+        --ink: #191f28;
+        --muted: #5f6b7a;
+        --line: #e8ebee;
+        --accent: #1a66d6;
+        --accent-ink: #ffffff;
+      }
+      /* next-themes 의 .dark 클래스는 여기 없다(그 JS 도 오리진에서 온다) — OS 설정만 본다. */
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #17191d;
+          --surface: #202329;
+          --ink: #eaecef;
+          --muted: #8b95a1;
+          --line: #2a2e35;
+          --accent: #4593fc;
+          --accent-ink: #0a2540;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .card {
+        width: 100%;
+        max-width: 440px;
+        padding: 32px 28px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+        text-align: center;
+      }
+      .mark {
+        display: inline-grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 11px;
+        background: linear-gradient(135deg, #1a66d6, #4aa0ff);
+        box-shadow: 0 1px 2px rgba(15, 25, 50, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      }
+      /* 한글이 단어 중간에서 끊기지 않게 — globals.css 의 :lang(ko) 규칙과 같은 의도. */
+      h1, p { word-break: keep-all; }
+      h1 {
+        margin: 20px 0 0;
+        font-size: 20px;
+        line-height: 1.35;
+        letter-spacing: -0.015em;
+      }
+      .sub {
+        margin: 6px 0 0;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      p.body {
+        margin: 16px 0 0;
+        font-size: 14px;
+        line-height: 1.7;
+        color: var(--muted);
+      }
+      .cta {
+        display: inline-block;
+        margin-top: 24px;
+        padding: 10px 18px;
+        border-radius: 10px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .code {
+        margin: 22px 0 0;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+        font-size: 12px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" width="24" height="24">
+          <path d="M12 3.4a8.6 8.6 0 1 1-8.6 8.6" stroke="#fff" stroke-width="2.1" stroke-linecap="round" />
+          <path d="M12 7.9a4.1 4.1 0 1 1-4.1 4.1" stroke="#fff" stroke-width="2.1" stroke-linecap="round" opacity=".82" />
+          <circle cx="12" cy="12" r="2.15" fill="#fff" />
+        </svg>
+      </span>
+
+      <h1>콘솔을 잠시 이용할 수 없습니다</h1>
+      <p class="sub" lang="en">The console is temporarily unavailable</p>
+
+      <p class="body">
+        배포나 재시작이 진행 중일 수 있습니다. 데이터는 그대로 있고, 잠시 후 다시 열면 이어서 쓸 수 있습니다.
+      </p>
+      <p class="body" lang="en">
+        A deploy or restart may be in progress. Your data is untouched — please try again in a moment.
+      </p>
+
+      <!-- 요청 경로를 되돌려 주지 않는다: `{{placeholder "http.request.uri"}}` 를 본문에 심으면 공격자가
+           만든 URL 이 그대로 반사돼 XSS 가 된다(Caddy 는 이스케이프하지 않는다). 항상 루트로 보낸다. -->
+      <a class="cta" href="/">다시 시도 · Try again</a>
+
+      <p class="code">
+        오류 코드 {{placeholder "http.error.status_code"}} · {{placeholder "http.error.status_text"}}
+      </p>
+    </main>
+  </body>
+</html>
