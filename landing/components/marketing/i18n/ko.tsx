@@ -19,7 +19,7 @@ export const ko: Dict = {
       "쿨다운, 차단 목록, 리스 로직을 직접 짤 필요 없습니다. 가장 상태 좋은 리소스를 받아 쓰고 결과만 알려주면 — 검증된 오픈소스 엔진이 풀을 알아서 관리하고 되살립니다.",
   },
 
-  a11y: { enlarge: "스크린샷 확대", closeDialog: "닫기" },
+  a11y: { enlarge: "스크린샷 확대", closeDialog: "닫기" , toggleTheme: "테마 전환" },
 
   nav: {
     links: { features: "기능", how: "동작 방식", docs: "문서" },

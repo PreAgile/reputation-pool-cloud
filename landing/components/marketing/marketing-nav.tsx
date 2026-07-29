@@ -49,7 +49,15 @@ function GitHubPill({ label, openSource }: { label: string; openSource: string }
   );
 }
 
-export function MarketingNav({ nav, locale }: { nav: Dict["nav"]; locale: Locale }) {
+export function MarketingNav({
+  nav,
+  a11y,
+  locale,
+}: {
+  nav: Dict["nav"];
+  a11y: Dict["a11y"];
+  locale: Locale;
+}) {
   // md 미만에서는 데스크톱 nav 링크가 숨겨지므로(hidden md:flex) 접이식 메뉴로 대체한다.
   const [open, setOpen] = useState(false);
   const base = LOCALE_PATH[locale];
@@ -79,7 +87,7 @@ export function MarketingNav({ nav, locale }: { nav: Dict["nav"]; locale: Locale
         <div className="flex flex-1 items-center justify-end gap-2">
           <GitHubPill label={nav.github} openSource={nav.openSource} />
           <LanguageSwitcher current={locale} label={nav.language} />
-          <ThemeToggle />
+          <ThemeToggle label={a11y.toggleTheme} />
           <Link
             href={`${base}#contact`}
             className={buttonClass("primary", "inline-flex items-center justify-center text-accent-ink")}

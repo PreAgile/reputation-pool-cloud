@@ -53,6 +53,9 @@ export async function onRequest(context: MiddlewareContext): Promise<Response> {
   // 308 이면 스위처로 영어를 골라도 되돌릴 수 없다.
   if (locale !== "en") {
     const target = new URL(LOCALE_PATH[locale], url);
+    // 쿼리를 옮겨 싣는다. `new URL(path, base)` 는 base 의 검색 문자열을 버리므로 그냥 두면
+    // `/?utm_source=…` 로 들어온 한국어 방문자에게서 유입 파라미터가 통째로 사라진다.
+    target.search = url.search;
     return new Response(null, {
       status: 307,
       headers: {

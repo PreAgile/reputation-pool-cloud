@@ -20,7 +20,7 @@ export function Landing({ locale }: { locale: Locale }) {
   const dict = getDict(locale);
   return (
     <div lang={locale} className="min-h-screen bg-bg">
-      <MarketingNav nav={dict.nav} locale={locale} />
+      <MarketingNav nav={dict.nav} a11y={dict.a11y} locale={locale} />
       <main>
         <Hero dict={dict} locale={locale} />
         <TrustSignals dict={dict} locale={locale} />

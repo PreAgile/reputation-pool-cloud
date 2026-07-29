@@ -21,7 +21,7 @@ export type Dict = {
   meta: { title: string; description: string };
 
   /** 접근성 라벨(아이콘·다이얼로그 등 텍스트 없는 UI). */
-  a11y: { enlarge: string; closeDialog: string };
+  a11y: { enlarge: string; closeDialog: string; toggleTheme: string };
 
   /** marketing-nav(client) 로 넘어가는 슬라이스 — 반드시 평범한 문자열만(직렬화 안전). */
   nav: {

@@ -22,7 +22,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   return (
     <div lang="en" className="flex min-h-screen flex-col bg-bg">
       <HtmlLang lang="en" />
-      <MarketingNav nav={dict.nav} locale="en" />
+      <MarketingNav nav={dict.nav} a11y={dict.a11y} locale="en" />
       <div className="mx-auto flex w-full max-w-[1080px] flex-1 flex-col gap-8 px-6 py-9 lg:flex-row lg:gap-12 lg:py-12">
         <DocsSidebar label={dict.nav.links.docs} />
         <main className="min-w-0 flex-1">{children}</main>

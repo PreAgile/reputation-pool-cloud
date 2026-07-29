@@ -18,7 +18,7 @@ export const en: Dict = {
       "Stop hand-rolling cooldowns, blocklists, and lease logic. Grab the healthiest resource and report what happened — a verified open-source engine keeps the pool healthy for you.",
   },
 
-  a11y: { enlarge: "Enlarge screenshot", closeDialog: "Close" },
+  a11y: { enlarge: "Enlarge screenshot", closeDialog: "Close", toggleTheme: "Toggle theme" },
 
   nav: {
     links: { features: "Features", how: "How it works", docs: "Docs" },
