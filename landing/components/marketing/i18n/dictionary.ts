@@ -17,6 +17,9 @@ export { LOCALES, LOCALE_PATH } from "@/lib/locale";
 /** 스위처에 노출할 사람이 읽는 언어명. */
 export const LOCALE_LABEL: Record<Locale, string> = { en: "English", ko: "한국어" };
 
+/** docs 섹션 카드 한 장. 목적지 슬러그는 비번역 구조라 사전에 없다(`DOCS_CARD_SLUGS` 참고). */
+type DocsCard = { tag: string; title: string; body: string; go: string };
+
 export type Dict = {
   meta: { title: string; description: string };
 
@@ -79,8 +82,13 @@ export type Dict = {
     label: string;
     heading: string;
     intro: string;
-    /** 3개 — href 구조와 index 로 정렬. */
-    items: { tag: string; title: string; body: string; go: string }[];
+    /**
+     * docs 카드 3장 — `landing-sections.tsx` 의 `DOCS_CARD_SLUGS` 와 **index 로 결합**한다.
+     * 그래서 개수가 스타일이 아니라 계약이다: 배열로 두면 사전에 카드를 하나 더 넣는 순간 슬러그가
+     * `undefined` 가 되어 `/docs/undefined` 로 가는 링크가 조용히 생긴다. 튜플로 못 박아 두면 en·ko
+     * 사전과 슬러그 목록 중 하나만 늘어난 상태에서 컴파일이 깨진다.
+     */
+    items: readonly [DocsCard, DocsCard, DocsCard];
     /**
      * 카드 아래 한 줄 — 엔진 레포로 가는 링크(#121). docs 사이트가 생겨도 이 링크는 남긴다:
      * "판단 로직을 직접 읽을 수 있다"는 것이 이 제품의 진짜 신뢰 신호다.

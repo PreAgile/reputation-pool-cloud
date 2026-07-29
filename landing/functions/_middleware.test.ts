@@ -86,6 +86,26 @@ describe("랜딩 언어 판별 미들웨어", () => {
     expect(next).toHaveBeenCalled();
   });
 
+  // #143 의 결정: 한국어 docs 가 생겼어도 docs 는 자동 판별에서 제외한다. 공유된 딥링크는 보낸 사람이
+  // 본 언어로 열려야 하기 때문이다. 언어 전환은 스위처가, 색인은 hreflang·사이트맵이 담당한다.
+  it("한국어 브라우저가 영어 docs 딥링크를 열면 → /ko/docs 로 돌리지 않고 그대로 준다", async () => {
+    const { context, next } = makeContext(
+      makeRequest("/docs/api", { acceptLanguage: "ko-KR,ko;q=0.9", cfCountry: "KR" }),
+    );
+    const response = await onRequest(context);
+
+    expect(next).toHaveBeenCalled();
+    expect(response.status).toBe(200);
+  });
+
+  it("영어 쿠키를 가진 방문자가 한국어 docs 링크를 열면 → /docs 로 튕기지 않는다", async () => {
+    const { context, next } = makeContext(makeRequest("/ko/docs/api", { cookie: "rp_locale=en" }));
+    const response = await onRequest(context);
+
+    expect(next).toHaveBeenCalled();
+    expect(response.status).toBe(200);
+  });
+
   it("/en 은 존재하지 않으므로 → 정본인 / 로 301 을 보낸다", async () => {
     const { context, next } = makeContext(makeRequest("/en"));
     const response = await onRequest(context);

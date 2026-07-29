@@ -146,6 +146,42 @@ export function rememberLocale(locale: Locale): void {
   document.cookie = localeCookie(locale, window.location.protocol === "https:");
 }
 
+/**
+ * 지금 보고 있는 경로를 **다른 로케일의 같은 페이지**로 옮긴다 (#143).
+ *
+ * 언어 스위처가 원래 `LOCALE_PATH[locale]`(즉 `/` 또는 `/ko`)로만 링크했다. 랜딩 두 장뿐일 때는
+ * 그게 곧 "같은 페이지"였지만, 한국어 docs 가 생기면서 `/docs/api` 에서 한국어를 고르면 문서를 잃고
+ * 랜딩으로 튕기게 됐다 — 스위처는 언어를 바꾸는 장치이고 위치를 바꾸는 장치가 아니다.
+ *
+ * 계산은 프리픽스 산술 하나다: 경로에서 로케일 프리픽스를 떼어 **로케일 없는 경로**를 얻고, 목표
+ * 로케일의 프리픽스를 다시 붙인다. 그래서 docs 를 알 필요가 없고, 앞으로 로케일별로 생기는 어떤
+ * 라우트에도 그대로 적용된다.
+ *
+ * 전제: 프리픽스를 뺀 경로가 두 로케일에 **모두 존재한다.** 현재 로케일 표면은 랜딩(`/`·`/ko`)과
+ * docs(`/docs/**`·`/ko/docs/**`)뿐이고 둘 다 1:1 로 존재한다(docs 는 매니페스트 하나에서 두 로케일
+ * 라우트가 파생되고 `app/docs/pages.test.tsx`·`app/ko/docs/pages.test.tsx` 가 그 대응을 잠근다).
+ * 한쪽에만 있는 라우트를 만들면 여기서 없는 URL 이 나오므로, 그런 라우트를 추가할 때는 이 전제를
+ * 먼저 깨야 한다.
+ */
+export function localePathFor(pathname: string, locale: Locale): string {
+  const neutral = stripLocalePrefix(pathname);
+  if (neutral === "") return LOCALE_PATH[locale];
+  return locale === DEFAULT_LOCALE ? neutral : `${LOCALE_PATH[locale]}${neutral}`;
+}
+
+/**
+ * 로케일 프리픽스를 떼어낸 경로. 랜딩 루트(`/`·`/ko`)는 빈 문자열이 된다.
+ * 뒤 슬래시는 지운다 — `next.config.ts` 의 `trailingSlash: false` 규칙과 같은 형태로 맞춰야
+ * `/ko/docs/` 같은 입력에서 `/ko/docs/` + 프리픽스 조합이 나오지 않는다.
+ */
+function stripLocalePrefix(pathname: string): string {
+  const path = pathname.replace(/\/+$/, "");
+  const koPrefix = LOCALE_PATH.ko;
+  if (path === koPrefix) return "";
+  if (path.startsWith(`${koPrefix}/`)) return path.slice(koPrefix.length);
+  return path;
+}
+
 /** 어떤 신호가 로케일을 정했는지 — 디버깅·테스트 가시성용. */
 export type LocaleSource = "cookie" | "accept-language" | "country" | "default";
 

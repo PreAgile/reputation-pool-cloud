@@ -19,14 +19,15 @@ import {
 import { docsMetadata, docsPage } from "@/lib/docs-manifest";
 
 const SLUG = "authentication";
+const LOCALE = "en";
 const PAGE = docsPage(SLUG)!;
 
-export const metadata: Metadata = docsMetadata(SLUG);
+export const metadata: Metadata = docsMetadata(SLUG, LOCALE);
 
 export default function DocsAuthenticationPage() {
   return (
     <>
-      <PageHeader title={PAGE.title} summary={PAGE.summary} />
+      <PageHeader title={PAGE.title[LOCALE]} summary={PAGE.summary[LOCALE]} />
 
       <Section id="two-credentials" title="Two credentials, one per plane">
         <Table head={["", "Data plane (gRPC)", "Control plane (REST)"]}>
@@ -79,7 +80,7 @@ export default function DocsAuthenticationPage() {
           <P>
             The admin JWT works against the hosted control plane. The API key works against a gRPC port that is bound to
             loopback in every deployment, so today it authenticates calls to a stack you run yourself — see{" "}
-            <DocsLink href="/docs/quickstart">Quickstart</DocsLink>. Everything below about issuing, storage, rotation,
+            <DocsLink slug="quickstart" locale={LOCALE}>Quickstart</DocsLink>. Everything below about issuing, storage, rotation,
             and revocation is the same in both cases; keys are minted through the control plane either way.
           </P>
         </Callout>
@@ -269,11 +270,11 @@ export default function DocsAuthenticationPage() {
           </Bullet>
         </Bullets>
         <P>
-          Next: <DocsLink href="/docs/api">REST API reference</DocsLink> for the endpoints these credentials open.
+          Next: <DocsLink slug="api" locale={LOCALE}>REST API reference</DocsLink> for the endpoints these credentials open.
         </P>
       </Section>
 
-      <DocsPager slug={SLUG} />
+      <DocsPager slug={SLUG} locale={LOCALE} />
     </>
   );
 }

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import { DOCS_PAGES, docsHref } from "@/lib/docs-manifest";
+import { DOCS_PAGES, docsAlternates, docsHref } from "@/lib/docs-manifest";
 import { seriousViolations } from "@/test/a11y";
 import DocsLayout from "./layout";
 import DocsIntroPage, { metadata } from "./page";
 
-// 마케팅 셸(ThemeToggle)과 사이드바(usePathname)가 쓰는 훅만 대체한다.
+// 마케팅 셸(ThemeToggle)과 사이드바·스위처(usePathname)가 쓰는 훅만 대체한다.
 vi.mock("next-themes", () => ({ useTheme: () => ({ resolvedTheme: "light", setTheme: vi.fn() }) }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/docs" }));
 
@@ -18,7 +18,7 @@ function renderDocs() {
   );
 }
 
-describe("docs 셸 + Introduction (#121)", () => {
+describe("영어 docs 셸 + Introduction (#121)", () => {
   it("마케팅 nav·사이드바·푸터를 상속한 채 문서 본문을 렌더한다", () => {
     renderDocs();
 
@@ -41,7 +41,7 @@ describe("docs 셸 + Introduction (#121)", () => {
 
     const pager = screen.getByRole("navigation", { name: "Pagination" });
     expect(within(pager).queryByText(/Previous/)).not.toBeInTheDocument();
-    expect(within(pager).getByRole("link")).toHaveAttribute("href", docsHref("quickstart"));
+    expect(within(pager).getByRole("link")).toHaveAttribute("href", docsHref("quickstart", "en"));
   });
 
   it("본문이 나머지 문서와 엔진 레포로 이어진다 → GitHub 링크는 신뢰 신호로 남는다", () => {
@@ -59,12 +59,33 @@ describe("docs 셸 + Introduction (#121)", () => {
     );
   });
 
+  // 영어 문서의 nav Docs 링크는 로케일 프리픽스가 없는 `/docs` 다 — 로케일을 유지한다는 규칙의 영어 쪽 결과.
+  it("nav 의 Docs 링크가 영어 docs 루트를 가리킨다", () => {
+    renderDocs();
+    expect(screen.getAllByRole("link", { name: "Docs" })[0]).toHaveAttribute("href", "/docs");
+  });
+
   // 사이트 절대 URL 의 단일 출처는 `lib/site.ts`(#118) 다. docs 페이지는 자기 오리진을 다시 선언하지 않고
   // 상대 canonical 만 두므로, 절대 URL 은 상위 metadataBase 한 곳에서 결정된다.
   it("SEO: canonical 이 상대 경로 /docs 이고 metadataBase 를 설정하지 않는다", () => {
     expect(metadata.alternates?.canonical).toBe("/docs");
     expect(metadata.metadataBase).toBeUndefined();
     expect(metadata.title).toContain("Introduction");
+  });
+
+  it("SEO: hreflang 이 한국어 대안(/ko/docs)을 함께 알린다", () => {
+    expect(metadata.alternates?.languages).toEqual(docsAlternates(""));
+  });
+
+  // #143 리뷰의 핵심 회귀: 드롭다운이던 시절 영어 문서의 정적 HTML 에는 `/ko…` 링크가 0 건이었다.
+  // 한국어 문서를 만들어 놓고도 사용자는 그 존재를 알 수 없었다. **클릭하지 않고** 확인한다.
+  it("언어 스위처가 상호작용 없이 → 같은 문서의 한국어판(/ko/docs) 링크를 노출한다", () => {
+    renderDocs();
+
+    const switcher = screen.getByRole("navigation", { name: "Language" });
+    expect(within(switcher).getByRole("link", { name: "한국어" })).toHaveAttribute("href", "/ko/docs");
+    expect(within(switcher).getByRole("link", { name: "English" })).toHaveAttribute("href", "/docs");
+    expect(within(switcher).getByRole("link", { name: "English" })).toHaveAttribute("aria-current", "true");
   });
 
   it("a11y: critical/serious 위반이 없다", async () => {

@@ -5,14 +5,15 @@ import { CONTACT_EMAIL, GITHUB_REPO_URL } from "@/components/marketing/constants
 import { docsMetadata, docsPage } from "@/lib/docs-manifest";
 
 const SLUG = "";
+const LOCALE = "en";
 const PAGE = docsPage(SLUG)!;
 
-export const metadata: Metadata = docsMetadata(SLUG);
+export const metadata: Metadata = docsMetadata(SLUG, LOCALE);
 
 export default function DocsIntroPage() {
   return (
     <>
-      <PageHeader title={PAGE.title} summary={PAGE.summary} />
+      <PageHeader title={PAGE.title[LOCALE]} summary={PAGE.summary[LOCALE]} />
 
       <Section id="what-it-is" title="What this is">
         <P>
@@ -46,7 +47,7 @@ export default function DocsIntroPage() {
           <Bullet>
             <B>Any pool with per-destination health</B> — the same resource can be perfectly fine for one target and
             burned for another. That distinction is the core of the model; see{" "}
-            <DocsLink href="/docs/concepts">Concepts</DocsLink>.
+            <DocsLink slug="concepts" locale={LOCALE}>Concepts</DocsLink>.
           </Bullet>
         </Bullets>
         <P>
@@ -72,16 +73,16 @@ export default function DocsIntroPage() {
           </Bullet>
         </Bullets>
         <P>
-          Both are documented here: <DocsLink href="/docs/quickstart">Quickstart</DocsLink> walks the data-plane loop,{" "}
-          <DocsLink href="/docs/api">REST API reference</DocsLink> covers the control plane, and{" "}
-          <DocsLink href="/docs/authentication">Authentication</DocsLink> explains which credential belongs where.
+          Both are documented here: <DocsLink slug="quickstart" locale={LOCALE}>Quickstart</DocsLink> walks the data-plane loop,{" "}
+          <DocsLink slug="api" locale={LOCALE}>REST API reference</DocsLink> covers the control plane, and{" "}
+          <DocsLink slug="authentication" locale={LOCALE}>Authentication</DocsLink> explains which credential belongs where.
         </P>
         <Callout tone="warn" title="Only the control plane is reachable over the internet today">
           <P>
             The gRPC data plane is bound to loopback in every deployment here, and the public reverse proxy fronts only
             the dashboard and <C>/api</C>. So hosted access means the dashboard and the REST control plane; to run the{" "}
             <C>Register</C>/<C>Acquire</C>/<C>Report</C> loop you start the stack yourself, which{" "}
-            <DocsLink href="/docs/quickstart">Quickstart</DocsLink> walks through end to end. It is the same code either
+            <DocsLink slug="quickstart" locale={LOCALE}>Quickstart</DocsLink> walks through end to end. It is the same code either
             way — that section explains why the port is closed and what would change if it opened.
           </P>
         </Callout>
@@ -93,7 +94,7 @@ export default function DocsIntroPage() {
           curve, lease fencing, and the selection strategy all live in{" "}
           <A href={GITHUB_REPO_URL}>PreAgile/reputation-pool</A> under Apache-2.0, and this service consumes it as a
           published dependency rather than a fork. Everything a paragraph in{" "}
-          <DocsLink href="/docs/concepts">Concepts</DocsLink> says about behaviour is behaviour you can read the source
+          <DocsLink slug="concepts" locale={LOCALE}>Concepts</DocsLink> says about behaviour is behaviour you can read the source
           of, and reproduce by self-hosting.
         </P>
         <P>What the hosted service adds is everything around the engine:</P>
@@ -107,7 +108,7 @@ export default function DocsIntroPage() {
           <P>
             The part that decides whether your proxy gets benched for an hour is the part you can audit. If you disagree
             with the cooldown curve, you can read exactly what it is, open an issue against the engine, or run your own
-            copy. See <DocsLink href="/docs/faq">FAQ</DocsLink> for where to file which kind of bug.
+            copy. See <DocsLink slug="faq" locale={LOCALE}>FAQ</DocsLink> for where to file which kind of bug.
           </P>
         </Callout>
       </Section>
@@ -115,14 +116,14 @@ export default function DocsIntroPage() {
       <Section id="next" title="Where to go next">
         <Bullets>
           <Bullet>
-            <DocsLink href="/docs/quickstart">Quickstart</DocsLink> — key to first <C>Report</C>, with curl, Java, and
+            <DocsLink slug="quickstart" locale={LOCALE}>Quickstart</DocsLink> — key to first <C>Report</C>, with curl, Java, and
             TypeScript.
           </Bullet>
           <Bullet>
-            <DocsLink href="/docs/concepts">Concepts</DocsLink> — the model: resources, contexts, cells, states.
+            <DocsLink slug="concepts" locale={LOCALE}>Concepts</DocsLink> — the model: resources, contexts, cells, states.
           </Bullet>
           <Bullet>
-            <DocsLink href="/docs/api">REST API reference</DocsLink> — every control-plane endpoint and its errors.
+            <DocsLink slug="api" locale={LOCALE}>REST API reference</DocsLink> — every control-plane endpoint and its errors.
           </Bullet>
         </Bullets>
         <P>
@@ -135,7 +136,7 @@ export default function DocsIntroPage() {
         </P>
       </Section>
 
-      <DocsPager slug={SLUG} />
+      <DocsPager slug={SLUG} locale={LOCALE} />
     </>
   );
 }

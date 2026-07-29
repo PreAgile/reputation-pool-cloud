@@ -21,14 +21,15 @@ import { GITHUB_REPO_URL } from "@/components/marketing/constants";
 import { docsMetadata, docsPage } from "@/lib/docs-manifest";
 
 const SLUG = "concepts";
+const LOCALE = "en";
 const PAGE = docsPage(SLUG)!;
 
-export const metadata: Metadata = docsMetadata(SLUG);
+export const metadata: Metadata = docsMetadata(SLUG, LOCALE);
 
 export default function DocsConceptsPage() {
   return (
     <>
-      <PageHeader title={PAGE.title} summary={PAGE.summary} />
+      <PageHeader title={PAGE.title[LOCALE]} summary={PAGE.summary[LOCALE]} />
 
       <Section id="resource" title="Resource">
         <P>
@@ -423,11 +424,11 @@ Acquire("checkout-us") → will not return it   (its checkout-us cell is cooling
           on this page — the penalties, the backoff curve, the transition conditions, the selection weights — is
           implemented in the open-source engine at <A href={GITHUB_REPO_URL}>PreAgile/reputation-pool</A>, so you can
           read the source rather than take this page&apos;s word for it. Next:{" "}
-          <DocsLink href="/docs/authentication">Authentication</DocsLink>.
+          <DocsLink slug="authentication" locale={LOCALE}>Authentication</DocsLink>.
         </P>
       </Section>
 
-      <DocsPager slug={SLUG} />
+      <DocsPager slug={SLUG} locale={LOCALE} />
     </>
   );
 }
