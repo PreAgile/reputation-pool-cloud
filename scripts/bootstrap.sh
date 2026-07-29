@@ -297,7 +297,38 @@ else
 EOF
 fi
 
-cat <<EOF
+# 롤백 안내도 호스트의 성질로 갈라 준다. 풀 배포 타이머(#15)가 도는 호스트에서는 태그만 되돌리는 것이
+# **되돌린 상태로 남지 않는다** — 다음 폴링 주기가 `origin/main` 을 다시 올린다. 이 안내가 만들 수 있는
+# 최악은 "롤백했다" 고 믿은 채 5분 뒤 원래대로 돌아가 있는 것이라, 조건을 짐작하지 않고 직접 확인한다.
+#
+# 두 조건을 모두 본다: 타이머가 실제로 발화하는 상태이고(`is-active`), 스크립트가 fail closed 를 통과한다
+# (`PULL_DEPLOY_ENABLED=true`). 하나라도 아니면 다음 주기가 아무것도 하지 않으므로 수동 롤백이 유지된다.
+# systemctl 이 없는 호스트(개발용 macOS 등)에서는 자동 배포가 있을 수 없다.
+auto_deploy=no
+if command -v systemctl > /dev/null 2>&1 \
+	&& systemctl is-active reputation-pool-deploy.timer > /dev/null 2>&1 \
+	&& [ "$(grep -E '^PULL_DEPLOY_ENABLED=' .env 2> /dev/null | head -1 | cut -d= -f2- | tr -d "\"'" || true)" = true ]; then
+	auto_deploy=yes
+fi
 
-  롤백: .env 에 APP_IMAGE_TAG=sha-<커밋> 을 넣고 이 스크립트를 다시 실행한다.
+if [ "$auto_deploy" = yes ]; then
+	cat <<'EOF'
+
+  롤백: 이 호스트는 자동 배포(pull-deploy 타이머)가 켜져 있다. 태그만 되돌리면 다음 폴링 주기가
+     origin/main 으로 다시 올려 버리므로 순서가 있다.
+       1) .env 의 PULL_DEPLOY_ENABLED 를 false 로 (타이머는 그대로, 배포만 멈춘다)
+       2) git reset --hard <되돌릴-sha>
+       3) .env 의 APP_IMAGE_TAG 와 DASHBOARD_IMAGE_TAG 를 sha-<7자리> 로 (둘 다 — app 만 되돌리면
+          대시보드는 새 이미지로 남는다)
+       4) 이 스크립트를 다시 실행
+     되돌릴 것이 코드 자체라면 main 에 revert 를 머지하는 편이 낫다 — 다음 주기가 그걸 배포하고,
+     PULL_DEPLOY_ENABLED 를 되돌려 놓는 것을 잊을 일도 없다.
+     자세히: docs/engineering/deployment.md §7-1 롤백하기
 EOF
+else
+	cat <<'EOF'
+
+  롤백: .env 의 APP_IMAGE_TAG 와 DASHBOARD_IMAGE_TAG 를 sha-<7자리> 로 바꾸고 이 스크립트를 다시 실행한다.
+     둘 다 바꾼다 — app 만 되돌리면 대시보드는 새 이미지로 남는다.
+EOF
+fi
