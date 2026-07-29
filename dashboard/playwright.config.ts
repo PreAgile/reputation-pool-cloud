@@ -28,7 +28,8 @@ export default defineConfig({
     // shots 프로젝트에는 일부러 넣지 않는다 — 마케팅 스크린샷(#16)은 영어 기준이다.
     { name: "e2e", testMatch: "e2e/**/*.spec.ts", use: { ...devices["Desktop Chrome"], locale: "ko-KR" } },
     { name: "visual", testMatch: "visual/**/*.spec.ts", use: { ...devices["Desktop Chrome"], locale: "ko-KR" } },
-    // shots: 마케팅 랜딩(#16)용 실제 대시보드 스크린샷을 public/marketing/ 에 저장(비교 아님).
+    // shots: 마케팅 랜딩(#16)용 실제 대시보드 스크린샷을 `../landing/public/marketing/` 에 저장(비교 아님).
+    // 찍는 대상은 이 앱의 화면이고 쓰는 쪽은 랜딩 앱이다 — 사본이 하나만 있도록 출력만 넘긴다(#15).
     // 레티나(deviceScaleFactor=2) · 모션 감소 · 넓은 뷰포트로 결정론적 캡처.
     {
       name: "shots",

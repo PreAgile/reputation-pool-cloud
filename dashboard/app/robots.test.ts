@@ -10,9 +10,10 @@ const disallowed = () =>
   rules().flatMap((rule) => (Array.isArray(rule.disallow) ? rule.disallow : rule.disallow ? [rule.disallow] : []));
 
 describe("robots.txt (#16)", () => {
-  it("사이트맵 위치를 실제 서비스 오리진의 절대 URL 로 알린다", () => {
-    // Cloudflare 관리형 robots.txt 는 `Sitemap:` 줄이 없었다 — 오리진이 직접 내려줘야 한다.
-    expect(robots().sitemap).toBe("https://app.poolroost.com/sitemap.xml");
+  it("사이트맵을 알리지 않는다 → 이 호스트에는 색인할 공개 화면이 없고 /sitemap.xml 은 404 다", () => {
+    // 랜딩·문서가 apex 랜딩으로 옮겨가며 `app/sitemap.ts` 도 함께 삭제됐다(#15). `Sitemap:` 줄만 남기면
+    // 크롤러가 404 를 계속 긁는다. 사이트맵은 이제 `landing/app/sitemap.ts` 가 apex 기준으로 낸다.
+    expect(robots().sitemap).toBeUndefined();
   });
 
   it("크롤러 전체에 / 를 허용하고 API·actuator 만 차단한다", () => {
@@ -32,5 +33,13 @@ describe("robots.txt (#16)", () => {
     for (const path of ["/login", "/overview", "/usage", "/keys", "/events", "/admin", "/resources", "/preview"]) {
       expect(list.some((entry) => entry.startsWith(path))).toBe(false);
     }
+  });
+
+  // 호스트 이전(#15) 중에는 이게 위 불변식보다 더 비싸다: 옛 랜딩·문서 URL 은 apex 로 301 하는데,
+  // 크롤러가 그 301 을 읽으려면 옛 URL 을 가져올 수 있어야 한다. `Disallow: /` 를 넣으면 리다이렉트가
+  // 영원히 읽히지 않고 `app.poolroost.com` 의 옛 URL 이 색인에 굳는다.
+  it("사이트 전체를 막지 않는다 → 이전 중인 옛 URL 의 301 을 크롤러가 볼 수 있어야 한다", () => {
+    expect(disallowed()).not.toContain("/");
+    expect(rules().every((rule) => rule.allow === "/")).toBe(true);
   });
 });

@@ -79,11 +79,12 @@ jobs:
           context: ${{ matrix.context }}
           platforms: linux/${{ matrix.arch }}
           push: true
-          # dashboard 의 정본 오리진. `NEXT_PUBLIC_*` 는 빌드 시점 인라인이라 런타임 환경변수로는 canonical 을
-          # 못 바꾼다 — 여기서 넣어야 한다. 레포/환경 변수 `NEXT_PUBLIC_SITE_URL` 로 코드 수정 없이 덮을 수 있다.
+          # dashboard 가 옛 랜딩·문서 URL 을 301 로 넘길 apex 랜딩 오리진(#15). `NEXT_PUBLIC_*` 는 빌드 시점
+          # 인라인이고 리다이렉트도 빌드가 라우트 매니페스트로 구워내므로 런타임 환경변수로는 못 바꾼다 —
+          # 여기서 넣어야 한다. 레포/환경 변수 `NEXT_PUBLIC_LANDING_URL` 로 코드 수정 없이 덮을 수 있다.
           # app 이미지에는 쓰이지 않는 ARG 라 무해하다.
           build-args: |
-            NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL || 'https://app.poolroost.com' }}
+            NEXT_PUBLIC_LANDING_URL=${{ vars.NEXT_PUBLIC_LANDING_URL || 'https://poolroost.com' }}
           tags: |
             ghcr.io/preagile/reputation-pool-cloud/${{ matrix.image }}:latest-${{ matrix.arch }}
             ghcr.io/preagile/reputation-pool-cloud/${{ matrix.image }}:sha-${{ github.sha }}-${{ matrix.arch }}
