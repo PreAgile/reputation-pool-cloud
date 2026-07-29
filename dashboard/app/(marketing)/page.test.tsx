@@ -27,7 +27,7 @@ describe("랜딩 페이지 (#16)", () => {
     expect(screen.getByRole("heading", { name: /Up and running in five minutes\./ })).toBeInTheDocument();
   });
 
-  it("주요 CTA — Get started(/#contact) · Read the docs(/#docs) 를 제공한다", () => {
+  it("주요 CTA — Get started(/#contact) · Read the docs(/docs) 를 제공한다", () => {
     render(<MarketingPage />);
 
     // "Get started" 는 nav·hero 여러 곳 → 모두 /#contact 로 스크롤(하위 경로에서도 홈 섹션 도달하도록 `/` 프리픽스).
@@ -35,7 +35,26 @@ describe("랜딩 페이지 (#16)", () => {
     expect(starts.length).toBeGreaterThan(0);
     starts.forEach((a) => expect(a).toHaveAttribute("href", "/#contact"));
 
-    expect(screen.getByRole("link", { name: "Read the docs" })).toHaveAttribute("href", "/#docs");
+    // #121: 문서 CTA 는 더 이상 같은 페이지의 `#docs` 앵커가 아니라 전용 docs 사이트다.
+    expect(screen.getByRole("link", { name: "Read the docs" })).toHaveAttribute("href", "/docs");
+  });
+
+  // #121: nav 의 Docs 링크와 랜딩 docs 카드가 모두 실제 문서 라우트로 들어간다(이전엔 `#docs` 앵커와
+  // GitHub 레포뿐이었다). 엔진 레포 링크는 신뢰 신호로 남긴다.
+  it("Docs 배선: nav 링크와 docs 카드가 /docs 하위 실제 페이지를 가리킨다", () => {
+    render(<MarketingPage />);
+
+    // nav 의 Docs(데스크톱). 로케일 프리픽스 없음 — 문서는 영어 전용.
+    expect(screen.getAllByRole("link", { name: "Docs" })[0]).toHaveAttribute("href", "/docs");
+
+    expect(screen.getByRole("link", { name: /Quickstart/ })).toHaveAttribute("href", "/docs/quickstart");
+    expect(screen.getByRole("link", { name: /API reference/ })).toHaveAttribute("href", "/docs/api");
+    expect(screen.getByRole("link", { name: /Concepts/ })).toHaveAttribute("href", "/docs/concepts");
+
+    expect(screen.getByRole("link", { name: /Read the code on GitHub/ })).toHaveAttribute(
+      "href",
+      "https://github.com/PreAgile/reputation-pool",
+    );
   });
 
   // #120: 트러스트 바가 영어에서 줄바꿈되며 구분선이 어긋났다. 레이아웃(구분선 위치)은 실브라우저

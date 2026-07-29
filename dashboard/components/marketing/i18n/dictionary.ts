@@ -81,6 +81,12 @@ export type Dict = {
     intro: string;
     /** 3개 — href 구조와 index 로 정렬. */
     items: { tag: string; title: string; body: string; go: string }[];
+    /**
+     * 카드 아래 한 줄 — 엔진 레포로 가는 링크(#121). docs 사이트가 생겨도 이 링크는 남긴다:
+     * "판단 로직을 직접 읽을 수 있다"는 것이 이 제품의 진짜 신뢰 신호다.
+     */
+    engineNote: string;
+    engineCta: string;
   };
 
   contact: {

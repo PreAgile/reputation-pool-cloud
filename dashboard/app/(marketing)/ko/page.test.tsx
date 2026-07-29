@@ -28,7 +28,9 @@ describe("랜딩 페이지 한국어 (/ko, #16)", () => {
 
     // "시작하기" 는 nav·hero 여러 곳 → 모두 /ko#contact.
     screen.getAllByRole("link", { name: "시작하기" }).forEach((a) => expect(a).toHaveAttribute("href", "/ko#contact"));
-    expect(screen.getByRole("link", { name: "문서 보기" })).toHaveAttribute("href", "/ko#docs");
+    // #121: docs 는 영어 전용 전용 사이트다 — `/ko` 랜딩에서도 로케일 프리픽스 없이 `/docs` 로 간다.
+    expect(screen.getByRole("link", { name: "문서 보기" })).toHaveAttribute("href", "/docs");
+    expect(screen.getAllByRole("link", { name: "문서" })[0]).toHaveAttribute("href", "/docs");
 
     const srcOf = (name: RegExp) => screen.getAllByRole("img", { name }).map((el) => el.getAttribute("src"));
     expect(srcOf(/풀 오버뷰/)).toEqual(

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonClass } from "@/components/ui/button";
+import { DOCS_ROOT } from "@/lib/docs-manifest";
 import { Brand } from "./logo";
 import { LanguageSwitcher } from "./language-switcher";
 import { GITHUB_REPO_URL, GITHUB_STARS } from "./constants";
@@ -55,7 +56,9 @@ export function MarketingNav({ nav, locale }: { nav: Dict["nav"]; locale: Locale
   const links = [
     { href: `${base}#features`, label: nav.links.features },
     { href: `${base}#how`, label: nav.links.how },
-    { href: `${base}#docs`, label: nav.links.docs },
+    // Docs 는 랜딩 앵커가 아니라 전용 docs 사이트(#121)다. 문서는 영어 전용이므로 로케일 프리픽스를
+    // 붙이지 않는다 — `/ko` 랜딩에서도 같은 `/docs` 로 간다.
+    { href: DOCS_ROOT, label: nav.links.docs },
   ];
 
   return (

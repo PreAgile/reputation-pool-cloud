@@ -151,6 +151,9 @@ export const ko: Dict = {
       { tag: "레퍼런스", title: "API 레퍼런스", body: "6개 gRPC RPC 와 REST 컨트롤 플레인, 모든 필드 문서화.", go: "API 살펴보기 →" },
       { tag: "가이드", title: "핵심 개념", body: "평판, 쿨다운, 컨텍스트, 확보 — 엔진이 실제로 판단하는 방식.", go: "모델 이해하기 →" },
     ],
+    // 문서 자체는 영어 전용이지만(#121), 랜딩의 이 한 줄은 한국어 방문자에게 보이므로 번역한다.
+    engineNote: "이 판단을 전부 내리는 엔진은 오픈소스입니다.",
+    engineCta: "GitHub 에서 코드 보기 →",
   },
 
   contact: {

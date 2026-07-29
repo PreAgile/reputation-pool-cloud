@@ -150,6 +150,8 @@ export const en: Dict = {
       { tag: "Reference", title: "API reference", body: "Six gRPC RPCs and the REST control plane, every field documented.", go: "Browse the API →" },
       { tag: "Guide", title: "Concepts", body: "Reputation, cooldown, contexts, leases — how the engine actually thinks.", go: "Learn the model →" },
     ],
+    engineNote: "The engine that makes every one of these decisions is open source.",
+    engineCta: "Read the code on GitHub →",
   },
 
   contact: {

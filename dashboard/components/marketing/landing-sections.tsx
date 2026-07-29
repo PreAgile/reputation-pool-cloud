@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { DOCS_ROOT } from "@/lib/docs-manifest";
 import { SITE_HOST } from "@/lib/site";
 import { BrowserFrame } from "./browser-frame";
 import { Brand } from "./logo";
@@ -163,7 +164,8 @@ export function Hero({ dict, locale }: SectionProps) {
             <Link href={`${base}#contact`} className={buttonClass("primary", `${CTA} px-5 py-2.5 text-[15px] text-accent-ink`)}>
               {h.ctaPrimary}
             </Link>
-            <Link href={`${base}#docs`} className={buttonClass("ghost", `${CTA} px-5 py-2.5 text-[15px]`)}>
+            {/* 전용 docs 사이트(#121)로 — 로케일 프리픽스 없음(문서는 영어 전용). */}
+            <Link href={DOCS_ROOT} className={buttonClass("ghost", `${CTA} px-5 py-2.5 text-[15px]`)}>
               {h.ctaSecondary}
             </Link>
           </div>
@@ -387,19 +389,27 @@ export function HowItWorks({ dict, locale }: SectionProps) {
 
 /* ─────────────────────────────  Docs  ───────────────────────────── */
 
+/**
+ * docs 카드가 가리키는 실제 라우트(비번역) — dict.docs.items 와 index 로 결합.
+ *
+ * 이전에는 세 카드가 모두 공개 GitHub 레포를 가리켰다(전용 docs 라우트가 없어 404 회피용). 이제 `/docs`
+ * 가 실제로 존재하므로(#121) 각 카드가 해당 문서 페이지로 들어간다. 문서는 영어 전용이라 로케일 프리픽스가
+ * 없다 — `/ko` 랜딩에서도 같은 경로로 간다.
+ */
+const DOCS_HREFS: string[] = ["/docs/quickstart", "/docs/api", "/docs/concepts"];
+
 export function Docs({ dict, locale }: SectionProps) {
   return (
+    // id="docs" 는 남겨 둔다 — nav·히어로 CTA 는 이제 `/docs` 로 가지만, 밖에서 공유된 `#docs` 링크가
+    // 아무 데도 도착하지 않는 것보다 이 섹션에 도착하는 편이 낫다.
     <section id="docs" className="scroll-mt-20 border-b border-line">
       <div className={cn(WRAP, "py-[88px]")}>
         <SectionHead label={dict.docs.label} heading={dict.docs.heading} body={dict.docs.intro} locale={locale} />
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {dict.docs.items.map((d) => (
-            // 전용 docs 라우트는 후속 슬라이스 → 실제 문서가 사는 공개 레포로 연결(404 회피).
-            <a
+          {dict.docs.items.map((d, i) => (
+            <Link
               key={d.title}
-              href={GITHUB_REPO_URL}
-              target="_blank"
-              rel="noreferrer"
+              href={DOCS_HREFS[i]}
               className="group rounded-[14px] border border-line bg-surface p-5 transition hover:-translate-y-0.5 hover:border-accent"
             >
               <span className="rounded-[6px] border border-accent/20 bg-accent-soft px-2 py-0.5 font-mono text-[11px] text-accent">
@@ -408,9 +418,21 @@ export function Docs({ dict, locale }: SectionProps) {
               <h3 className="mt-3 text-[17px] font-semibold tracking-tight text-ink">{d.title}</h3>
               <p className="mb-3.5 mt-2 text-[13.5px] leading-relaxed text-muted">{d.body}</p>
               <span className="text-[13px] font-bold text-accent">{d.go}</span>
-            </a>
+            </Link>
           ))}
         </div>
+        {/* 엔진 레포 링크는 유지한다 — 문서가 생겼어도 "판단 로직을 직접 읽을 수 있다"는 건 진짜 신뢰 신호다. */}
+        <p className="mt-8 text-center text-[14px] text-muted">
+          {dict.docs.engineNote}{" "}
+          <a
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="font-bold text-accent hover:underline"
+          >
+            {dict.docs.engineCta}
+          </a>
+        </p>
       </div>
     </section>
   );
@@ -451,8 +473,8 @@ export function Contact({ dict, locale }: SectionProps) {
 /** 푸터 링크 구조(비번역: href/external) — dict.footer.columns 와 index 로 결합. */
 function footerHrefs(base: string): { href: string; external?: boolean }[][] {
   return [
-    // Product: Features, How it works, Docs(→ 공개 레포)
-    [{ href: `${base}#features` }, { href: `${base}#how` }, { href: GITHUB_REPO_URL, external: true }],
+    // Product: Features, How it works, Docs(→ 전용 docs 사이트, #121)
+    [{ href: `${base}#features` }, { href: `${base}#how` }, { href: DOCS_ROOT }],
     // Open source: GitHub, Engine, Changelog(→ Releases)
     [{ href: GITHUB_REPO_URL, external: true }, { href: GITHUB_REPO_URL, external: true }, { href: `${GITHUB_REPO_URL}/releases`, external: true }],
     // Company: Contact(mailto)
