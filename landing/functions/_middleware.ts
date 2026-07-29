@@ -14,6 +14,11 @@
  * ## 판별 규칙은 그대로다
  * `lib/locale.ts` 의 `resolveLocale` 을 그대로 재사용한다(쿠키 → Accept-Language → 국가 → 기본값).
  * 규칙을 여기 다시 적으면 두 곳이 갈라진다 — 이식은 **입력을 얻는 방법**만 바꾸는 일이어야 한다.
+ *
+ * ## 여기서 함께 처리하는 것: `/en` → `/` (301)
+ * 로케일 판별과 같은 축의 URL 규칙이라 같은 파일에 둔다. 영어는 기본 로케일이라 `/en` 은 존재하지
+ * 않는데(`/ko` 만 접두사를 갖는다) 방문자가 그 대칭을 기대해 404 를 맞는다. 자세한 근거는 해당 분기의
+ * 주석 참고.
  */
 import { COUNTRY_HEADER, LOCALE_COOKIE, LOCALE_PATH, LOCALE_VARY, resolveLocale } from "../lib/locale";
 
@@ -36,6 +41,23 @@ function readCookie(header: string | null, name: string): string | null {
 export async function onRequest(context: MiddlewareContext): Promise<Response> {
   const { request, next } = context;
   const url = new URL(request.url);
+
+  // `/en` 은 존재하지 않는 경로다 — 영어는 기본 로케일이라 랜딩 그 자체가 `/` 이고, 접두사가 붙는 건
+  // `/ko` 뿐이다. 그런데 `/ko` 를 본 사람은 `/en` 도 있으리라 추측하고 실제로 그렇게 들어와 404 를
+  // 맞았다. 없는 페이지를 만들어 중복 URL 을 늘리는 대신, 정본인 `/` 로 보낸다.
+  //
+  // 307 이 아니라 **301** 인 이유: 아래 로케일 리다이렉트는 요청 헤더·쿠키에 따라 결과가 바뀌므로
+  // 브라우저가 기억하면 안 되지만, 이것은 방문자와 무관한 **URL 규칙**이다(`/en` 은 앞으로도 정본이
+  // 아니다). 영구로 알려야 크롤러가 `/en` 을 후보에서 지우고 링크 지분을 `/` 로 합친다.
+  //
+  // 한국 IP 방문자가 `/en` 을 치면 `/` 로 온 뒤 아래 판별에 걸려 `/ko` 로 한 번 더 간다. 언어 쿠키를
+  // 여기서 심어 막을 수도 있지만, 영구 리다이렉트는 브라우저가 캐시하므로 `Set-Cookie` 가 한 번만
+  // 적용돼 동작이 방문자마다 갈린다 — 규칙을 단순하게 두고 스위처에 맡긴다.
+  if (url.pathname === "/en" || url.pathname === "/en/") {
+    const target = new URL("/", url);
+    target.search = url.search;
+    return new Response(null, { status: 301, headers: { Location: target.toString() } });
+  }
 
   // 판별이 응답을 바꾸는 경로는 `/` 하나뿐이다. `/ko` 는 언어가 URL 로 고정돼 있으므로 건드리지 않는다 —
   // 명시적 URL 을 쿠키에 따라 되돌리면 공유된 링크가 깨지고 리다이렉트 루프의 재료가 된다.

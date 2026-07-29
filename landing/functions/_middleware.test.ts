@@ -86,6 +86,52 @@ describe("랜딩 언어 판별 미들웨어", () => {
     expect(next).toHaveBeenCalled();
   });
 
+  it("/en 은 존재하지 않으므로 → 정본인 / 로 301 을 보낸다", async () => {
+    const { context, next } = makeContext(makeRequest("/en"));
+    const response = await onRequest(context);
+
+    expect(response.status).toBe(301);
+    expect(new URL(response.headers.get("location") ?? "").pathname).toBe("/");
+    // 정적 자산을 꺼내오지 않고 리다이렉트로 끝난다.
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("/en/ (뒤 슬래시)도 같이 / 로 보낸다", async () => {
+    const { context } = makeContext(makeRequest("/en/"));
+    const response = await onRequest(context);
+
+    expect(response.status).toBe(301);
+    expect(new URL(response.headers.get("location") ?? "").pathname).toBe("/");
+  });
+
+  it("/en 리다이렉트는 유입 파라미터를 잃지 않는다", async () => {
+    const { context } = makeContext(makeRequest("/en?utm_source=hn&ref=x"));
+    const response = await onRequest(context);
+
+    expect(new URL(response.headers.get("location") ?? "").search).toBe("?utm_source=hn&ref=x");
+  });
+
+  it("/en 은 로케일 판별과 무관하게 301 이다 → URL 규칙이라 방문자에 따라 갈리지 않는다", async () => {
+    const korean = makeContext(makeRequest("/en", { acceptLanguage: "ko-KR,ko;q=0.9", cfCountry: "KR" }));
+    const english = makeContext(makeRequest("/en", { acceptLanguage: "en-US" }));
+
+    const a = await onRequest(korean.context);
+    const b = await onRequest(english.context);
+
+    expect(a.status).toBe(301);
+    expect(b.status).toBe(301);
+    expect(new URL(a.headers.get("location") ?? "").pathname).toBe("/");
+    expect(new URL(b.headers.get("location") ?? "").pathname).toBe("/");
+  });
+
+  it("/enterprise 처럼 /en 으로 시작하는 다른 경로는 건드리지 않는다", async () => {
+    const { context, next } = makeContext(makeRequest("/enterprise"));
+    const response = await onRequest(context);
+
+    expect(next).toHaveBeenCalled();
+    expect(response.status).toBe(200);
+  });
+
   it("리다이렉트 응답에 Vary 와 no-store 를 단다 → 공유 캐시가 남의 언어를 재사용하지 못하게", async () => {
     const { context } = makeContext(makeRequest("/", { acceptLanguage: "ko" }));
     const response = await onRequest(context);
