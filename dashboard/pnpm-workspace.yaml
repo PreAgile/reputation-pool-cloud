@@ -4,8 +4,16 @@
 #   - msw: 테스트용 Mock Service Worker (postinstall)
 #   - esbuild: vitest/vite 번들러 네이티브 바이너리
 #   - unrs-resolver: eslint-config-next(ESLint import resolver) 네이티브 바이너리 (#58)
+#
+# false 도 반드시 적어야 한다. 판단을 비워 두면 pnpm 이 install 을 종료 코드 1 로 끝내므로
+# (ERR_PNPM_IGNORED_BUILDS) CI 의 install 스텝이 실패하고 그 뒤 게이트가 아예 돌지 않는다 — 경고처럼
+# 보이지만 경고가 아니다.
+#   - protobufjs: @grpc/proto-loader 의 전이 의존. 퀵스타트 문서 예제를 tsc 로 검증하는 dev 전용
+#     경로에서만 쓰이고(이미지에 들어가지 않는다) postinstall 은 protobufjs CLI 용이라 타입 검사에
+#     필요 없다.
 allowBuilds:
   sharp: true
   msw: true
   esbuild: true
   unrs-resolver: true
+  protobufjs: false

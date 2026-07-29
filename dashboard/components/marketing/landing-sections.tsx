@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { DOCS_ROOT } from "@/lib/docs-manifest";
 import { SITE_HOST } from "@/lib/site";
 import { BrowserFrame } from "./browser-frame";
 import { Brand } from "./logo";
@@ -163,7 +164,8 @@ export function Hero({ dict, locale }: SectionProps) {
             <Link href={`${base}#contact`} className={buttonClass("primary", `${CTA} px-5 py-2.5 text-[15px] text-accent-ink`)}>
               {h.ctaPrimary}
             </Link>
-            <Link href={`${base}#docs`} className={buttonClass("ghost", `${CTA} px-5 py-2.5 text-[15px]`)}>
+            {/* 전용 docs 사이트(#121)로 — 로케일 프리픽스 없음(문서는 영어 전용). */}
+            <Link href={DOCS_ROOT} className={buttonClass("ghost", `${CTA} px-5 py-2.5 text-[15px]`)}>
               {h.ctaSecondary}
             </Link>
           </div>
@@ -199,29 +201,47 @@ const TRUST_ICONS: React.ReactNode[] = [
   </g>,
 ];
 
+/**
+ * 배지 사이 세로 구분선을 "그 줄의 첫 칸이 아닌 칸"에만 붙이는 클래스.
+ *
+ * 이전 구현은 `flex flex-wrap` 컨테이너에 `i > 0 && "border-l"` 이었다. `i` 는 **배열에서 몇 번째**라는
+ * 사실이고, 구분선이 필요한 조건은 **이 줄에서 몇 번째**라는 사실이다. flex-wrap 에서는 줄바꿈 지점을
+ * 컨테이너 폭과 *텍스트 길이*가 런타임에 정하므로 이 둘이 갈린다 — 영어에서 `Audit trail` 이 둘째 줄로
+ * 넘어가면 그 항목이 `border-l` 을 들고 가서 줄 맨 앞에 세로선이 떠 있었고 윗줄과 축도 어긋났다.
+ * 한국어는 라벨이 짧아 4개가 우연히 한 줄에 들어가 멀쩡해 보였을 뿐이다(이슈 #120).
+ *
+ * grid 로 열 수를 고정하면 "줄의 첫 칸"이 텍스트와 무관한 **정적 사실**이 된다: 2열에서는 홀수 칸,
+ * 4열에서는 `4n+1` 칸이 줄 머리다. 그래서 구분선은 없는 상태에서 **더하는 방향으로만** 쓴다.
+ *   - 2열(기본): 짝수 칸(`2n`)은 줄 머리가 아니다 → 구분선 + 왼쪽 여백.
+ *   - 4열(md↑): 여기에 `4n+3` 칸도 줄 머리가 아니게 되므로 → 구분선 + 왼쪽 여백.
+ *
+ * `border-l-0` 으로 되돌리는 규칙을 두지 않는 이유: `[&:nth-child(…)]` 와 `md:[&:nth-child(…)]` 는
+ * 특이도가 같아서 어느 쪽이 이기는지가 생성 순서에 달린다. 두 규칙이 같은 값을 더하기만 하면
+ * 순서와 무관하게 결과가 하나뿐이다. 항목 수가 4개에서 늘어도 같은 규칙이 그대로 성립한다.
+ */
+const TRUST_DIVIDER =
+  "[&:nth-child(2n)]:border-l [&:nth-child(2n)]:border-line [&:nth-child(2n)]:pl-5" +
+  " md:[&:nth-child(4n+3)]:border-l md:[&:nth-child(4n+3)]:border-line md:[&:nth-child(4n+3)]:pl-5";
+
 export function TrustSignals({ dict }: SectionProps) {
   return (
     <section className="border-b border-line bg-surface">
-      <div className={cn(WRAP, "flex flex-wrap items-center gap-y-4 py-5")}>
-        <span className="mr-6 text-[13px] font-semibold text-muted">{dict.trust.heading}</span>
-        {dict.trust.items.map((s, i) => (
-          <div
-            key={s.title}
-            className={cn(
-              "flex items-center gap-2.5 px-5",
-              i > 0 && "border-l border-line",
-              i === 0 && "pl-0",
-            )}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="size-[18px] shrink-0 text-accent" aria-hidden="true">
-              {TRUST_ICONS[i]}
-            </svg>
-            <span>
-              <span className="block text-[13.5px] font-semibold text-ink">{s.title}</span>
-              <span className="block text-[11.5px] text-muted">{s.sub}</span>
-            </span>
-          </div>
-        ))}
+      {/* 헤딩은 자기 줄로 — 배지 격자와 축을 섞지 않으면 두 열/네 열 어디서도 정렬이 흔들리지 않는다. */}
+      <div className={cn(WRAP, "py-5")}>
+        <span className="block text-[13px] font-semibold text-muted">{dict.trust.heading}</span>
+        <div className="mt-3.5 grid grid-cols-2 gap-y-4 md:grid-cols-4">
+          {dict.trust.items.map((s, i) => (
+            <div key={s.title} className={cn("flex items-start gap-2.5 pr-5", TRUST_DIVIDER)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="mt-0.5 size-[18px] shrink-0 text-accent" aria-hidden="true">
+                {TRUST_ICONS[i]}
+              </svg>
+              <span>
+                <span className="block text-[13.5px] font-semibold text-ink">{s.title}</span>
+                <span className="block text-[11.5px] text-muted">{s.sub}</span>
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -369,19 +389,27 @@ export function HowItWorks({ dict, locale }: SectionProps) {
 
 /* ─────────────────────────────  Docs  ───────────────────────────── */
 
+/**
+ * docs 카드가 가리키는 실제 라우트(비번역) — dict.docs.items 와 index 로 결합.
+ *
+ * 이전에는 세 카드가 모두 공개 GitHub 레포를 가리켰다(전용 docs 라우트가 없어 404 회피용). 이제 `/docs`
+ * 가 실제로 존재하므로(#121) 각 카드가 해당 문서 페이지로 들어간다. 문서는 영어 전용이라 로케일 프리픽스가
+ * 없다 — `/ko` 랜딩에서도 같은 경로로 간다.
+ */
+const DOCS_HREFS: string[] = ["/docs/quickstart", "/docs/api", "/docs/concepts"];
+
 export function Docs({ dict, locale }: SectionProps) {
   return (
+    // id="docs" 는 남겨 둔다 — nav·히어로 CTA 는 이제 `/docs` 로 가지만, 밖에서 공유된 `#docs` 링크가
+    // 아무 데도 도착하지 않는 것보다 이 섹션에 도착하는 편이 낫다.
     <section id="docs" className="scroll-mt-20 border-b border-line">
       <div className={cn(WRAP, "py-[88px]")}>
         <SectionHead label={dict.docs.label} heading={dict.docs.heading} body={dict.docs.intro} locale={locale} />
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {dict.docs.items.map((d) => (
-            // 전용 docs 라우트는 후속 슬라이스 → 실제 문서가 사는 공개 레포로 연결(404 회피).
-            <a
+          {dict.docs.items.map((d, i) => (
+            <Link
               key={d.title}
-              href={GITHUB_REPO_URL}
-              target="_blank"
-              rel="noreferrer"
+              href={DOCS_HREFS[i]}
               className="group rounded-[14px] border border-line bg-surface p-5 transition hover:-translate-y-0.5 hover:border-accent"
             >
               <span className="rounded-[6px] border border-accent/20 bg-accent-soft px-2 py-0.5 font-mono text-[11px] text-accent">
@@ -390,9 +418,21 @@ export function Docs({ dict, locale }: SectionProps) {
               <h3 className="mt-3 text-[17px] font-semibold tracking-tight text-ink">{d.title}</h3>
               <p className="mb-3.5 mt-2 text-[13.5px] leading-relaxed text-muted">{d.body}</p>
               <span className="text-[13px] font-bold text-accent">{d.go}</span>
-            </a>
+            </Link>
           ))}
         </div>
+        {/* 엔진 레포 링크는 유지한다 — 문서가 생겼어도 "판단 로직을 직접 읽을 수 있다"는 건 진짜 신뢰 신호다. */}
+        <p className="mt-8 text-center text-[14px] text-muted">
+          {dict.docs.engineNote}{" "}
+          <a
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="font-bold text-accent hover:underline"
+          >
+            {dict.docs.engineCta}
+          </a>
+        </p>
       </div>
     </section>
   );
@@ -433,8 +473,8 @@ export function Contact({ dict, locale }: SectionProps) {
 /** 푸터 링크 구조(비번역: href/external) — dict.footer.columns 와 index 로 결합. */
 function footerHrefs(base: string): { href: string; external?: boolean }[][] {
   return [
-    // Product: Features, How it works, Docs(→ 공개 레포)
-    [{ href: `${base}#features` }, { href: `${base}#how` }, { href: GITHUB_REPO_URL, external: true }],
+    // Product: Features, How it works, Docs(→ 전용 docs 사이트, #121)
+    [{ href: `${base}#features` }, { href: `${base}#how` }, { href: DOCS_ROOT }],
     // Open source: GitHub, Engine, Changelog(→ Releases)
     [{ href: GITHUB_REPO_URL, external: true }, { href: GITHUB_REPO_URL, external: true }, { href: `${GITHUB_REPO_URL}/releases`, external: true }],
     // Company: Contact(mailto)
