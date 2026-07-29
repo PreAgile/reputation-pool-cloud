@@ -1,0 +1,10 @@
+# 의존성 install 스크립트 실행 허용. pnpm 10+는 공급망 보안상 빌드 스크립트를 기본 차단하며,
+# 신뢰하는 것만 여기 명시한다. dashboard/pnpm-workspace.yaml 과 같은 목록에서 msw 만 빠졌다 —
+# 랜딩에는 네트워크를 가로챌 테스트가 없다.
+#   - sharp: Next 이미지 최적화 네이티브 바이너리
+#   - esbuild: vitest/vite 번들러 네이티브 바이너리
+#   - unrs-resolver: eslint-config-next(ESLint import resolver) 네이티브 바이너리
+allowBuilds:
+  sharp: true
+  esbuild: true
+  unrs-resolver: true
