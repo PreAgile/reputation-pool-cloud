@@ -26,8 +26,8 @@
 	}
 }
 
-# 로케일 자동 판별(#110) 경로의 `Vary`. `/` 와 `/login` 은 응답 본문이 `Accept-Language`·`rp_locale`
-# 쿠키·`CF-IPCountry` 에 따라 달라지므로, 중간 캐시가 한 언어 응답을 다른 언어 방문자에게 주지 않도록
+# 로케일 자동 판별(#110) 경로의 `Vary`. `/login` 은 응답 본문이 `Accept-Language`·`rp_locale` 쿠키·
+# `CF-IPCountry` 에 따라 달라지므로, 중간 캐시가 한 언어 응답을 다른 언어 방문자에게 주지 않도록
 # 알려야 한다.
 #
 # 왜 앱이 아니라 Caddy 에서 붙이는가: Next 15.5 는 app-router 페이지 응답의 `Vary` 를 자신의 RSC 값
@@ -37,12 +37,13 @@
 # 모두 본다. `+` 는 기존 값을 지우지 않고 필드를 추가한다(앱의 RSC Vary 를 날리면 클라이언트 라우터
 # 캐시가 깨진다).
 #
-# 307 리다이렉트(`/` → `/ko`) 응답에는 앱이 넣은 같은 값이 이미 남아 있어 `Vary` 가 두 번 출력된다.
-# `Vary` 는 목록 헤더라 중복은 합쳐져 해석되므로 무해하다.
+# `/` 는 여기서 빠졌다(#15): 랜딩이 apex(`landing/`, Cloudflare Pages)로 옮겨가면서 이 호스트의 `/` 는
+# 언어에 따라 본문이 갈리는 페이지가 아니라 **고정 301**(`next.config.ts` 의 `redirects()`)이 되었다.
+# 응답이 갈리지 않는 경로에 `Vary` 를 붙이면 캐시 키만 불필요하게 쪼개진다. 언어 판별은 이제 apex 쪽
+# `landing/functions/_middleware.ts` 가 한다.
 #
 # (Caddyfile.prod 와 동일하게 유지할 것.)
 (locale_vary) {
-	header / +Vary "Accept-Language, Cookie, CF-IPCountry"
 	header /login +Vary "Accept-Language, Cookie, CF-IPCountry"
 }
 

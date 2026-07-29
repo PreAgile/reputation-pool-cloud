@@ -1,6 +1,15 @@
 /**
  * 마케팅 스크린샷 캡처 (#16) — 랜딩 기능 3행에 넣을 PNG 를 저장한다.
  *
+ * ## 캡처는 대시보드에, 산출물은 랜딩에 (#15)
+ * 랜딩·문서는 별개 앱(`landing/`, Cloudflare Pages)으로 분리됐지만 이 스크립트는 대시보드에 남는다 —
+ * 찍는 대상이 **실제 대시보드 화면**(`/overview`·`/resources/*`·`/events`)과 이 앱의 영어 목업
+ * (`/preview/*`)이기 때문이다. 랜딩에서는 이 화면들을 렌더할 수 없다.
+ *
+ * 반면 PNG 를 **쓰는** 쪽은 랜딩뿐이다. 그래서 출력만 `../landing/public/marketing/` 으로 보낸다.
+ * 두 앱에 같은 12장을 각각 두면(한동안 실제로 그랬다) 재캡처 때 한쪽만 갱신돼 랜딩이 옛 스크린샷을
+ * 서빙하는데, 그게 조용히 오래 간다. 레포에 사본은 하나뿐이어야 하고, 그 하나는 랜딩이 서빙하는 것이다.
+ *
  * 로케일 일치 + 테마 연동으로 총 12장:
  *   - KO: 실제 한국어 대시보드(/overview·/resources·/events) 를 route-stub 위에서 렌더 → `*-ko-{light,dark}.png`
  *   - EN: 영어 목업(/preview/*, 프로덕션 비노출) 을 렌더 → `*-en-{light,dark}.png`
@@ -21,7 +30,8 @@ import {
   marketingEventsFixture,
 } from "../test/marketing-fixtures";
 
-const OUT_DIR = path.join(process.cwd(), "public", "marketing");
+// Playwright 는 설정 파일이 있는 `dashboard/` 를 cwd 로 돈다 — 산출물은 형제 디렉터리인 랜딩 앱으로 나간다.
+const OUT_DIR = path.join(process.cwd(), "..", "landing", "public", "marketing");
 const TOKEN = "header.payload.sig"; // 값 존재만으로 대시보드 인증 가드 통과.
 type Theme = "light" | "dark";
 
