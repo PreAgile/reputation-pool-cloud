@@ -64,11 +64,68 @@ oci setup config      # user OCID / tenancy OCID / region=ap-tokyo-1 → API 키
 붙일 필요가 없다. 90초 간격으로 한 번씩만 시도하고(분당 1회 미만이라 레이트 리밋에 걸리지 않는다), 리밋에
 걸리면 5분→10분→…30분으로 물러난다. 성공하면 멈추고 알림·공인 IP·SSH 명령을 출력한다.
 
-조정은 환경변수로 한다: `OCPUS`, `MEMORY_GB`, `BOOT_GB`, `INTERVAL`, `MAX_ATTEMPTS`, `SSH_KEY_FILE`,
+조정은 환경변수로 한다: `SHAPE_LADDER`, `BOOT_GB`, `INTERVAL`, `MAX_ATTEMPTS`, `SSH_KEY_FILE`,
 `DISPLAY_NAME`. 자동 탐색이 실패하면 `TENANCY`, `AD`, `SUBNET`, `IMAGE`를 직접 지정한다.
+크기를 하나로 고정하려면 `OCPUS`/`MEMORY_GB`를 준다.
 
 인스턴스가 유휴 회수(§10)됐을 때의 재구축 경로이기도 하다 — 컴퓨트는 이 스크립트, OS 위쪽은
 `bootstrap.sh`다.
+
+#### 크기 사다리 — 한 덩어리가 안 되면 절반을 노린다
+
+기본값은 `SHAPE_LADDER="2:12 1:6"`이고 시도마다 번갈아 요청한다. 용량은 통째로 비는 게 아니라 **조각으로**
+난다. 2 OCPU/12GB 한 덩어리가 안 들어가는 순간에도 1 OCPU/6GB는 들어갈 수 있고, 절반이라도 잡으면
+발판이 된다(무료 한도 안이라 비용은 그대로 0). 6GB 호스트로 스택을 띄우는 경로는 §9-1에 이미 있다.
+
+#### 서버에서 24/7로 돌리기 (`install-a1-hunter.sh`) — 권장
+
+개발 머신에서 돌리면 **맥이 잠들 때마다 루프가 멈춘다.** 실측: 30시간 경과 중 실제 시도는 11시간분
+(가동률 37%)이었고, 갭이 217분·84분·70분씩 났다. 용량이 열리는 순간은 예측할 수 없으므로 **가동률이 곧
+확률**이다. 24/7 도는 서버로 옮기면 100%가 된다.
+
+```bash
+# 서버에서
+./scripts/install-a1-hunter.sh            # systemd 서비스 설치 + 시작
+journalctl -u a1-hunter.service -f
+./scripts/install-a1-hunter.sh --uninstall
+```
+
+**API 키를 서버로 복사하지 않는다.** 이 호스트는 공개 인터넷에 열려 있고, `oci_api_key.pem`은 테넌시
+전체를 조작할 수 있으며 파일이라 유출되면 어디서든 쓸 수 있다. 대신 **인스턴스 프린시펄**을 쓴다 —
+인스턴스가 자기 신원으로 인증하므로 키 파일이 없고, 권한은 IAM 정책으로 좁히며, 문제가 생기면 정책을
+지워 즉시 차단된다.
+
+테넌시에 한 번 만들어 두는 설정(이미 되어 있다):
+
+```bash
+oci iam dynamic-group create --name a1-hunter \
+  --matching-rule "ALL {instance.id = '<이 인스턴스 OCID>'}" --description "..." --compartment-id <tenancy>
+
+oci iam policy create --name a1-hunter-policy --compartment-id <tenancy> --description "..." --statements '[
+  "Allow dynamic-group a1-hunter to manage instance-family in tenancy where any {request.operation='"'"'LaunchInstance'"'"', request.operation='"'"'GetInstance'"'"', request.operation='"'"'ListInstances'"'"', request.operation='"'"'ListVnicAttachments'"'"'}",
+  "Allow dynamic-group a1-hunter to use volume-family in tenancy",
+  "Allow dynamic-group a1-hunter to use virtual-network-family in tenancy"]'
+```
+
+**`TerminateInstance`를 뺀 것이 핵심이다.** 이 루프는 프로덕션 서버에서 돌고, 그 서버가 자기 자신을 죽일
+수 있으면 안 된다. 오퍼레이션 화이트리스트라 실수로도 삭제가 나가지 않는다.
+
+설정은 `~/.a1-hunter.env`에 둔다(설치 스크립트가 뼈대를 만들어 준다). `TENANCY`/`AD`/`SUBNET`/`IMAGE`를
+**박아 두는 이유**는 조회 API 호출을 없애기 위해서다 — 시도당 요청이 1개로 줄어 레이트 리밋에 유리하고,
+조회 권한을 정책에 넣지 않아도 된다.
+
+유닛은 `Restart=always`에 **`RestartPreventExitStatus=0`**을 함께 준다. 이 루프는 확보에 성공하면
+`exit 0`으로 끝나는데, 그것까지 재시작하면 **두 번째 인스턴스를 만들려 든다.**
+
+#### 확보 알림 메일
+
+성공하면 `scripts/notify-mail.py`가 메일을 보낸다. 서버에서는 화면을 보는 사람이 없으니 이게 유일한
+통지다. 설정은 `~/.rp-mail.env`이고, 없으면 조용히 넘어가되 로그에 남긴다(알림 실패가 확보를 무효화하지
+않는다). 경로는 **OCI Email Delivery** — 하루 100통/월 3,000통이 영구 무료이고 체험 크레딧 만료와 무관하다.
+같은 경로를 나중에 제품 메일과 Alertmanager 알림에도 재사용할 수 있다.
+
+설정 파일을 셸로 `source`하지 않는다: SMTP 비밀번호에 `[`·`$` 같은 문자가 섞이면 셸이 해석해 값이 잘린다
+(실제로 첫 시도가 그렇게 실패했고, 증상은 "인증 실패"로만 보여 원인 구분이 되지 않았다).
 4. 실제 한도 확인: 콘솔 → Governance → Limits, Quotas and Usage → `Cores for Ampere A1 based VM instances`
    (2026-06에 4 OCPU/24GB → 2 OCPU/12GB로 무공지 축소된 전례가 있다)
 
