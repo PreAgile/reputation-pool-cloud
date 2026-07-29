@@ -77,6 +77,17 @@ describe("영어 docs 셸 + Introduction (#121)", () => {
     expect(metadata.alternates?.languages).toEqual(docsAlternates(""));
   });
 
+  // #143 리뷰의 핵심 회귀: 드롭다운이던 시절 영어 문서의 정적 HTML 에는 `/ko…` 링크가 0 건이었다.
+  // 한국어 문서를 만들어 놓고도 사용자는 그 존재를 알 수 없었다. **클릭하지 않고** 확인한다.
+  it("언어 스위처가 상호작용 없이 → 같은 문서의 한국어판(/ko/docs) 링크를 노출한다", () => {
+    renderDocs();
+
+    const switcher = screen.getByRole("navigation", { name: "Language" });
+    expect(within(switcher).getByRole("link", { name: "한국어" })).toHaveAttribute("href", "/ko/docs");
+    expect(within(switcher).getByRole("link", { name: "English" })).toHaveAttribute("href", "/docs");
+    expect(within(switcher).getByRole("link", { name: "English" })).toHaveAttribute("aria-current", "true");
+  });
+
   it("a11y: critical/serious 위반이 없다", async () => {
     const { container } = renderDocs();
     expect(await seriousViolations(container)).toEqual([]);

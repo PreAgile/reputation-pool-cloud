@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, within, fireEvent } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { DOCS_PAGES, docsAlternates, docsHref } from "@/lib/docs-manifest";
 import { seriousViolations } from "@/test/a11y";
 import DocsLayoutKo from "./layout";
@@ -52,13 +52,14 @@ describe("한국어 docs 셸 + 소개 (#143)", () => {
     expect(within(pager).getByRole("link")).toHaveAttribute("href", docsHref("quickstart", "ko"));
   });
 
-  it("언어 스위처가 → 랜딩이 아니라 같은 문서의 영어판(/docs)을 가리킨다", () => {
+  // 이 PR 의 사용자 관점 종료 기준: 한국어 문서 위에서 **누르지 않아도** 영어로 건너갈 링크가 보인다.
+  it("언어 스위처가 상호작용 없이 → 랜딩이 아니라 같은 문서의 영어판(/docs)을 가리킨다", () => {
     renderDocsKo();
 
-    fireEvent.click(screen.getByRole("button", { name: "언어" }));
-    const menu = screen.getByRole("menu");
-    expect(within(menu).getByRole("menuitem", { name: "English" })).toHaveAttribute("href", "/docs");
-    expect(within(menu).getByRole("menuitem", { name: "한국어" })).toHaveAttribute("href", "/ko/docs");
+    const switcher = screen.getByRole("navigation", { name: "언어" });
+    expect(within(switcher).getByRole("link", { name: "English" })).toHaveAttribute("href", "/docs");
+    expect(within(switcher).getByRole("link", { name: "한국어" })).toHaveAttribute("href", "/ko/docs");
+    expect(within(switcher).getByRole("link", { name: "한국어" })).toHaveAttribute("aria-current", "true");
   });
 
   it("SEO: canonical 이 /ko/docs 이고 hreflang 이 en·ko·x-default 를 가리킨다", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, within, fireEvent } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { seriousViolations } from "@/test/a11y";
 import MarketingPageKo, { metadata } from "./page";
 
@@ -49,12 +49,15 @@ describe("랜딩 페이지 한국어 (/ko, #16)", () => {
     expect((email.getAttribute("href") ?? "").startsWith("mailto:digle117@gmail.com")).toBe(true);
   });
 
-  it("언어 스위처가 영어(/)로 되돌아간다", () => {
+  // 클릭하지 않고 확인한다: 드롭다운이던 시절에는 링크가 열기 전까지 DOM 에 없었고, 그래서 JS 없이는
+  // 영어로 되돌아갈 방법이 없었다(#143 리뷰).
+  it("언어 스위처가 상호작용 없이 영어(/) 링크를 노출하고 현재 언어를 표시한다", () => {
     render(<MarketingPageKo />);
-    fireEvent.click(screen.getByRole("button", { name: "언어" }));
-    const menu = screen.getByRole("menu");
-    expect(within(menu).getByRole("menuitem", { name: "English" })).toHaveAttribute("href", "/");
-    expect(within(menu).getByRole("menuitem", { name: "한국어" })).toHaveAttribute("href", "/ko");
+
+    const switcher = screen.getByRole("navigation", { name: "언어" });
+    expect(within(switcher).getByRole("link", { name: "English" })).toHaveAttribute("href", "/");
+    expect(within(switcher).getByRole("link", { name: "한국어" })).toHaveAttribute("href", "/ko");
+    expect(within(switcher).getByRole("link", { name: "한국어" })).toHaveAttribute("aria-current", "true");
   });
 
   // #110: 자동 판별로 `/` 에서 넘어와도 한국어의 정본 URL 은 `/ko` 다 — 그래야 한국어 페이지가

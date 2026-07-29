@@ -111,14 +111,16 @@ describe("랜딩 페이지 (#16)", () => {
     );
   });
 
-  it("언어 스위처가 한국어(/ko)로 연결된다", () => {
+  // 스위처는 드롭다운이 아니라 항상 보이는 두 링크다(#143 리뷰) — 열기 전에는 링크가 DOM 에 없어서
+  // JS 를 끈 사람과 크롤러에게는 한국어 표면이 아예 존재하지 않았다. **클릭하지 않고** 확인한다.
+  it("언어 스위처가 상호작용 없이 한국어(/ko) 링크를 노출한다", () => {
     render(<MarketingPage />);
 
-    // 스위처는 드롭다운 — 열기 전엔 메뉴가 DOM 에 없다.
-    fireEvent.click(screen.getByRole("button", { name: "Language" }));
-    const menu = screen.getByRole("menu");
-    expect(within(menu).getByRole("menuitem", { name: "한국어" })).toHaveAttribute("href", "/ko");
-    expect(within(menu).getByRole("menuitem", { name: "English" })).toHaveAttribute("href", "/");
+    const switcher = screen.getByRole("navigation", { name: "Language" });
+    expect(within(switcher).getByRole("link", { name: "한국어" })).toHaveAttribute("href", "/ko");
+    expect(within(switcher).getByRole("link", { name: "English" })).toHaveAttribute("href", "/");
+    // 현재 로케일은 색이 아니라 속성으로 알린다.
+    expect(within(switcher).getByRole("link", { name: "English" })).toHaveAttribute("aria-current", "true");
   });
 
   it("GitHub 링크가 공개 엔진 레포를 가리킨다", () => {
