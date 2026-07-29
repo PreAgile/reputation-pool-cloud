@@ -5,7 +5,7 @@
   "description": "reputation-pool 랜딩·문서 (#15/#16) — Cloudflare Pages 로 나가는 정적 표면. 앱 서버와 수명이 분리된다",
   "scripts": {
     "dev": "next dev -p 3001",
-    "build": "next build",
+    "build": "next build && node scripts/postexport-lang.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -21,6 +21,8 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.6",
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "@tailwindcss/postcss": "^4.0.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -31,6 +33,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "eslint": "^9.39.5",
     "eslint-config-next": "15.5.20",
+    "jest-axe": "^10.0.0",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
