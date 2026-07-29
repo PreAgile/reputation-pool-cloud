@@ -20,14 +20,15 @@ import { CONTACT_EMAIL, GITHUB_REPO_URL } from "@/components/marketing/constants
 import { docsMetadata, docsPage } from "@/lib/docs-manifest";
 
 const SLUG = "faq";
+const LOCALE = "en";
 const PAGE = docsPage(SLUG)!;
 
-export const metadata: Metadata = docsMetadata(SLUG);
+export const metadata: Metadata = docsMetadata(SLUG, LOCALE);
 
 export default function DocsFaqPage() {
   return (
     <>
-      <PageHeader title={PAGE.title} summary={PAGE.summary} />
+      <PageHeader title={PAGE.title[LOCALE]} summary={PAGE.summary[LOCALE]} />
 
       <Section id="limits" title="Limits">
         <SubHeading>How many resources and cells can I have?</SubHeading>
@@ -66,7 +67,7 @@ export default function DocsFaqPage() {
           As many as you have things that can burn it independently — typically one per destination. Each distinct{" "}
           <C>(resource, context)</C> pair is one cell against the budget above, so a context derived per-request (a
           request id, a timestamp) will both exhaust the budget and produce cells with no useful history. See{" "}
-          <DocsLink href="/docs/concepts">Concepts</DocsLink>.
+          <DocsLink slug="concepts" locale={LOCALE}>Concepts</DocsLink>.
         </P>
       </Section>
 
@@ -119,7 +120,7 @@ export default function DocsFaqPage() {
             The gRPC port is bound to loopback in every deployment and the public reverse proxy fronts only the
             dashboard and <C>/api</C>, so there is no hosted address to send <C>Acquire</C> and <C>Report</C> to. What
             hosting covers right now is the control plane and everything built on it. The comparison below is what the
-            two options are meant to be; <DocsLink href="/docs/quickstart">Quickstart</DocsLink> is what runs today.
+            two options are meant to be; <DocsLink slug="quickstart" locale={LOCALE}>Quickstart</DocsLink> is what runs today.
           </P>
         </Callout>
         <P>
@@ -188,7 +189,7 @@ export default function DocsFaqPage() {
       <Section id="bugs" title="Where do I report a bug?">
         <P>
           It depends on which half is wrong, and the split is the same one described in{" "}
-          <DocsLink href="/docs">Introduction</DocsLink>.
+          <DocsLink slug="" locale={LOCALE}>Introduction</DocsLink>.
         </P>
         <SubHeading>Engine behaviour → the public repository</SubHeading>
         <P>
@@ -241,7 +242,7 @@ export default function DocsFaqPage() {
           gRPC route and no TLS termination for one. That binding is also load-bearing: the login throttle trusts{" "}
           <C>X-Forwarded-For</C> on the premise that the app is unreachable except through the proxy, so opening the
           data plane is a redesign of that defence rather than a port change. Until it happens,{" "}
-          <DocsLink href="/docs/quickstart">Quickstart</DocsLink> runs the loop against a stack you start, and the
+          <DocsLink slug="quickstart" locale={LOCALE}>Quickstart</DocsLink> runs the loop against a stack you start, and the
           client code is identical apart from the address and the channel credentials.
         </P>
 
@@ -269,12 +270,14 @@ export default function DocsFaqPage() {
 
         <SubHeading>Are these docs available in Korean?</SubHeading>
         <P>
-          Not yet — the docs are English-only for now, while the marketing site is available in both English and Korean.
-          Korean documentation is planned.
+          Yes. Every page exists in both English and Korean, and the language switcher in the header takes you to{" "}
+          <B>the same page</B> in the other language. Docs URLs do not switch language on their own from your browser
+          settings — a shared link has to open in the language the sender saw. Code, identifiers, endpoint paths, and
+          JSON keys stay in English in both.
         </P>
       </Section>
 
-      <DocsPager slug={SLUG} />
+      <DocsPager slug={SLUG} locale={LOCALE} />
     </>
   );
 }

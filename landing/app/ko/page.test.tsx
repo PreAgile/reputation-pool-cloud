@@ -28,9 +28,14 @@ describe("랜딩 페이지 한국어 (/ko, #16)", () => {
 
     // "시작하기" 는 nav·hero 여러 곳 → 모두 /ko#contact.
     screen.getAllByRole("link", { name: "시작하기" }).forEach((a) => expect(a).toHaveAttribute("href", "/ko#contact"));
-    // #121: docs 는 영어 전용 전용 사이트다 — `/ko` 랜딩에서도 로케일 프리픽스 없이 `/docs` 로 간다.
-    expect(screen.getByRole("link", { name: "문서 보기" })).toHaveAttribute("href", "/docs");
-    expect(screen.getAllByRole("link", { name: "문서" })[0]).toHaveAttribute("href", "/docs");
+    // #143: 한국어 docs 가 생겼으므로 `/ko` 랜딩의 문서 링크는 `/ko/docs` 로 간다. 이전에는 `/docs` 로
+    // 보냈고, 그게 한국어 방문자가 문서에서 언어를 잃는 지점이었다(이슈 #143 의 실측 증상).
+    expect(screen.getByRole("link", { name: "문서 보기" })).toHaveAttribute("href", "/ko/docs");
+    screen.getAllByRole("link", { name: "문서" }).forEach((a) => expect(a).toHaveAttribute("href", "/ko/docs"));
+    // docs 카드 세 장도 한국어 문서로 들어간다.
+    expect(screen.getByRole("link", { name: /퀵스타트/ })).toHaveAttribute("href", "/ko/docs/quickstart");
+    expect(screen.getByRole("link", { name: /API 레퍼런스/ })).toHaveAttribute("href", "/ko/docs/api");
+    expect(screen.getByRole("link", { name: /핵심 개념/ })).toHaveAttribute("href", "/ko/docs/concepts");
 
     const srcOf = (name: RegExp) => screen.getAllByRole("img", { name }).map((el) => el.getAttribute("src"));
     expect(srcOf(/풀 오버뷰/)).toEqual(

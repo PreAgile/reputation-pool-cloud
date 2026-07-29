@@ -64,9 +64,10 @@ export function MarketingNav({
   const links = [
     { href: `${base}#features`, label: nav.links.features },
     { href: `${base}#how`, label: nav.links.how },
-    // Docs 는 랜딩 앵커가 아니라 전용 docs 사이트(#121)다. 문서는 영어 전용이므로 로케일 프리픽스를
-    // 붙이지 않는다 — `/ko` 랜딩에서도 같은 `/docs` 로 간다.
-    { href: DOCS_ROOT, label: nav.links.docs },
+    // Docs 는 랜딩 앵커가 아니라 전용 docs 사이트(#121)다. **로케일을 유지한다** (#143): 이전에는
+    // 문서가 영어 한 벌뿐이라 `/ko` 랜딩에서도 `/docs` 로 보냈는데, 그게 한국어 방문자가 문서에서
+    // 언어를 잃는 지점이었다. 한국어 문서가 생긴 지금은 같은 언어의 문서로 들어가야 한다.
+    { href: DOCS_ROOT[locale], label: nav.links.docs },
   ];
 
   return (

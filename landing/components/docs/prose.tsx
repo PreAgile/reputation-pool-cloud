@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
+import { docsHref } from "@/lib/docs-manifest";
+import type { Locale } from "@/lib/locale";
 
 /**
  * docs 본문을 조립하는 프레젠테이션 프리미티브 (#121).
  *
  * 페이지마다 같은 Tailwind 클래스 뭉치를 다시 적으면 여섯 페이지가 서로 조금씩 다른 타이포로 갈라진다.
  * 그래서 문단·헤딩·코드 블록·콜아웃·엔드포인트 헤더를 여기 한 곳에 두고 페이지는 **내용만** 쓴다.
+ * 로케일별 페이지가 둘(en·ko)이 된 뒤에는 이 단일화가 더 중요해졌다 — 프로즈는 갈려도 타이포는
+ * 갈리지 않아야 한다(#143).
  *
  * MDX 툴체인은 쓰지 않는다(이 PR 에서 런타임 의존성을 늘리지 않는다) — 평범한 TSX 컴포넌트이므로
  * 타입 검사와 vitest 렌더가 그대로 적용되고, 코드 스니펫 안에 인라인 강조를 섞을 때도 별도 파서가
@@ -94,10 +98,26 @@ export function A({ href, children }: { href: string; children: React.ReactNode 
   );
 }
 
-/** 문서 내부 링크(클라이언트 내비게이션). */
-export function DocsLink({ href, children }: { href: string; children: React.ReactNode }) {
+/**
+ * 다른 docs 페이지로 가는 내부 링크(클라이언트 내비게이션).
+ *
+ * `href` 대신 **슬러그 + 로케일**을 받는다 (#143). 경로를 손으로 적게 두면 한국어 페이지에서
+ * `/docs/concepts` 라고 쓰는 실수 한 번에 독자가 영어 문서로 넘어가고, 그건 리뷰에서 잡히기 어렵다.
+ * 슬러그만 받으면 URL 은 매니페스트가 만들고 링크는 언제나 같은 로케일 안에 머문다.
+ *
+ * 같은 페이지 안의 앵커(`#blocklist`)는 로케일 문제가 없으므로 평범한 `<a>` 를 그대로 쓴다.
+ */
+export function DocsLink({
+  slug,
+  locale,
+  children,
+}: {
+  slug: string;
+  locale: Locale;
+  children: React.ReactNode;
+}) {
   return (
-    <Link href={href} className="font-medium text-accent hover:underline">
+    <Link href={docsHref(slug, locale)} className="font-medium text-accent hover:underline">
       {children}
     </Link>
   );

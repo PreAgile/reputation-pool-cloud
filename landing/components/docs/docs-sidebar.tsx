@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { docsHref, docsSections } from "@/lib/docs-manifest";
+import type { Locale } from "@/lib/locale";
 
 /**
  * docs 좌측 사이드바 (#121) — 섹션·페이지 목록을 `lib/docs-manifest.ts` 에서 파생한다.
@@ -14,14 +15,18 @@ import { docsHref, docsSections } from "@/lib/docs-manifest";
  * 여섯 번 반복하는 대신 경로 한 곳에서 읽는다. 활성 표시는 색뿐 아니라 `aria-current="page"` 로도
  * 노출한다 — 색만으로는 스크린리더에 아무 정보가 아니다(대시보드 `AppShell` 과 같은 규칙).
  *
+ * `locale` 은 라벨 언어뿐 아니라 **링크가 머무는 언어**를 정한다 (#143). 이 컴포넌트가 로케일을 모르면
+ * 한국어 문서의 사이드바가 영어 문서로 이어져 한 번 클릭에 언어가 바뀐다 — 문서를 읽다가 언어가
+ * 갈리는 것이 한국어 docs 의 가장 흔한 실패 방식이므로, href 는 항상 자기 로케일 루트에서 만든다.
+ *
  * 모바일에서는 목록을 접는다. 데스크톱 목록과 모바일 목록을 각각 렌더하면 같은 링크가 DOM 에 두 벌
  * 생기므로(스크린리더에 중복 내비게이션), 목록은 **한 벌만** 두고 lg 미만에서만 토글 버튼으로
  * 여닫는다. `lg:block` 이 항상 이기므로 데스크톱에서는 토글 상태와 무관하게 항상 펼쳐져 있다.
  */
-export function DocsSidebar({ label = "Docs" }: { label?: string }) {
+export function DocsSidebar({ locale, label }: { locale: Locale; label: string }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const sections = docsSections();
+  const sections = docsSections(locale);
 
   return (
     <nav aria-label={label} className="lg:sticky lg:top-[76px] lg:w-[220px] lg:shrink-0 lg:self-start">
@@ -50,10 +55,10 @@ export function DocsSidebar({ label = "Docs" }: { label?: string }) {
       <div id="docs-nav-list" className={cn("mt-3 lg:mt-0 lg:block", open ? "block" : "hidden")}>
         {sections.map((group) => (
           <div key={group.section} className="mb-5 last:mb-0">
-            <p className="px-3 text-[11.5px] font-bold uppercase tracking-[0.06em] text-muted">{group.section}</p>
+            <p className="px-3 text-[11.5px] font-bold uppercase tracking-[0.06em] text-muted">{group.label}</p>
             <ul className="mt-1.5 flex flex-col gap-0.5">
               {group.pages.map((page) => {
-                const href = docsHref(page.slug);
+                const href = docsHref(page.slug, locale);
                 const active = pathname === href;
                 return (
                   <li key={page.slug}>
@@ -68,7 +73,7 @@ export function DocsSidebar({ label = "Docs" }: { label?: string }) {
                           : "font-medium text-muted hover:bg-surface-2 hover:text-ink",
                       )}
                     >
-                      {page.title}
+                      {page.title[locale]}
                     </Link>
                   </li>
                 );

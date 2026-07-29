@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { buttonClass } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { DOCS_ROOT } from "@/lib/docs-manifest";
+import { DOCS_ROOT, docsHref } from "@/lib/docs-manifest";
 import { SITE_HOST } from "@/lib/site";
 import { BrowserFrame } from "./browser-frame";
 import { Brand } from "./logo";
@@ -164,8 +164,8 @@ export function Hero({ dict, locale }: SectionProps) {
             <Link href={`${base}#contact`} className={buttonClass("primary", `${CTA} px-5 py-2.5 text-[15px] text-accent-ink`)}>
               {h.ctaPrimary}
             </Link>
-            {/* 전용 docs 사이트(#121)로 — 로케일 프리픽스 없음(문서는 영어 전용). */}
-            <Link href={DOCS_ROOT} className={buttonClass("ghost", `${CTA} px-5 py-2.5 text-[15px]`)}>
+            {/* 전용 docs 사이트(#121)로 — 방문자의 로케일을 유지한다(#143). */}
+            <Link href={DOCS_ROOT[locale]} className={buttonClass("ghost", `${CTA} px-5 py-2.5 text-[15px]`)}>
               {h.ctaSecondary}
             </Link>
           </div>
@@ -390,17 +390,17 @@ export function HowItWorks({ dict, locale }: SectionProps) {
 /* ─────────────────────────────  Docs  ───────────────────────────── */
 
 /**
- * docs 카드가 가리키는 실제 라우트(비번역) — dict.docs.items 와 index 로 결합.
+ * docs 카드가 가리키는 실제 문서 슬러그(비번역) — dict.docs.items 와 index 로 결합.
  *
- * 이전에는 세 카드가 모두 공개 GitHub 레포를 가리켰다(전용 docs 라우트가 없어 404 회피용). 이제 `/docs`
- * 가 실제로 존재하므로(#121) 각 카드가 해당 문서 페이지로 들어간다. 문서는 영어 전용이라 로케일 프리픽스가
- * 없다 — `/ko` 랜딩에서도 같은 경로로 간다.
+ * 이전에는 세 카드가 모두 공개 GitHub 레포를 가리켰다(전용 docs 라우트가 없어 404 회피용). 이제 docs 가
+ * 실제로 존재하므로(#121) 각 카드가 해당 문서 페이지로 들어간다. URL 은 **슬러그 + 방문자 로케일**로
+ * 매니페스트가 만든다(#143) — 경로를 손으로 적어 두면 한국어 랜딩의 카드가 영어 문서로 떨어진다.
  */
-const DOCS_HREFS: string[] = ["/docs/quickstart", "/docs/api", "/docs/concepts"];
+const DOCS_CARD_SLUGS: string[] = ["quickstart", "api", "concepts"];
 
 export function Docs({ dict, locale }: SectionProps) {
   return (
-    // id="docs" 는 남겨 둔다 — nav·히어로 CTA 는 이제 `/docs` 로 가지만, 밖에서 공유된 `#docs` 링크가
+    // id="docs" 는 남겨 둔다 — nav·히어로 CTA 는 이제 docs 사이트로 가지만, 밖에서 공유된 `#docs` 링크가
     // 아무 데도 도착하지 않는 것보다 이 섹션에 도착하는 편이 낫다.
     <section id="docs" className="scroll-mt-20 border-b border-line">
       <div className={cn(WRAP, "py-[88px]")}>
@@ -409,7 +409,7 @@ export function Docs({ dict, locale }: SectionProps) {
           {dict.docs.items.map((d, i) => (
             <Link
               key={d.title}
-              href={DOCS_HREFS[i]}
+              href={docsHref(DOCS_CARD_SLUGS[i], locale)}
               className="group rounded-[14px] border border-line bg-surface p-5 transition hover:-translate-y-0.5 hover:border-accent"
             >
               <span className="rounded-[6px] border border-accent/20 bg-accent-soft px-2 py-0.5 font-mono text-[11px] text-accent">
@@ -471,10 +471,11 @@ export function Contact({ dict, locale }: SectionProps) {
 /* ─────────────────────────────  Footer  ───────────────────────────── */
 
 /** 푸터 링크 구조(비번역: href/external) — dict.footer.columns 와 index 로 결합. */
-function footerHrefs(base: string): { href: string; external?: boolean }[][] {
+function footerHrefs(locale: Locale): { href: string; external?: boolean }[][] {
+  const base = LOCALE_PATH[locale];
   return [
-    // Product: Features, How it works, Docs(→ 전용 docs 사이트, #121)
-    [{ href: `${base}#features` }, { href: `${base}#how` }, { href: DOCS_ROOT }],
+    // Product: Features, How it works, Docs(→ 전용 docs 사이트 #121, 로케일 유지 #143)
+    [{ href: `${base}#features` }, { href: `${base}#how` }, { href: DOCS_ROOT[locale] }],
     // Open source: GitHub, Engine, Changelog(→ Releases)
     [{ href: GITHUB_REPO_URL, external: true }, { href: GITHUB_REPO_URL, external: true }, { href: `${GITHUB_REPO_URL}/releases`, external: true }],
     // Company: Contact(mailto)
@@ -483,8 +484,7 @@ function footerHrefs(base: string): { href: string; external?: boolean }[][] {
 }
 
 export function Footer({ dict, locale }: SectionProps) {
-  const base = LOCALE_PATH[locale];
-  const hrefs = footerHrefs(base);
+  const hrefs = footerHrefs(locale);
   const year = new Date().getFullYear();
   return (
     <footer>

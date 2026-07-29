@@ -20,14 +20,15 @@ import {
 import { docsMetadata, docsPage } from "@/lib/docs-manifest";
 
 const SLUG = "api";
+const LOCALE = "en";
 const PAGE = docsPage(SLUG)!;
 
-export const metadata: Metadata = docsMetadata(SLUG);
+export const metadata: Metadata = docsMetadata(SLUG, LOCALE);
 
 export default function DocsApiPage() {
   return (
     <>
-      <PageHeader title={PAGE.title} summary={PAGE.summary} />
+      <PageHeader title={PAGE.title[LOCALE]} summary={PAGE.summary[LOCALE]} />
 
       <Section id="conventions" title="Conventions">
         <Bullets>
@@ -39,7 +40,7 @@ export default function DocsApiPage() {
           <Bullet>
             <B>Auth</B> — every endpoint except <C>POST /api/auth/login</C> requires{" "}
             <C>Authorization: Bearer &lt;jwt&gt;</C>. API keys do not work here; see{" "}
-            <DocsLink href="/docs/authentication">Authentication</DocsLink>.
+            <DocsLink slug="authentication" locale={LOCALE}>Authentication</DocsLink>.
           </Bullet>
           <Bullet>
             <B>Tenant</B> — scoped reads use the tenant on your token, never a parameter. There is no way to ask for
@@ -102,7 +103,7 @@ export default function DocsApiPage() {
           <P>
             <C>Acquire</C>, <C>Report</C>, <C>Register</C>, <C>Renew</C>, <C>Release</C>, and the live event stream are
             gRPC RPCs on the data plane, not REST endpoints — there is no HTTP gateway in front of them today. See{" "}
-            <DocsLink href="/docs/quickstart">Quickstart</DocsLink> for those, and the{" "}
+            <DocsLink slug="quickstart" locale={LOCALE}>Quickstart</DocsLink> for those, and the{" "}
             <a href="#grpc" className="font-medium text-accent hover:underline">
               gRPC summary
             </a>{" "}
@@ -282,7 +283,7 @@ export default function DocsApiPage() {
             Scores are sampled on a timer (once a minute), not written on every report, so the curve is a sampled view
             rather than a full history of outcomes. An unknown resource returns <C>200</C> with an empty{" "}
             <C>contexts</C> array — there is simply no series. Samples are retained for seven days; see{" "}
-            <DocsLink href="/docs/faq">FAQ</DocsLink>.
+            <DocsLink slug="faq" locale={LOCALE}>FAQ</DocsLink>.
           </P>
         </Endpoint>
 
@@ -482,7 +483,7 @@ done`}
           All three endpoints take a <C>tenantId</C> path parameter, and it must be the tenant your token is bound to —
           otherwise <C>403 forbidden</C>, checked before existence so the response cannot reveal whether another tenant
           exists. A <C>tenantId</C> that does not exist answers <C>404 tenant not found</C>. Storage, rotation, and
-          revocation semantics are in <DocsLink href="/docs/authentication">Authentication</DocsLink>.
+          revocation semantics are in <DocsLink slug="authentication" locale={LOCALE}>Authentication</DocsLink>.
         </P>
 
         <Endpoint id="post-api-key" method="POST" path="/api/tenants/{tenantId}/api-keys">
@@ -540,7 +541,7 @@ done`}
           <C>io.github.preagile.reputationpool.grpc.v1.ReputationAdvisor</C>, authenticated with <C>x-api-key</C>
           metadata, served on port <C>9093</C> of the app container — published on <C>127.0.0.1</C> only, so you reach
           it from a stack you started rather than from a hosted hostname. Message shapes and runnable calls are in{" "}
-          <DocsLink href="/docs/quickstart">Quickstart</DocsLink>.
+          <DocsLink slug="quickstart" locale={LOCALE}>Quickstart</DocsLink>.
         </P>
         <Table head={["RPC", "Request → response", "Notes"]}>
           <Row>
@@ -629,13 +630,13 @@ done`}
             <Cell>
               The call would create new pool state (a new resource on <C>Register</C>, a new cell on <C>Report</C>) past
               the service-wide budget. Calls that only touch existing state are never affected — see{" "}
-              <DocsLink href="/docs/faq">FAQ</DocsLink>.
+              <DocsLink slug="faq" locale={LOCALE}>FAQ</DocsLink>.
             </Cell>
           </Row>
         </Table>
       </Section>
 
-      <DocsPager slug={SLUG} />
+      <DocsPager slug={SLUG} locale={LOCALE} />
     </>
   );
 }

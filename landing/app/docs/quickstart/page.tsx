@@ -18,9 +18,10 @@ import { docsMetadata, docsPage } from "@/lib/docs-manifest";
 import { TYPESCRIPT_WORKER_EXAMPLE } from "./typescript-example";
 
 const SLUG = "quickstart";
+const LOCALE = "en";
 const PAGE = docsPage(SLUG)!;
 
-export const metadata: Metadata = docsMetadata(SLUG);
+export const metadata: Metadata = docsMetadata(SLUG, LOCALE);
 
 /**
  * 퀵스타트 (#121). **자체 호스팅 스택 기준**으로 쓴다.
@@ -42,7 +43,7 @@ export const metadata: Metadata = docsMetadata(SLUG);
 export default function DocsQuickstartPage() {
   return (
     <>
-      <PageHeader title={PAGE.title} summary={PAGE.summary} />
+      <PageHeader title={PAGE.title[LOCALE]} summary={PAGE.summary[LOCALE]} />
 
       <Callout tone="warn" title="There is no hosted gRPC endpoint yet — this page runs against your own stack">
         <P>
@@ -106,7 +107,7 @@ export RP_API_KEY=local-dev-key            # REPUTATION_POOL_API_KEY from your .
             The REST control plane takes an <C>Authorization: Bearer &lt;jwt&gt;</C> obtained by logging in. The gRPC
             data plane takes an API key in the <C>x-api-key</C> metadata header. A JWT will not authenticate a gRPC call
             and an API key will not authenticate a REST call — see{" "}
-            <DocsLink href="/docs/authentication">Authentication</DocsLink>.
+            <DocsLink slug="authentication" locale={LOCALE}>Authentication</DocsLink>.
           </P>
         </Callout>
       </Section>
@@ -246,7 +247,7 @@ grpcurl -plaintext -H "x-api-key: $RP_API_KEY" \\
         <P>
           Pick the failure type honestly — it is not cosmetic. <C>BLOCKED</C> costs 30 score points and starts an hour
           of cooldown; <C>SLOW</C> costs 2 and starts thirty seconds. Reporting everything as <C>BLOCKED</C> will empty
-          your pool. The exact numbers are in <DocsLink href="/docs/concepts">Concepts</DocsLink>.
+          your pool. The exact numbers are in <DocsLink slug="concepts" locale={LOCALE}>Concepts</DocsLink>.
         </P>
         <P>
           Finally, hand the resource back with <C>Release</C> so another worker can take it. Releasing is not required
@@ -406,7 +407,7 @@ curl -sS "$RP_ORIGIN/api/events?limit=10" -H "Authorization: Bearer $RP_JWT"`}
           <Bullet>
             <C>401</C> on every REST call? Either the token expired — log in again — or the three admin variables are
             not set, which disables the console entirely. See{" "}
-            <DocsLink href="/docs/api">REST API reference</DocsLink> for the full error table.
+            <DocsLink slug="api" locale={LOCALE}>REST API reference</DocsLink> for the full error table.
           </Bullet>
           <Bullet>
             <C>UNAVAILABLE</C> from grpcurl? Nothing is listening on <C>9093</C>. Check <C>docker compose ps</C>; the
@@ -448,7 +449,7 @@ curl -sS "$RP_ORIGIN/api/events?limit=10" -H "Authorization: Bearer $RP_JWT"`}
         </P>
       </Section>
 
-      <DocsPager slug={SLUG} />
+      <DocsPager slug={SLUG} locale={LOCALE} />
     </>
   );
 }
