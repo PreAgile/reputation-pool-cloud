@@ -148,6 +148,13 @@ fi
 command -v oci > /dev/null 2>&1 || die "oci CLI 가 없다"
 command -v python3 > /dev/null 2>&1 || die "python3 가 없다"
 
+# 설정값이 정수인지 여기서 잡는다. 그러지 않으면 아래 `[ "$RETENTION_DAYS" -gt 0 ]` 이 "integer
+# expression expected" 를 stderr 에 흘리고 **거짓으로 평가되어 정리 단계 전체가 조용히 스킵된다** —
+# 이 스크립트가 막으려는 실패 형태와 정확히 같다. 설정 오타는 시작 시점에 죽는 편이 낫다.
+case "$RETENTION_DAYS" in
+	'' | *[!0-9]*) die "OFFSITE_RETENTION_DAYS 는 0 이상의 정수여야 한다 (받은 값: '$RETENTION_DAYS')" ;;
+esac
+
 if docker info > /dev/null 2>&1; then
 	DOCKER=(docker)
 elif sudo -n docker info > /dev/null 2>&1; then
