@@ -187,10 +187,15 @@ REPUTATION_POOL_AUDIT_RETENTION=P0D     # 기본: 영구 보관 (P0D = 끄기). 
 | 알림 임계값·룰(`monitoring/*`) | 레포에 커밋 → main 머지 | 5분 내 자동 배포 |
 | 이미지에 굽히는 값(`NEXT_PUBLIC_*`) | GitHub 저장소 변수 → 재빌드 | 다음 릴리스 |
 
-**세 번째를 호스트 `.env` 에 넣으면 아무 일도 일어나지 않는다.** `NEXT_PUBLIC_SITE_URL` 은 Next 가
-정적 프리렌더 시점에 인라인하는 빌드타임 변수라 `release.yml` 이 `docker build --build-arg` 로 넘긴다.
-값이 틀리면 canonical/hreflang/OG 가 전부 잘못된 호스트를 가리켜 **조용히 색인이 안 된다**(실제로
-DNS 조차 없는 도메인이 기본값이던 시기가 있었다).
+**세 번째를 호스트 `.env` 에 넣으면 아무 일도 일어나지 않는다.** `NEXT_PUBLIC_LANDING_URL` 은 Next 가
+빌드 시점에 인라인하는 빌드타임 변수라 `release.yml` 이 `docker build --build-arg` 로 넘긴다.
+리다이렉트 규칙도 `next build` 가 라우트 매니페스트로 구워내므로 런타임 환경변수로는 `Location` 조차
+바꿀 수 없다. 값이 틀리면 옛 랜딩 URL 이 **존재하지 않는 호스트로 301** 되는데, 이건 404 보다 나쁘다 —
+크롤러가 링크 지분을 죽은 주소로 옮긴다.
+
+(계층 분리 전에는 이 자리가 `NEXT_PUBLIC_SITE_URL`, 즉 "이 앱 자신의 오리진"이었다. 랜딩·문서가
+apex 로 나가면서 대시보드에는 canonical·hreflang·sitemap 이 하나도 남지 않았고 그 변수를 읽는 코드도
+사라졌다 — #15. 랜딩 앱이 여전히 쓰는 동명 변수는 Cloudflare Pages 의 빌드 환경변수라 별개다.)
 
 `monitoring/*` 이 두 번째 경로인 이유: 알림 룰과 compose 파일은 이미지 안이 아니라 **서버 체크아웃에서
 bind-mount** 된다. 그래서 `pull-deploy.sh` 가 이미지만 갱신하지 않고 `git reset --hard` 로 체크아웃을

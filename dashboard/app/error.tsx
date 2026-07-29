@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect } from "react";
 import { ErrorScreen } from "@/components/error-screen";
 import { getErrorMessages, localeFromDocument } from "@/components/error-messages";
 import { buttonClass, Button } from "@/components/ui/button";
-import { LOCALE_PATH } from "@/lib/locale";
+import { LANDING_ORIGIN } from "@/lib/site";
 
 /**
  * 라우트 세그먼트 런타임 에러 경계 (#134). 이 파일이 없으면 렌더 중 예외 하나에 Next 기본 에러 화면이
@@ -48,9 +47,10 @@ export default function RouteError({
       actions={
         <>
           <Button onClick={reset}>{messages.actions.retry}</Button>
-          <Link href={LOCALE_PATH[locale]} className={buttonClass("ghost")}>
+          {/* 404 와 같은 이유로 apex 절대 URL 이다 — `not-found.tsx` 의 홈 링크 주석 참고. */}
+          <a href={LANDING_ORIGIN} className={buttonClass("ghost")}>
             {messages.actions.home}
-          </Link>
+          </a>
         </>
       }
       note={error.digest ? `${messages.digest}: ${error.digest}` : undefined}

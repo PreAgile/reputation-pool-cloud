@@ -4,7 +4,8 @@ import { ErrorScreen } from "@/components/error-screen";
 import { getErrorMessages } from "@/components/error-messages";
 import { buttonClass } from "@/components/ui/button";
 import { HtmlLang } from "@/components/html-lang";
-import { COUNTRY_HEADER, LOCALE_COOKIE, LOCALE_PATH, resolveLocale } from "@/lib/locale";
+import { LANDING_ORIGIN } from "@/lib/site";
+import { COUNTRY_HEADER, LOCALE_COOKIE, resolveLocale } from "@/lib/locale";
 
 /**
  * 404 (#134). 지금까지 오타 하나면 Next 기본 화면(`404: This page could not be found.`, 검정 배경,
@@ -15,7 +16,7 @@ import { COUNTRY_HEADER, LOCALE_COOKIE, LOCALE_PATH, resolveLocale } from "@/lib
  * `CF-IPCountry` → 기본 영어. 404 에만 별도 규칙을 두면 "언어 스위처로 한국어를 고른 사람이 오타를
  * 치면 영어 404" 같은 어긋남이 생긴다.
  *
- * 미들웨어(`middleware.ts`)는 매처가 `/`·`/login` 뿐이라 여기까지 오지 않는다. 그래서 판별을 이 페이지가
+ * 미들웨어(`middleware.ts`)는 매처가 `/login` 뿐이라 여기까지 오지 않는다. 그래서 판별을 이 페이지가
  * 직접 한다 — 미들웨어 매처를 전 경로로 넓히면 모든 정적 자산 요청까지 미들웨어를 통과하게 되므로
  * 404 하나 때문에 치를 대가가 아니다.
  *
@@ -46,9 +47,16 @@ export default async function NotFound() {
         description={messages.notFound.description}
         actions={
           <>
-            <Link href={LOCALE_PATH[locale]} className={buttonClass("primary")}>
+            {/*
+              랜딩은 이 앱이 아니라 apex(Cloudflare Pages)에 있다(#15). 상대 경로 `/`·`/ko` 를 두면
+              두 가지가 어긋난다 — `/` 는 이제 `/overview` 로 가는 콘솔 진입점이라 "홈으로"가 제자리를
+              맴돌고, `/ko` 는 apex 로 한 번 더 308 을 타고 나간다. 절대 URL 로 바로 보낸다.
+              언어를 붙이지 않는 이유: apex 의 미들웨어가 방문자 신호로 다시 판별하므로, 여기서 `/ko` 를
+              고정하면 랜딩 쪽 판별과 두 곳에서 같은 결정을 하게 된다.
+            */}
+            <a href={LANDING_ORIGIN} className={buttonClass("primary")}>
               {messages.actions.home}
-            </Link>
+            </a>
             <Link href="/overview" className={buttonClass("ghost")}>
               {messages.actions.console}
             </Link>

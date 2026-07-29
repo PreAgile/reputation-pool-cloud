@@ -11,7 +11,7 @@ import type { MetadataRoute } from "next";
  * disallow 는 `/api/`·`/actuator/` 로만 유지한다. 비공개 화면을 여기에 넣고 싶어지지만 **넣으면 안 된다**.
  * 이유가 이제 두 겹이다.
  *
- *   1. `/login`·`/overview`·`/preview/*` 는 `X-Robots-Tag: noindex`(next.config.ts 의 headers())로
+ *   1. 이 호스트의 화면은 `X-Robots-Tag: noindex`(next.config.ts 의 headers() — `/:path*` 전 경로)로
  *      색인에서 빼는데, 크롤러가 noindex 를 보려면 먼저 그 URL 을 가져올 수 있어야 한다. robots.txt 로
  *      막으면 헤더를 읽지 못해 "차단됐지만 색인됨" 상태로 남는다. 둘 중 하나만 골라야 하고, 우리는
  *      noindex 를 골랐다.

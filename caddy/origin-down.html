@@ -102,6 +102,26 @@
         font-weight: 700;
         text-decoration: none;
       }
+      /*
+        보조 CTA (#135 가 "계층 분리 후 CTA 한 줄 추가" 로 예고한 자리).
+
+        주 CTA "다시 시도"는 **지금 죽어 있는 바로 그 오리진**을 향한다 — 배포 중이라면 몇 초 뒤 살아
+        나지만, 오래 걸리는 장애라면 사용자에게 남는 선택지가 없다. 랜딩(apex)은 이 앱과 다른 인프라
+        (Cloudflare Pages)에 있어 **이 화면이 뜨는 순간에도 살아 있다.** 그래서 갈 수 있는 곳을 하나 준다.
+
+        색을 낮춰 두는 이유: 대부분의 경우 정답은 여전히 "잠시 뒤 다시 시도"다. 이 링크가 주 CTA 와
+        같은 무게로 보이면 몇 초만 기다리면 될 사람을 밖으로 내보낸다.
+
+        오리진을 리터럴로 적는다: 이 파일은 Caddy 가 정적으로 서빙하므로 빌드도 환경변수 치환도 없다.
+        `{{...}}` 는 Caddy 플레이스홀더로 해석되므로 템플릿 변수도 쓸 수 없다. apex 가 바뀌면 여기와
+        `dashboard/lib/site.ts` 의 기본값을 함께 고쳐야 한다.
+      */
+      .cta-secondary {
+        margin-left: 8px;
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
       .code {
         margin: 22px 0 0;
         padding-top: 16px;
@@ -135,6 +155,7 @@
       <!-- 요청 경로를 되돌려 주지 않는다: `{{placeholder "http.request.uri"}}` 를 본문에 심으면 공격자가
            만든 URL 이 그대로 반사돼 XSS 가 된다(Caddy 는 이스케이프하지 않는다). 항상 루트로 보낸다. -->
       <a class="cta" href="/">다시 시도 · Try again</a>
+      <a class="cta cta-secondary" href="https://poolroost.com">poolroost.com · 서비스 소개</a>
 
       <p class="code">
         오류 코드 {{placeholder "http.error.status_code"}} · {{placeholder "http.error.status_text"}}
