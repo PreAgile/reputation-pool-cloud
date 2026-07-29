@@ -38,6 +38,30 @@ describe("랜딩 페이지 (#16)", () => {
     expect(screen.getByRole("link", { name: "Read the docs" })).toHaveAttribute("href", "/#docs");
   });
 
+  // #120: 트러스트 바가 영어에서 줄바꿈되며 구분선이 어긋났다. 레이아웃(구분선 위치)은 실브라우저
+  // 스냅샷(visual/trust-strip.spec.ts)이 잡고, 여기서는 배지 4개가 제목·서브까지 빠짐없이 렌더되는지
+  // — 격자로 옮기는 과정에서 항목이 유실되지 않았는지 — 를 단정한다.
+  it("트러스트 바: 배지 4개가 제목과 서브카피를 모두 렌더한다", () => {
+    render(<MarketingPage />);
+
+    const heading = screen.getByText("Trust comes from the engine, not logos");
+    // "Audit trail" 같은 라벨은 Capabilities 카드에도 나온다 — 트러스트 섹션 안으로 범위를 좁힌다.
+    const strip = heading.closest("section");
+    expect(strip).not.toBeNull();
+    const inStrip = within(strip as HTMLElement);
+
+    const badges: [string, string][] = [
+      ["Open source", "the whole engine, on GitHub"],
+      ["Lincheck", "concurrency proven correct"],
+      ["Mutation-tested", "tests that catch real bugs"],
+      ["Audit trail", "every decision on record"],
+    ];
+    badges.forEach(([title, sub]) => {
+      expect(inStrip.getByText(title)).toBeInTheDocument();
+      expect(inStrip.getByText(sub)).toBeInTheDocument();
+    });
+  });
+
   it("결제 없음 — Email us CTA 가 mailto(digle117@gmail.com) 로 연결된다", () => {
     render(<MarketingPage />);
 

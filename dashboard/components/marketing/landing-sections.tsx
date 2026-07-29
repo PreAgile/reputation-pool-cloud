@@ -199,29 +199,47 @@ const TRUST_ICONS: React.ReactNode[] = [
   </g>,
 ];
 
+/**
+ * 배지 사이 세로 구분선을 "그 줄의 첫 칸이 아닌 칸"에만 붙이는 클래스.
+ *
+ * 이전 구현은 `flex flex-wrap` 컨테이너에 `i > 0 && "border-l"` 이었다. `i` 는 **배열에서 몇 번째**라는
+ * 사실이고, 구분선이 필요한 조건은 **이 줄에서 몇 번째**라는 사실이다. flex-wrap 에서는 줄바꿈 지점을
+ * 컨테이너 폭과 *텍스트 길이*가 런타임에 정하므로 이 둘이 갈린다 — 영어에서 `Audit trail` 이 둘째 줄로
+ * 넘어가면 그 항목이 `border-l` 을 들고 가서 줄 맨 앞에 세로선이 떠 있었고 윗줄과 축도 어긋났다.
+ * 한국어는 라벨이 짧아 4개가 우연히 한 줄에 들어가 멀쩡해 보였을 뿐이다(이슈 #120).
+ *
+ * grid 로 열 수를 고정하면 "줄의 첫 칸"이 텍스트와 무관한 **정적 사실**이 된다: 2열에서는 홀수 칸,
+ * 4열에서는 `4n+1` 칸이 줄 머리다. 그래서 구분선은 없는 상태에서 **더하는 방향으로만** 쓴다.
+ *   - 2열(기본): 짝수 칸(`2n`)은 줄 머리가 아니다 → 구분선 + 왼쪽 여백.
+ *   - 4열(md↑): 여기에 `4n+3` 칸도 줄 머리가 아니게 되므로 → 구분선 + 왼쪽 여백.
+ *
+ * `border-l-0` 으로 되돌리는 규칙을 두지 않는 이유: `[&:nth-child(…)]` 와 `md:[&:nth-child(…)]` 는
+ * 특이도가 같아서 어느 쪽이 이기는지가 생성 순서에 달린다. 두 규칙이 같은 값을 더하기만 하면
+ * 순서와 무관하게 결과가 하나뿐이다. 항목 수가 4개에서 늘어도 같은 규칙이 그대로 성립한다.
+ */
+const TRUST_DIVIDER =
+  "[&:nth-child(2n)]:border-l [&:nth-child(2n)]:border-line [&:nth-child(2n)]:pl-5" +
+  " md:[&:nth-child(4n+3)]:border-l md:[&:nth-child(4n+3)]:border-line md:[&:nth-child(4n+3)]:pl-5";
+
 export function TrustSignals({ dict }: SectionProps) {
   return (
     <section className="border-b border-line bg-surface">
-      <div className={cn(WRAP, "flex flex-wrap items-center gap-y-4 py-5")}>
-        <span className="mr-6 text-[13px] font-semibold text-muted">{dict.trust.heading}</span>
-        {dict.trust.items.map((s, i) => (
-          <div
-            key={s.title}
-            className={cn(
-              "flex items-center gap-2.5 px-5",
-              i > 0 && "border-l border-line",
-              i === 0 && "pl-0",
-            )}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="size-[18px] shrink-0 text-accent" aria-hidden="true">
-              {TRUST_ICONS[i]}
-            </svg>
-            <span>
-              <span className="block text-[13.5px] font-semibold text-ink">{s.title}</span>
-              <span className="block text-[11.5px] text-muted">{s.sub}</span>
-            </span>
-          </div>
-        ))}
+      {/* 헤딩은 자기 줄로 — 배지 격자와 축을 섞지 않으면 두 열/네 열 어디서도 정렬이 흔들리지 않는다. */}
+      <div className={cn(WRAP, "py-5")}>
+        <span className="block text-[13px] font-semibold text-muted">{dict.trust.heading}</span>
+        <div className="mt-3.5 grid grid-cols-2 gap-y-4 md:grid-cols-4">
+          {dict.trust.items.map((s, i) => (
+            <div key={s.title} className={cn("flex items-start gap-2.5 pr-5", TRUST_DIVIDER)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="mt-0.5 size-[18px] shrink-0 text-accent" aria-hidden="true">
+                {TRUST_ICONS[i]}
+              </svg>
+              <span>
+                <span className="block text-[13.5px] font-semibold text-ink">{s.title}</span>
+                <span className="block text-[11.5px] text-muted">{s.sub}</span>
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
