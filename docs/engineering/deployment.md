@@ -265,11 +265,12 @@ header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
 ```bash
 # 수동 재배포 (main 머지 후 release.yml이 latest 를 갱신한 뒤)
 ./scripts/bootstrap.sh
-
-# 롤백 — release.yml이 커밋마다 sha-<커밋> 태그를 남긴다
-echo 'APP_IMAGE_TAG=sha-<커밋>' >> .env
-./scripts/bootstrap.sh
 ```
+
+롤백은 자동 배포가 켜져 있는지에 따라 절차가 다르다 — **켜져 있으면 태그만 되돌려도 다음 폴링 주기가
+`origin/main` 으로 다시 올린다.** [§7-1 롤백하기](#롤백하기)를 따른다. 자동 배포가 꺼진 호스트라면
+`.env` 의 `APP_IMAGE_TAG` 와 `DASHBOARD_IMAGE_TAG` 를 `sha-<7자리>`(release.yml 이 커밋마다 남긴다)로
+바꾸고 `bootstrap.sh` 를 다시 실행하면 된다. 둘 다 바꾼다 — app 만 되돌리면 대시보드는 새 이미지로 남는다.
 
 ### 7-1. 자동 배포 (서버가 GitHub 에 물어본다 — 풀 방식)
 
@@ -392,17 +393,24 @@ sudo systemctl start reputation-pool-deploy.service   # 주기를 기다리지 �
 #### 롤백하기
 
 ```bash
-# 서버에서: 되돌릴 커밋으로 고정한 뒤 재실행
+# 서버에서: 먼저 자동 배포를 멈춘다 — 이걸 빼면 다음 주기가 롤백을 되돌린다
 cd ~/reputation-pool-cloud
+sed -i 's|^PULL_DEPLOY_ENABLED=.*|PULL_DEPLOY_ENABLED=false|' .env
+
+# 되돌릴 커밋으로 고정한 뒤 재실행
 git reset --hard <되돌릴-sha>
 sed -i 's|^APP_IMAGE_TAG=.*|APP_IMAGE_TAG=sha-<7자리>|' .env
 sed -i 's|^DASHBOARD_IMAGE_TAG=.*|DASHBOARD_IMAGE_TAG=sha-<7자리>|' .env
 ./scripts/bootstrap.sh
 ```
 
-**주의**: 이 상태로 두면 다음 폴링 주기가 다시 `origin/main` 으로 올려 버린다. 원인을 고칠 시간이 필요하면
-`.env` 의 `PULL_DEPLOY_ENABLED` 를 `false` 로 바꿔 타이머를 멈춘 뒤 작업한다. 되돌릴 것이 코드 자체라면
-`main` 에 revert 를 머지하는 것이 정석이다 — 그러면 다음 주기가 그걸 배포한다.
+`PULL_DEPLOY_ENABLED=false` 를 먼저 하는 이유: 타이머는 5분마다 `origin/main` 을 보므로, 멈추지 않으면
+**최대 5분 뒤 롤백이 조용히 되돌아간다.** 타이머 자체는 그대로 두고 배포만 멈추는 킬 스위치다.
+
+원인을 고친 뒤 `PULL_DEPLOY_ENABLED` 를 `true` 로 되돌리는 것을 잊지 않는다 — 잊으면 이후 머지가 전부
+배포되지 않고, 로그에는 "아무것도 하지 않는다" 만 남아 알아채기 어렵다. 되돌릴 것이 **코드 자체라면
+`main` 에 revert 를 머지하는 것이 정석이다** — 다음 주기가 그걸 배포하고, 킬 스위치를 건드릴 일이 없다.
+`bootstrap.sh` 도 완료 안내에서 이 호스트의 자동 배포 상태를 확인해 맞는 절차를 출력한다.
 
 > `docker compose down -v` 를 프로덕션에서 쓰지 않는다. `caddy-data` 볼륨의 인증서가 사라져 재발급이 일어나고
 > Let's Encrypt 레이트리밋을 소모한다. DB 볼륨도 함께 지워진다.
