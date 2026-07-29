@@ -395,8 +395,14 @@ export function HowItWorks({ dict, locale }: SectionProps) {
  * 이전에는 세 카드가 모두 공개 GitHub 레포를 가리켰다(전용 docs 라우트가 없어 404 회피용). 이제 docs 가
  * 실제로 존재하므로(#121) 각 카드가 해당 문서 페이지로 들어간다. URL 은 **슬러그 + 방문자 로케일**로
  * 매니페스트가 만든다(#143) — 경로를 손으로 적어 두면 한국어 랜딩의 카드가 영어 문서로 떨어진다.
+ *
+ * 타입을 `string[]` 이 아니라 **사전 항목 튜플에서 매핑**해 만든다. index 로 결합하는 두 목록이라
+ * 길이가 어긋나면 `docsHref(undefined, locale)` 가 되어 `/docs/undefined` 링크가 조용히 나가는데,
+ * 그건 렌더도 되고 테스트도 통과한다(404 는 배포 후에야 보인다). 이 매핑이 그 어긋남을 컴파일 시점에
+ * 잡는다 — 사전에 카드를 추가하면 여기서 원소가 하나 모자란다고 컴파일이 깨진다.
  */
-const DOCS_CARD_SLUGS: string[] = ["quickstart", "api", "concepts"];
+type SlugsMatching<T extends readonly unknown[]> = { [K in keyof T]: string };
+const DOCS_CARD_SLUGS: SlugsMatching<Dict["docs"]["items"]> = ["quickstart", "api", "concepts"];
 
 export function Docs({ dict, locale }: SectionProps) {
   return (

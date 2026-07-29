@@ -65,6 +65,7 @@ describe("DocsPager: 매니페스트 순서를 따르는 본문 하단 prev/next
       expect(within(nav).queryByText(/다음/)).not.toBeInTheDocument();
       const prev = within(nav).getByRole("link");
       expect(prev).toHaveAttribute("href", docsHref(DOCS_PAGES[DOCS_PAGES.length - 2].slug, "ko"));
+      expect(prev).toHaveTextContent(DOCS_PAGES[DOCS_PAGES.length - 2].title.ko);
     });
   });
 

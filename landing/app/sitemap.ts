@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/site";
 import { DOCS_PAGES, docsHref } from "@/lib/docs-manifest";
-import { LOCALES } from "@/lib/locale";
+import { LOCALES, type Locale } from "@/lib/locale";
 
 /**
  * 정적 내보내기(`output: "export"`)에서는 라우트 핸들러가 기본적으로 동적으로 취급되어 빌드가
@@ -38,10 +38,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...DOCS_PAGES.flatMap((page) => {
       // 한 슬러그의 두 URL 은 서로의 언어 대안이다. 이 쌍이 없으면 구글이 두 언어를 중복 콘텐츠로 보고
       // 한쪽을 버린다(#121 시점에는 영어 한 벌뿐이라 대안이 없어 일부러 비워 뒀고, 그 전제가 깨졌다).
-      const docsLanguages = {
-        en: `${SITE_URL}${docsHref(page.slug, "en")}`,
-        ko: `${SITE_URL}${docsHref(page.slug, "ko")}`,
-      };
+      // 이 맵도 바로 아래 URL 루프와 **같은 `LOCALES`** 에서 돌린다. 여기만 로케일을 손으로 적어 두면
+      // 언어를 추가할 때 `<loc>` 는 늘고 hreflang 쌍은 그대로인 상태가 되고, 그건 사이트맵을 열어 봐도
+      // 눈에 띄지 않는다(URL 은 다 있고 관계만 빠져 있다).
+      const docsLanguages = Object.fromEntries(
+        LOCALES.map((locale) => [locale, `${SITE_URL}${docsHref(page.slug, locale)}`]),
+      ) as Record<Locale, string>;
       return LOCALES.map((locale) => ({
         url: `${SITE_URL}${docsHref(page.slug, locale)}`,
         changeFrequency: "monthly" as const,
