@@ -79,11 +79,17 @@ jobs:
           context: ${{ matrix.context }}
           platforms: linux/${{ matrix.arch }}
           push: true
-          # dashboard 의 정본 오리진. `NEXT_PUBLIC_*` 는 빌드 시점 인라인이라 런타임 환경변수로는 canonical 을
-          # 못 바꾼다 — 여기서 넣어야 한다. 레포/환경 변수 `NEXT_PUBLIC_SITE_URL` 로 코드 수정 없이 덮을 수 있다.
-          # app 이미지에는 쓰이지 않는 ARG 라 무해하다.
+          # dashboard 가 **바깥으로 내보내는 링크**의 목적지(랜딩 apex). 404 의 "홈으로", 502 화면의 CTA 가
+          # 이 값으로 굳는다. `NEXT_PUBLIC_*` 는 빌드 시점 인라인이라 런타임 환경변수로는 못 바꾼다 — 여기서
+          # 넣어야 한다. 레포/환경 변수 `NEXT_PUBLIC_LANDING_URL` 로 코드 수정 없이 덮을 수 있다(apex 가 다른
+          # staging 배포). app 이미지에는 쓰이지 않는 ARG 라 무해하다.
+          #
+          # 계층 분리(#15) 전에는 여기서 `NEXT_PUBLIC_SITE_URL`(이 앱 자신의 오리진)을 넘겼다. 랜딩·문서가
+          # apex 로 나가면서 dashboard 에는 canonical·hreflang·sitemap 이 하나도 남지 않았고, 그 변수를
+          # 읽는 코드도 사라졌다. 안 읽히는 build arg 를 남겨 두면 다음 사람이 그것을 고치고 아무 일도
+          # 일어나지 않는 일을 겪으므로 지운다(랜딩 쪽 `NEXT_PUBLIC_SITE_URL` 은 Pages 빌드 변수라 별개다).
           build-args: |
-            NEXT_PUBLIC_SITE_URL=${{ vars.NEXT_PUBLIC_SITE_URL || 'https://app.poolroost.com' }}
+            NEXT_PUBLIC_LANDING_URL=${{ vars.NEXT_PUBLIC_LANDING_URL || 'https://poolroost.com' }}
           tags: |
             ghcr.io/preagile/reputation-pool-cloud/${{ matrix.image }}:latest-${{ matrix.arch }}
             ghcr.io/preagile/reputation-pool-cloud/${{ matrix.image }}:sha-${{ github.sha }}-${{ matrix.arch }}

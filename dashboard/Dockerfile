@@ -7,10 +7,13 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
-# 사이트 정본 오리진. `NEXT_PUBLIC_*` 는 빌드 시점에 정적 프리렌더 산출물로 인라인되므로 런타임 환경변수로는
-# canonical·hreflang·OG 를 바꿀 수 없다 — 반드시 build arg 로 넣어야 한다(CI 는 release.yml 의 build-args).
-ARG NEXT_PUBLIC_SITE_URL=https://app.poolroost.com
-ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+# 랜딩이 사는 곳(apex). 이 이미지가 서빙하는 오리진이 아니라 **바깥으로 내보내는 링크**의 목적지다 —
+# 404 의 "홈으로", 502 화면의 CTA(dashboard/lib/site.ts).
+# `NEXT_PUBLIC_*` 는 빌드 시점에 산출물로 인라인되므로 런타임 환경변수로는 바꿀 수 없다 — 반드시 build arg
+# 로 넣어야 한다(CI 는 release.yml 의 build-args). 여기가 비어 있으면 값을 덮을 방법이 아예 없어져서,
+# apex 가 다른 배포(staging 등)는 앱이 죽은 순간 사용자에게 **남의 도메인**을 탈출구로 준다.
+ARG NEXT_PUBLIC_LANDING_URL=https://poolroost.com
+ENV NEXT_PUBLIC_LANDING_URL=$NEXT_PUBLIC_LANDING_URL
 RUN pnpm run build
 
 FROM node:22-slim AS run

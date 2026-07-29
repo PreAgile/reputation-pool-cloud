@@ -187,10 +187,10 @@ REPUTATION_POOL_AUDIT_RETENTION=P0D     # 기본: 영구 보관 (P0D = 끄기). 
 | 알림 임계값·룰(`monitoring/*`) | 레포에 커밋 → main 머지 | 5분 내 자동 배포 |
 | 이미지에 굽히는 값(`NEXT_PUBLIC_*`) | GitHub 저장소 변수 → 재빌드 | 다음 릴리스 |
 
-**세 번째를 호스트 `.env` 에 넣으면 아무 일도 일어나지 않는다.** `NEXT_PUBLIC_SITE_URL` 은 Next 가
-정적 프리렌더 시점에 인라인하는 빌드타임 변수라 `release.yml` 이 `docker build --build-arg` 로 넘긴다.
-값이 틀리면 canonical/hreflang/OG 가 전부 잘못된 호스트를 가리켜 **조용히 색인이 안 된다**(실제로
-DNS 조차 없는 도메인이 기본값이던 시기가 있었다).
+**세 번째를 호스트 `.env` 에 넣으면 아무 일도 일어나지 않는다.** `NEXT_PUBLIC_LANDING_URL` 은 Next 가
+빌드 시점에 산출물로 인라인하는 빌드타임 변수라 `release.yml` 이 `docker build --build-arg` 로 넘긴다.
+이 값은 대시보드가 **바깥으로 내보내는 링크**(404 의 "홈으로", 502 화면의 CTA)의 목적지다. 틀리면
+하필 앱이 죽어 있는 순간에 드러난다 — 살아 있는 곳으로 나가라고 준 링크가 죽은 호스트를 가리킨다.
 
 `monitoring/*` 이 두 번째 경로인 이유: 알림 룰과 compose 파일은 이미지 안이 아니라 **서버 체크아웃에서
 bind-mount** 된다. 그래서 `pull-deploy.sh` 가 이미지만 갱신하지 않고 `git reset --hard` 로 체크아웃을

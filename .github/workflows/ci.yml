@@ -151,19 +151,28 @@ jobs:
               caddy:2 caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
           done
 
-      # 랜딩 로케일 자동 판별(#110)의 `Vary` 는 Caddy 가 붙인다 — Next 15.5 가 app-router 200 응답의
+      # 로케일 자동 판별(#110)의 `Vary` 는 Caddy 가 붙인다 — Next 15.5 가 app-router 200 응답의
       # `Vary` 를 자신의 RSC 값으로 덮어써서 앱에서는 붙일 수 없다(dashboard/middleware.ts 주석 참고).
-      # 즉 이 두 줄이 사라지면 Cloudflare/Caddy 가 한 언어 응답을 다른 언어 방문자에게 줄 수 있는데,
+      # 즉 이 줄이 사라지면 Cloudflare/Caddy 가 한 언어 응답을 다른 언어 방문자에게 줄 수 있는데,
       # 증상이 "가끔 언어가 틀리다"라서 배포 후에는 거의 잡히지 않는다. 그래서 여기서 존재를 고정한다.
+      #
+      # ## 왜 `/login` 뿐인가 — `/` 는 왜 목록에서 빠졌나 (#15 계층 분리)
+      # 이 검사는 원래 `/` 와 `/login` 둘 다 요구했다. 그때 `app.` 의 `/` 는 **랜딩**이었고 방문자 신호
+      # (쿠키·`Accept-Language`·`CF-IPCountry`)에 따라 en/ko 로 본문이 갈렸다. 지금 `/` 는 `/overview`
+      # 로 보내는 콘솔 진입점이라 어떤 신호에도 갈리지 않는다 — 갈리지 않는 응답에 `Vary` 를 붙이면
+      # 캐시 적중률만 깎는다. 랜딩의 로케일 판별과 그 `Vary` 는 apex(Cloudflare Pages)로 함께 옮겨 갔다.
+      #
+      # 그러므로 CI 가 실패한다고 Caddyfile 에 `/` 를 되살려서는 안 된다. 나중에 `app.` 에 **로케일로
+      # 갈리는 새 경로**가 생기면 그 경로를 이 목록에 추가한다(`/` 를 되돌리는 것이 아니라).
       - name: Assert Caddyfiles declare locale Vary
         run: |
           for f in Caddyfile Caddyfile.prod; do
-            for p in "/" "/login"; do
+            for p in "/login"; do
               grep -qF "header $p +Vary \"Accept-Language, Cookie, CF-IPCountry\"" "$f" \
                 || { echo "[$f] $p 의 로케일 Vary 선언이 없다 (#110)" >&2; exit 1; }
             done
           done
-          echo "ok: 두 Caddyfile 모두 / 와 /login 에 로케일 Vary 를 선언한다"
+          echo "ok: 두 Caddyfile 모두 /login 에 로케일 Vary 를 선언한다"
 
       # shellcheck cannot catch this class of bug: `var=$(grep ... | head -1)` aborts the whole script
       # under `set -e` + `pipefail` when grep matches nothing. That shipped and broke the default path on
