@@ -1,0 +1,270 @@
+@import "tailwindcss";
+
+/* next-themes sets class="dark" on <html>; drive dark via that class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Toss형 토큰 (라이트 기본) ──
+   넉넉한 여백·굵은 숫자·토스 블루 하나·상태는 기능색만. AI-generic 디폴트 회피. */
+:root {
+  --bg: #f2f4f6;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --ink: #191f28;
+  /* muted: 흰 배경에서 WCAG AA(4.5:1)를 넘도록 진하게. 예전 #8b95a1은 3.03:1로 미달(a11y 회귀에서 검출). */
+  --muted: #5f6b7a;
+  --line: #e8ebee;
+  /* accent: 흰 글자 버튼(≈5.4)·accent-soft 위 텍스트(≈4.8)가 WCAG AA를 넘도록 살짝 어둡게.
+     예전 #3182f6은 흰 글자 3.71·soft 위 3.31로 미달(a11y 게이트에서 검출). */
+  --accent: #1a66d6;
+  --accent-soft: #e8f3ff;
+  /* accent-ink: accent 배경 위 글자색(라이트는 흰색). 다크에서 짙은 잉크로 오버라이드. */
+  --accent-ink: #ffffff;
+  /* 상태 = 기능색 (accent와 분리). dots/차트용 밝은 값. */
+  --ok: #15b877;       /* HEALTHY */
+  --cool: #e6a323;     /* COOLING */
+  --recover: #12b5a5;  /* RECOVERING */
+  --block: #f04452;    /* BLOCKLISTED */
+  /* -ink: 배지 텍스트 전용 어두운 변형. text-{state}-ink on bg-{state}/12 틴트가 AA(≥4.5)를 넘도록.
+     밝은 기능색 자체는 dots/차트에 그대로 유지하고, 틴트 위 텍스트만 이 잉크를 쓴다.
+     (예전 text-{state} on /12: ok 2.29·cool 2.00·recover 2.29·block 3.19로 모두 미달) */
+  --ok-ink: #0a7347;       /* on ok/12 ≈5.3 */
+  --cool-ink: #8a5a00;     /* on cool/12 ≈5.4 (amber가 가장 어려워 충분히 어둡게) */
+  --recover-ink: #0a726a;  /* on recover/12 ≈5.2 */
+  --block-ink: #bd2130;    /* on block/12 ≈5.3 */
+  /* muted-ink: 중립 배지(폐기됨/반납 등) text on bg-muted/12 틴트 전용. 라이트는 muted 그대로 AA 통과. */
+  --muted-ink: #5f6b7a;    /* on muted/12 (light) ≥4.5 */
+  /* code: 랜딩 코드 스니펫·터미널 블록. 라이트/다크 공통으로 짙은 "터미널" 배경(코드가 어디서나 같게 보이게).
+     ink(#e6edf3) on bg(#0f1720) ≈ 15:1, 주석(muted #8b98a5)도 ≈ 6:1 로 AA 통과. */
+  --code-bg: #0f1720;
+  --code-ink: #e6edf3;
+  --code-muted: #8b98a5;
+}
+.dark {
+  --bg: #17191d;
+  --surface: #202329;
+  --surface-2: #262a31;
+  --ink: #eaecef;
+  --muted: #8b95a1;
+  --line: #2a2e35;
+  /* 다크 accent는 어두운 배경 위 텍스트(accent-soft·surface)에서 밝아야 해 그대로 둔다.
+     밝은 accent 위 흰 글자는 3.07로 미달 → 버튼 글자는 accent-ink(짙은 네이비)로 전환. */
+  --accent: #4593fc;
+  --accent-soft: #1b2a3f;
+  --accent-ink: #0a2540; /* on accent(#4593fc) ≈5.1 */
+  --ok: #2bc07f;
+  --cool: #efb23e;
+  --recover: #25c2b0;
+  --block: #f4606c;
+  /* -ink(다크): 밝은 배경 위가 아니라 자기 /12 틴트(짙은 카드 위) 위 텍스트. ok/cool/recover는
+     밝은 값 그대로도 ≥5.4로 통과, block만 #f4606c가 4.35로 미달이라 살짝 밝게 올린다. */
+  --ok-ink: #2bc07f;       /* on ok/12 ≈5.5 */
+  --cool-ink: #efb23e;     /* on cool/12 ≈6.5 */
+  --recover-ink: #25c2b0;  /* on recover/12 ≈5.7 */
+  --block-ink: #f47983;    /* on block/12 ≈5.1 */
+  /* 다크 muted(#8b95a1)는 muted/12 틴트 위 4.3으로 미달 → 배지 텍스트만 살짝 밝게 올려 AA 통과. */
+  --muted-ink: #9aa4b0;    /* on muted/12 (dark) ≈5.3 */
+  /* code: 다크에서도 동일 터미널 톤(살짝 더 어둡게). */
+  --code-bg: #0d1117;
+  --code-ink: #e6edf3;
+  --code-muted: #8b98a5;
+}
+
+/* 토큰 → Tailwind 유틸(bg-surface, text-ink, text-accent, border-line …). 테마 전환은 CSS 변수로. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-muted-ink: var(--muted-ink);
+  --color-code-bg: var(--code-bg);
+  --color-code-ink: var(--code-ink);
+  --color-code-muted: var(--code-muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-ok: var(--ok);
+  --color-cool: var(--cool);
+  --color-recover: var(--recover);
+  --color-block: var(--block);
+  --color-ok-ink: var(--ok-ink);
+  --color-cool-ink: var(--cool-ink);
+  --color-recover-ink: var(--recover-ink);
+  --color-block-ink: var(--block-ink);
+  /* --font-pretendard 는 next/font/local(app/fonts.ts)이 <html> 에 주입한다. 뒤의 이름들은
+     폰트 로드 전/실패 시 폴백. 이제 한글도 시스템 폰트가 아니라 Pretendard 로 렌더된다. */
+  --font-sans: var(--font-pretendard), "Pretendard Variable", Pretendard, -apple-system,
+    BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius-toss: 14px;
+}
+
+html {
+  color-scheme: light dark;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+/* 숫자가 열맞춤되게: KPI·score·ID 등에 .tnum */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── 한국어 타이포 (lang="ko" 서브트리 스코프) ──
+   랜딩 래퍼(components/marketing/landing.tsx)가 lang={locale} 를 달아 ko 서브트리에만 적용된다.
+   lang 속성 기반이라 SSR 에서도 안전하고, 영문 `/` 페이지 레이아웃은 건드리지 않는다.
+   `:lang(ko)` = (0,1,0)+요소 → Tailwind 단일 클래스(leading-*, tracking-*)를 이긴다. */
+:lang(ko) {
+  /* 어절(띄어쓰기) 단위로만 줄바꿈 — 한글 단어 중간이 끊기지 않는다. */
+  word-break: keep-all;
+  /* 그래도 넘치는 긴 토큰(URL·코드)만 마지막 수단으로 분해. */
+  overflow-wrap: break-word;
+}
+/* 한글 글자는 라틴보다 세로로 커서 제목 leading 을 살짝 키우고, 자간은 과하게 좁히지 않는다
+   (tracking-tight -0.025em 는 한글에서 답답해 보인다). */
+:lang(ko) h1 {
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+:lang(ko) h2 {
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+:lang(ko) h3 {
+  line-height: 1.42;
+  letter-spacing: -0.005em;
+}
+/* 본문·리드 문단은 한글 가독성에 맞춘 넉넉한 행간(1.5→1.72). 다만 코드/모노는 제외. */
+:lang(ko) p {
+  line-height: 1.72;
+}
+/* 인라인 코드가 어절 취급돼 통째로 다음 줄로 밀리며 빈 공간을 만들지 않게, 필요 시 분해 허용. */
+:lang(ko) code {
+  word-break: break-all;
+}
+
+/* ── 모션 토큰 (#54 P2) ──
+   지속시간 3단계 + 이징 2종. enter 는 ease-out(부드럽게 안착), 상태 전환은 표준 이징. */
+:root {
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-std: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Radix data-state=open/closed 전환용 키프레임(enter/exit). Radix Presence 가
+   닫힐 때 요소를 잠깐 유지하며 [data-state=closed] 애니메이션을 재생한다. */
+@keyframes rp-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes rp-pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes rp-pop-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.96); }
+}
+@keyframes rp-slide-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes rp-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 커맨드 팔레트 모달: scale(.97→1). 원본 pop(.96)과 달리 이슈 스펙에 맞춰 .97 로. */
+@keyframes rp-scale-in {
+  from { opacity: 0; transform: translate(-50%, 0) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+@keyframes rp-scale-out {
+  from { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  to { opacity: 0; transform: translate(-50%, 0) scale(0.97); }
+}
+
+/* origin scale+fade — 오버플로 메뉴(DropdownMenu). transform-origin 은 Radix 가 계산. */
+.rp-anim-pop {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+}
+.rp-anim-pop[data-state="open"] {
+  animation: rp-pop-in var(--motion-base) var(--ease-out);
+}
+.rp-anim-pop[data-state="closed"] {
+  animation: rp-pop-out var(--motion-fast) var(--ease-std);
+}
+
+/* fade+slide — 날짜 범위 팝오버(Popover). */
+.rp-anim-popover {
+  transform-origin: var(--radix-popover-content-transform-origin);
+}
+.rp-anim-popover[data-state="open"] {
+  animation: rp-slide-in var(--motion-base) var(--ease-out);
+}
+.rp-anim-popover[data-state="closed"] {
+  animation: rp-fade-out var(--motion-fast) var(--ease-std);
+}
+
+/* 커맨드 팔레트(⌘K) — 스크림 fade + 모달 scale. Radix Dialog data-state 로 enter/exit. */
+.rp-anim-scrim[data-state="open"] {
+  animation: rp-fade-in var(--motion-base) var(--ease-out);
+}
+.rp-anim-scrim[data-state="closed"] {
+  animation: rp-fade-out var(--motion-fast) var(--ease-std);
+}
+.rp-anim-dialog[data-state="open"] {
+  animation: rp-scale-in var(--motion-base) var(--ease-out);
+}
+.rp-anim-dialog[data-state="closed"] {
+  animation: rp-scale-out var(--motion-fast) var(--ease-std);
+}
+
+
+/* 실시간 상태 점(pulse) — 점 + 바깥으로 확장·소멸하는 링(신호 감지 느낌). #54 P2 마이크로 인터랙션.
+   링 색은 currentColor 상속 → 상태색(text-ok 등) 위에 얹으면 그 색으로 퍼진다. */
+@keyframes rp-ping {
+  0% { transform: scale(1); opacity: 0.55; }
+  70%, 100% { transform: scale(2.4); opacity: 0; }
+}
+.rp-live-dot {
+  position: relative;
+}
+.rp-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: rp-ping 1.8s var(--ease-out) infinite;
+}
+
+/* 카드/행 hover 전환 통일 — 색만 부드럽게(레이아웃 흔들림 없이). 상호작용 있는 카드/행에 얹는다. */
+.rp-hover {
+  transition:
+    background-color var(--motion-fast) var(--ease-std),
+    border-color var(--motion-fast) var(--ease-std);
+}
+
+/* 모션 감소 선호 시 전역 무력화(스켈레톤 맥동 등 포함). 접근성 필수. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

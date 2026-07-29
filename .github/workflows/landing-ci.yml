@@ -1,0 +1,93 @@
+# 랜딩·문서(#15/#16) CI — `landing/` 변경 시에만 돈다.
+#
+# 대시보드 CI(dashboard-ci.yml)와 별개인 이유는 두 앱이 별개 배포 대상이기 때문이다. 랜딩은
+# Cloudflare Pages 로, 대시보드는 GHCR 이미지 → 서버로 나간다. 한쪽 변경이 다른 쪽 CI 를 돌릴 이유가
+# 없고, 무엇보다 **랜딩이 깨져도 서버 배포가 막히면 안 된다**(그 반대도 마찬가지다).
+#
+# e2e/visual 은 여기 없다. 랜딩은 정적 HTML 이고 상호작용이 언어 스위처·테마 토글뿐이라 jsdom 으로
+# 충분하다. 실브라우저가 필요해지면 그때 추가한다.
+name: Landing CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "landing/**"
+      - ".github/workflows/landing-ci.yml"
+  pull_request:
+    paths:
+      - "landing/**"
+      - ".github/workflows/landing-ci.yml"
+
+concurrency:
+  group: landing-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: landing
+
+jobs:
+  gate:
+    name: Typecheck / Lint / Vitest / Export
+    runs-on: ubuntu-latest
+    steps:
+      # 이후 단계에 git 인증이 필요 없다. 기본값은 토큰을 .git/config 에 남겨 두므로,
+      # `pnpm install` 이 실행하는 임의의 스크립트가 그 자격 증명에 닿을 수 있다.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Typecheck (tsc --noEmit)
+        run: corepack pnpm typecheck
+
+      - name: Lint
+        run: corepack pnpm lint
+
+      - name: Unit tests (vitest)
+        run: corepack pnpm test
+
+      - name: Static export (next build)
+        run: corepack pnpm build
+
+      # 정적 내보내기가 **실제로 파일을 만들었는지** 확인한다. `next build` 는 export 설정이 빠져도
+      # 성공하므로(그때는 `.next/` 만 생긴다) 빌드 성공만으로는 Pages 에 올릴 것이 있다는 보장이 없다.
+      # 그 경우 배포는 조용히 빈 사이트를 만든다.
+      #
+      # 아래 검사들은 전부 "빌드는 초록인데 배포된 사이트가 틀린" 경우를 잡는다. 산출물을 직접 보지
+      # 않으면 드러나지 않는 종류다.
+      - name: 내보내기 산출물 확인
+        run: |
+          set -eu
+          test -f out/index.html || { echo "out/index.html 이 없다 — output: 'export' 설정을 확인한다" >&2; exit 1; }
+          test -f out/ko.html    || { echo "out/ko.html 이 없다 — 한국어 랜딩이 내보내지지 않았다" >&2; exit 1; }
+          test -f out/sitemap.xml && test -f out/robots.txt \
+            || { echo "sitemap.xml/robots.txt 가 없다 — force-static 선언을 확인한다" >&2; exit 1; }
+
+          # 한국어 문서가 lang="en" 으로 나가면 스크린리더가 초기 음성 언어를 잘못 고르고, JS 를 돌리지
+          # 않는 크롤러도 영어로 인식한다. 후처리(scripts/postexport-lang.mjs)가 정말 걸렸는지 본다.
+          grep -q '<html lang="ko"' out/ko.html \
+            || { echo "out/ko.html 의 lang 이 ko 가 아니다 — postexport-lang 이 걸리지 않았다" >&2; exit 1; }
+
+          # docs 가 사이트맵에서 빠진 채 배포된 전례가 있다(#130 이 6페이지를 넣고 sitemap 을 잊었다).
+          grep -q '/docs' out/sitemap.xml \
+            || { echo "sitemap.xml 에 /docs 가 없다 — 매니페스트 연결이 끊겼다" >&2; exit 1; }
+
+          # canonical 이 틀리면 색인이 조용히 다른 호스트로 간다(#118 의 재발 방지). 단위 테스트는
+          # 환경변수를 고정해 돌므로, **실제 빌드가 만든 산출물**을 여기서 한 번 더 본다.
+          grep -q 'rel="canonical" href="https://poolroost.com"' out/index.html \
+            || { echo "out/index.html 의 canonical 이 apex 가 아니다" >&2; exit 1; }
+
+          echo "생성된 HTML:"; find out -name '*.html' | sort
+          echo "sitemap <loc> 개수: $(grep -c '<loc>' out/sitemap.xml)"

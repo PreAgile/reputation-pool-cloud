@@ -1,0 +1,14 @@
+# 의존성 install 스크립트 실행 허용. pnpm 10+는 공급망 보안상 빌드 스크립트를 기본 차단하며,
+# 신뢰하는 것만 여기 명시한다. dashboard/pnpm-workspace.yaml 과 같은 목록에서 msw 만 빠졌다 —
+# 랜딩에는 네트워크를 가로챌 테스트가 없다.
+#   - sharp: Next 이미지 최적화 네이티브 바이너리
+#   - esbuild: vitest/vite 번들러 네이티브 바이너리
+#   - unrs-resolver: eslint-config-next(ESLint import resolver) 네이티브 바이너리
+#   - protobufjs: @grpc/proto-loader 의 전이 의존. 퀵스타트 예제를 tsc 로 검증하는 dev 전용 경로에서만
+#     쓰이므로 postinstall(protobufjs CLI 용)이 필요 없다. **미결정으로 두면 pnpm install 이 경고가
+#     아니라 exit 1 로 끝나 CI 설치 단계가 깨진다** — false 라고 명시하는 것이 그 이유다.
+allowBuilds:
+  sharp: true
+  esbuild: true
+  unrs-resolver: true
+  protobufjs: false
