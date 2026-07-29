@@ -109,6 +109,13 @@ describe("랜딩 페이지 (#16)", () => {
     expect(metadata.alternates?.languages).toEqual({ en: "/", ko: "/ko", "x-default": "/" });
   });
 
+  // 위 canonical·hreflang 은 모두 상대경로 — 절대 URL 로 렌더될 때 쓰이는 오리진이 metadataBase 다.
+  // 기본값이 DNS 없는 도메인(reputationpool.io)이던 동안 구글은 canonical 을 따라 존재하지 않는 호스트로
+  // 갔고 색인이 0건이었다. 그 버그의 직접 회귀 테스트다.
+  it("SEO: metadataBase 가 실제 서비스 오리진(app.poolroost.com)이다", () => {
+    expect(metadata.metadataBase?.origin).toBe("https://app.poolroost.com");
+  });
+
   it("a11y: critical/serious 위반이 없다", async () => {
     const { container } = render(<MarketingPage />);
     expect(await seriousViolations(container)).toEqual([]);

@@ -26,20 +26,52 @@
 #   ./scripts/oci-launch-retry.sh
 #
 # 환경변수로 조정 (전부 선택):
-#   OCPUS=2 MEMORY_GB=12 BOOT_GB=50 INTERVAL=60 MAX_ATTEMPTS=0
+#   SHAPE_LADDER="2:12 1:6"  BOOT_GB=50 INTERVAL=60 MAX_ATTEMPTS=0
+#   OCPUS=2 MEMORY_GB=12                       # SHAPE_LADDER 대신 크기 하나만 고정할 때
 #   SSH_KEY_FILE=~/.ssh/oci_rp_work.pub DISPLAY_NAME=reputation-pool-prod
-#   TENANCY=... AD=... SUBNET=... IMAGE=...   # 자동 탐색이 실패할 때만
+#   TENANCY=... AD=... SUBNET=... IMAGE=...   # 자동 탐색이 실패할 때(또는 조회 권한이 없을 때)
 #
 # 세션 토큰(`oci session authenticate`)이 아니라 **API 키 인증**을 쓴다: 세션 토큰은 1시간마다 만료돼
 # 장시간 루프가 중간에 죽는다.
+#
+# ## 개발 머신이 아니라 서버에서 돌리기 (권장)
+#
+# 맥에서 돌리면 잠들 때마다 루프가 멈춘다 — 실측 30시간 중 실제 시도는 11시간분(가동률 37%)이었고,
+# 용량이 열리는 순간은 예측할 수 없으므로 가동률이 곧 확률이다. 24/7 도는 서버에서 돌리면 100% 가 된다.
+#
+# 서버에서는 **인스턴스 프린시펄**로 인증한다(`OCI_CLI_AUTH=instance_principal`). 공개 인터넷에 노출된
+# 호스트에 테넌시 전체 권한을 가진 API 키 파일을 두지 않기 위해서다 — 인스턴스는 자기 신원으로 인증하고,
+# 권한은 IAM 정책으로 LaunchInstance 등으로 좁혀 둔다(TerminateInstance 는 제외한다: 그 서버가 자기
+# 자신을 죽일 수 있으면 안 된다). 설치는 `./scripts/install-a1-hunter.sh` 가 한다.
+#
+# 인스턴스 프린시펄 모드에서는 `~/.oci/config` 가 없으므로 `TENANCY` 를 환경변수로 준다. AD·SUBNET·IMAGE
+# 도 함께 주면 조회 API 호출이 사라져 시도당 요청이 1개로 줄고(레이트 리밋에 유리) 조회 권한도 필요 없다.
 set -euo pipefail
 
 # CLI 가 매 호출마다 붙이는 키 라벨 권고 경고를 끈다 — 오류 판별용 출력에 섞이면 읽기 어렵다.
 export SUPPRESS_LABEL_WARNING=True
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 SHAPE="${SHAPE:-VM.Standard.A1.Flex}"
-OCPUS="${OCPUS:-2}"
-MEMORY_GB="${MEMORY_GB:-12}"
+
+# 시도마다 요청 크기를 번갈아 바꾼다("OCPU:GB" 를 공백으로 구분).
+#
+# 용량은 통째로 비는 게 아니라 조각으로 난다. 2 OCPU/12GB 한 덩어리가 안 들어가는 순간에도
+# 1 OCPU/6GB 는 들어갈 수 있고, 절반이라도 잡아 두면 발판이 된다(무료 한도 안이라 비용은 그대로 0).
+# 나중에 용량이 열릴 때 그 인스턴스를 키우는 편이 처음부터 큰 것만 노리며 기다리는 것보다 빠르다.
+#
+# OCPUS/MEMORY_GB 를 명시하면 그 크기 하나만 시도한다(기존 사용법 호환).
+if [ -z "${SHAPE_LADDER:-}" ]; then
+	if [ -n "${OCPUS:-}" ] || [ -n "${MEMORY_GB:-}" ]; then
+		SHAPE_LADDER="${OCPUS:-2}:${MEMORY_GB:-12}"
+	else
+		SHAPE_LADDER="2:12 1:6"
+	fi
+fi
+read -r -a LADDER <<< "$SHAPE_LADDER"
+[ "${#LADDER[@]}" -gt 0 ] || { printf 'error: SHAPE_LADDER 가 비었다\n' >&2; exit 2; }
+
 BOOT_GB="${BOOT_GB:-50}"
 # 시도 간격(초). `--no-retry` 덕에 시도 1회 = HTTP 요청 1개이므로 이 값이 그대로 요청 빈도가 된다.
 #
@@ -88,7 +120,29 @@ summarize() {
 
 command -v oci > /dev/null 2>&1 || die "oci CLI 가 없다 — 'brew install oci-cli' 후 'oci setup config' 를 실행한다"
 [ -f "$SSH_KEY_FILE" ] || die "SSH 공개키가 없다: $SSH_KEY_FILE (SSH_KEY_FILE 로 지정 가능)"
-[ -f "$HOME/.oci/config" ] || die "$HOME/.oci/config 가 없다 — 'oci setup config' 를 먼저 실행한다"
+
+# 인증 경로는 둘이고, 무엇으로 도는지에 따라 tenancy 를 얻는 곳이 다르다.
+#   API 키       개발 머신. ~/.oci/config 에 tenancy 가 있다.
+#   인스턴스     서버. 키 파일도 config 도 없다 — TENANCY 를 환경변수로 받아야 한다.
+if [ "${OCI_CLI_AUTH:-}" = instance_principal ]; then
+	[ -n "${TENANCY:-}" ] || die "instance principal 모드에서는 TENANCY 를 환경변수로 준다 (~/.oci/config 가 없어 읽을 수 없다)"
+else
+	[ -f "$HOME/.oci/config" ] || die "$HOME/.oci/config 가 없다 — 'oci setup config' 를 먼저 실행한다 (서버라면 OCI_CLI_AUTH=instance_principal)"
+	TENANCY="${TENANCY:-$(awk -F= '/^tenancy[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2; exit}' "$HOME/.oci/config")}"
+	[ -n "$TENANCY" ] || die "$HOME/.oci/config 에서 tenancy OCID 를 찾지 못했다 — TENANCY 로 직접 지정한다"
+fi
+
+# 성공을 알린다. 메일 설정(~/.rp-mail.env)이 없으면 조용히 넘어가되 로그에는 남긴다 —
+# 서버에서 돌 때는 화면을 보는 사람이 없으므로 이 경로가 유일한 통지다.
+notify() {
+	local subject="$1" body="$2" rc=0
+	printf '%s\n' "$body" | python3 "$REPO_DIR/scripts/notify-mail.py" "$subject" > /dev/null 2>&1 || rc=$?
+	case "$rc" in
+		0) log "메일 알림 발송 완료" ;;
+		2) log "메일 설정이 없어 알림을 보내지 않았다 (~/.rp-mail.env)" ;;
+		*) log "warn: 메일 알림 발송 실패 (rc=$rc) — python3 scripts/notify-mail.py 로 확인한다" ;;
+	esac
+}
 
 # ---------------------------------------------------------------------------
 # 필요한 OCID 들을 탐색한다. 콘솔에서 복사해 붙이는 과정을 없애 오타 가능성을 줄인다.
@@ -111,9 +165,6 @@ oci_try() {
 	done
 	die "$label 조회가 4분간 실패했다 — 인증 전파 지연이거나 대상이 없다"
 }
-
-TENANCY="${TENANCY:-$(awk -F= '/^tenancy[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2; exit}' "$HOME/.oci/config")}"
-[ -n "$TENANCY" ] || die "$HOME/.oci/config 에서 tenancy OCID 를 찾지 못했다 — TENANCY 로 직접 지정한다"
 
 if [ -z "${AD:-}" ]; then
 	AD="$(oci_try '가용성 도메인' \
@@ -157,7 +208,8 @@ fi
 cat <<EOF
 
 대상 구성
-  shape        $SHAPE  ($OCPUS OCPU / ${MEMORY_GB}GB)
+  shape        $SHAPE
+  크기 사다리  ${LADDER[*]}  (OCPU:GB — 시도마다 번갈아)
   boot volume  ${BOOT_GB}GB
   AD           $AD
   subnet       ${SUBNET##*.}
@@ -183,8 +235,13 @@ while :; do
 		die "최대 시도 횟수($MAX_ATTEMPTS)를 넘었다 — 용량이 계속 없다"
 	fi
 
+	# 이번 시도의 크기를 사다리에서 고른다. 사다리가 하나면 항상 같은 크기다.
+	pair="${LADDER[$(( (attempt - 1) % ${#LADDER[@]} ))]}"
+	OCPUS="${pair%%:*}"
+	MEMORY_GB="${pair##*:}"
+
 	elapsed=$(( ($(date +%s) - started) / 60 ))
-	log "시도 #${attempt} (경과 ${elapsed}분)"
+	log "시도 #${attempt} — ${OCPUS} OCPU / ${MEMORY_GB}GB (경과 ${elapsed}분)"
 
 	call_started="$(date +%s)"
 	if out="$(oci --no-retry \
@@ -201,7 +258,7 @@ while :; do
 		--display-name "$DISPLAY_NAME" \
 		--metadata "file://${METADATA_FILE}" \
 		--wait-for-state RUNNING 2>&1)"; then
-		log "생성 성공 (응답 $(( $(date +%s) - call_started ))초)"
+		log "생성 성공 — ${OCPUS} OCPU / ${MEMORY_GB}GB (응답 $(( $(date +%s) - call_started ))초)"
 		break
 	fi
 	took="$(( $(date +%s) - call_started ))"
@@ -270,6 +327,30 @@ printf '\a'
 if command -v osascript > /dev/null 2>&1; then
 	osascript -e 'display notification "A1 인스턴스 생성 성공" with title "reputation-pool"' > /dev/null 2>&1 || true
 fi
+
+# 서버에서 돌 때는 화면을 보는 사람이 없다. 며칠을 기다린 끝에 잡은 것을 며칠 더 모르고 있으면
+# 안 되므로 메일로 알린다. 인스턴스는 잡은 뒤 사라지지 않지만, 알아야 옮길 수 있다.
+notify "[reputation-pool] A1 확보 — ${OCPUS} OCPU / ${MEMORY_GB}GB" "$(cat <<NOTIFY
+A1 인스턴스를 확보했습니다.
+
+  shape       $SHAPE  (${OCPUS} OCPU / ${MEMORY_GB}GB)
+  boot        ${BOOT_GB}GB
+  instance    $instance_id
+  public IP   ${public_ip:-<콘솔에서 확인>}
+  시도        ${attempt}회 (일시적 오류 ${transient}회 흡수)
+
+접속:
+  ssh -i ${SSH_KEY_FILE%.pub} ubuntu@${public_ip:-<IP>}
+
+다음 단계:
+  1. VCN Security List 인그레스 80/443 TCP + 443 UDP
+  2. git clone 후 ./scripts/bootstrap.sh
+  3. 6GB 인스턴스라면 오버레이: DEPLOY_OVERLAYS=compose.prod.6gb.yaml
+  자세히: docs/engineering/deployment.md
+
+이 인스턴스를 확보했으므로 사냥 루프는 종료됩니다.
+NOTIFY
+)"
 
 cat <<EOF
 

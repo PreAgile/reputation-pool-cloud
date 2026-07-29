@@ -214,7 +214,12 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 \
             scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh \
-            scripts/pull-deploy.sh scripts/install-pull-deploy.sh
+            scripts/pull-deploy.sh scripts/install-pull-deploy.sh scripts/install-a1-hunter.sh
+
+      # notify-mail.py runs on the server with no test suite around it; a syntax error would only
+      # surface at the moment we actually need to send an alert. Compile it here.
+      - name: Compile python scripts
+        run: python3 -m py_compile scripts/notify-mail.py
 
       # Alert rules have the same exposure as the deploy artefacts above: nothing loads alerts.yml until
       # Prometheus reloads it on the server, so a typo — or worse, a rule that parses but can never fire —

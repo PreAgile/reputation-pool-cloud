@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 import { Landing } from "@/components/marketing/landing";
 import { HtmlLang } from "@/components/html-lang";
 import { getDict } from "@/components/marketing/i18n";
+import { SITE_URL } from "@/lib/site";
 
 const dict = getDict("ko");
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://reputationpool.io";
-
 export const metadata: Metadata = {
+  // 오리진은 영어 랜딩과 같은 단일 출처(lib/site.ts)를 쓴다 — 한쪽만 고쳐 hreflang 이 갈라지는 사고를 막는다.
   metadataBase: new URL(SITE_URL),
   title: dict.meta.title,
   description: dict.meta.description,
