@@ -214,7 +214,8 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 \
             scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh \
-            scripts/pull-deploy.sh scripts/install-pull-deploy.sh scripts/install-a1-hunter.sh
+            scripts/pull-deploy.sh scripts/install-pull-deploy.sh scripts/install-a1-hunter.sh \
+            scripts/backup-offsite.sh
 
       # notify-mail.py runs on the server with no test suite around it; a syntax error would only
       # surface at the moment we actually need to send an alert. Compile it here.

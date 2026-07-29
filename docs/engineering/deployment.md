@@ -511,6 +511,60 @@ docker compose -f compose.yaml -f compose.prod.yaml exec backup /usr/local/bin/b
 
 백업·복원·복원 리허설 상세는 [`scripts/README.md`](../../scripts/README.md).
 
+### 8-1. 오프사이트 백업 (`backup-offsite.sh`)
+
+일일 백업(`backup.sh`)은 덤프를 **이 서버 안의 도커 볼륨**에 남긴다. 인스턴스가 사라지면(체험 크레딧
+만료 후 유예 종료, 유휴 회수(§10), 리전 사고) **원본과 백업이 함께 사라진다.** 백업이 원본과 같은 운명을
+공유하면 백업이 아니다. 그래서 덤프를 OCI Object Storage(Always Free 20GB)로 한 번 더 올린다.
+
+```bash
+./scripts/backup-offsite.sh --install        # systemd 타이머, 매일 08:00 UTC
+./scripts/backup-offsite.sh --dry-run        # 무엇을 할지만
+./scripts/backup-offsite.sh --verify-latest  # 최신 원격 덤프를 받아 pg_restore --list 로 검증
+sudo systemctl start rp-backup-offsite.service   # 즉시 한 번
+```
+
+사이드카가 07:32 UTC에 덤프를 만들므로 타이머는 그 뒤인 08:00에 돈다. 서버가 꺼져 있어 놓친 주기는
+`Persistent=true`로 부팅 후 한 번 실행한다 — 백업은 건너뛰면 그대로 구멍이 된다.
+
+**권한은 버킷 하나로 한정한다.** 인스턴스 프린시펄을 쓰고(§1의 A1 사냥꾼과 같은 이유로 API 키를 서버에
+두지 않는다), 정책은 이렇다:
+
+```
+Allow dynamic-group rp-prod-host to manage objects in tenancy where target.bucket.name='rp-backups'
+Allow dynamic-group rp-prod-host to read objectstorage-namespaces in tenancy
+Allow dynamic-group rp-prod-host to inspect buckets in tenancy
+```
+
+`manage buckets`를 **주지 않는다.** 오프사이트 백업의 의미는 "여기가 털려도 저기는 남는다"이므로, 이
+호스트가 침해되어도 **버킷 자체를 지울 수는 없어야** 한다. 그 경계를 권한으로 만든다.
+
+#### 무엇을 검증하는가
+
+업로드 경로에는 조용히 깨질 자리가 세 군데 있고 셋 다 막는다.
+
+| 지점 | 막는 방법 |
+|---|---|
+| 볼륨에서 꺼내다 잘림(디스크 가득참·컨테이너 kill) | 꺼낸 바이트 수가 볼륨의 크기와 다르면 **올리지 않고** 실패 |
+| `put`은 성공했는데 실제로는 온전히 안 올라감 | 업로드 후 `object head`로 원격 크기를 **다시 물어** 비교 |
+| 올라간 파일이 아카이브로서 깨짐 | `--verify-latest`가 내려받아 `pg_restore --list`로 읽어봄 |
+
+중단된 업로드(원격 크기가 로컬과 다름)는 다음 실행이 자동으로 다시 올린다. 이미 같은 크기로 있는 것은
+건너뛰므로 매일 도는 비용은 목록 조회 두 번뿐이다.
+
+**실패하면 메일이 온다**(`notify-mail.py`). 백업의 진짜 실패 모드는 "안 도는 것"이 아니라 *"안 도는데
+아무도 모르는 것"*이다.
+
+#### 복원
+
+```bash
+# 원격에서 받아 복원 (서버 볼륨이 이미 없어진 상황)
+oci os object list --namespace <ns> --bucket-name rp-backups --prefix db/
+oci os object get --namespace <ns> --bucket-name rp-backups --name db/<파일> --file /tmp/dump
+docker cp /tmp/dump reputation-pool-db:/tmp/dump
+./scripts/restore.sh   # 상세는 scripts/README.md
+```
+
 ## 9. 메모리 배분
 
 12GB 호스트 기준 컨테이너 상한 합계 약 8.6GB, 나머지는 OS와 페이지 캐시 몫이다.
