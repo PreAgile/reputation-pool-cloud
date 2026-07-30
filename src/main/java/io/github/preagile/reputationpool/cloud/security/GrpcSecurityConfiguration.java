@@ -35,6 +35,9 @@ public class GrpcSecurityConfiguration {
 
     private static final int RATE_LIMIT_ORDER = 200;
 
+    /** Also after auth, for the same reason: the quota is keyed by the tenant auth resolves. */
+    private static final int STREAM_QUOTA_ORDER = 300;
+
     @Bean
     @GrpcGlobalServerInterceptor
     @Order(AUTH_ORDER)
@@ -53,6 +56,23 @@ public class GrpcSecurityConfiguration {
     @Order(RATE_LIMIT_ORDER)
     ServerInterceptor rateLimitInterceptor(RateLimiter rateLimiter, MeterRegistry meterRegistry) {
         return new RateLimitInterceptor(rateLimiter, meterRegistry);
+    }
+
+    /**
+     * Concurrent-stream ceiling per tenant (issue #132 follow-up). The token bucket above meters calls,
+     * and a {@code SubscribeEvents} call is one call however long it lives — this bounds how many of
+     * those a tenant may hold open at once.
+     */
+    @Bean
+    StreamSubscriptionQuota streamSubscriptionQuota(RateLimitProperties properties) {
+        return new StreamSubscriptionQuota(properties);
+    }
+
+    @Bean
+    @GrpcGlobalServerInterceptor
+    @Order(STREAM_QUOTA_ORDER)
+    ServerInterceptor streamQuotaInterceptor(StreamSubscriptionQuota quota, MeterRegistry meterRegistry) {
+        return new StreamQuotaInterceptor(quota, meterRegistry);
     }
 
     @Bean

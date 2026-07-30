@@ -53,7 +53,7 @@ class RateLimitInterceptorTest {
     }
 
     private static RateLimitInterceptor interceptor(MeterRegistry registry, boolean enabled, int burst) {
-        RateLimiter limiter = new RateLimiter(new RateLimitProperties(enabled, 1, burst), FIXED);
+        RateLimiter limiter = new RateLimiter(new RateLimitProperties(enabled, 1, burst, 20), FIXED);
         return new RateLimitInterceptor(limiter, registry);
     }
 

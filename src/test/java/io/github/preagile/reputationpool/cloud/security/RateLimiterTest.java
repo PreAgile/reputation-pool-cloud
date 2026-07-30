@@ -50,7 +50,7 @@ class RateLimiterTest {
     }
 
     private static RateLimiter limiter(MutableClock clock, double perSecond, int burst) {
-        return new RateLimiter(new RateLimitProperties(true, perSecond, burst), clock);
+        return new RateLimiter(new RateLimitProperties(true, perSecond, burst, 20), clock);
     }
 
     @Test
@@ -197,7 +197,7 @@ class RateLimiterTest {
     @DisplayName("비활성화하면 → 아무리 호출해도 항상 허용한다 (사고 시 즉시 해제하는 탈출구)")
     void disabledAlwaysAllows() {
         MutableClock clock = new MutableClock(START);
-        RateLimiter limiter = new RateLimiter(new RateLimitProperties(false, 1, 1), clock);
+        RateLimiter limiter = new RateLimiter(new RateLimitProperties(false, 1, 1, 20), clock);
 
         for (int i = 0; i < 100; i++) {
             assertThat(limiter.tryConsume("t1").allowed()).isTrue();
@@ -245,11 +245,11 @@ class RateLimiterTest {
     @Test
     @DisplayName("설정이 잘못되면 기동 시점에 죽는다 → 상한 0 으로 조용히 전면 차단되지 않는다")
     void rejectsInvalidConfiguration() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new RateLimitProperties(true, 0, 10))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new RateLimitProperties(true, 0, 10, 20))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("requests-per-second");
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new RateLimitProperties(true, 10, 0))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new RateLimitProperties(true, 10, 0, 20))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("burst");
     }

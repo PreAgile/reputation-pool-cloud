@@ -29,12 +29,17 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param requestsPerSecond sustained rate allowed per tenant, in requests per second
  * @param burst how many requests a tenant may fire back-to-back after an idle period. Also the bucket's
  *     capacity: tokens accrue at {@link #requestsPerSecond} and stop here
+ * @param maxConcurrentStreams how many {@code SubscribeEvents} streams one tenant may hold open at once.
+ *     A separate axis from the two above and it needs its own ceiling: the bucket meters <em>calls</em>,
+ *     and a server-streaming call is one call no matter how long it lives or how much it carries. See
+ *     {@link StreamSubscriptionQuota} for why the count of open streams is the thing worth bounding
  */
 @ConfigurationProperties("reputation-pool.rate-limit")
 public record RateLimitProperties(
         @DefaultValue("true") boolean enabled,
         @DefaultValue("10") double requestsPerSecond,
-        @DefaultValue("50") int burst) {
+        @DefaultValue("50") int burst,
+        @DefaultValue("20") int maxConcurrentStreams) {
 
     /**
      * Fail fast on misconfiguration. Spring binds this at startup, so a bad value aborts the boot with a
@@ -55,6 +60,12 @@ public record RateLimitProperties(
         }
         if (burst < 1) {
             throw new IllegalArgumentException("rate-limit.burst must be >= 1, but was " + burst);
+        }
+        // 0 이면 구독을 한 건도 못 열어 SubscribeEvents 가 통째로 죽는다 — 위 두 값과 같은 posture 로
+        // 기동 시점에 막는다. 상한을 아예 끄고 싶으면 이 값이 아니라 `enabled=false` 를 쓴다.
+        if (maxConcurrentStreams < 1) {
+            throw new IllegalArgumentException(
+                    "rate-limit.max-concurrent-streams must be >= 1, but was " + maxConcurrentStreams);
         }
     }
 }
