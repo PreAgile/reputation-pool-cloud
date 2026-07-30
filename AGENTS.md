@@ -27,6 +27,7 @@
 - 보안·인증·tenant 규칙: [`docs/engineering/security.md`](docs/engineering/security.md)
 - 배포·서버 운영: [`docs/engineering/deployment.md`](docs/engineering/deployment.md)
 - SLO·에러버짓·알림 등급: [`docs/engineering/slo.md`](docs/engineering/slo.md)
+- 콘솔 화면 디자인 규칙·금지 목록: [`docs/engineering/console-design.md`](docs/engineering/console-design.md)
 - 테스트·검증·PR 규칙: [`docs/engineering/testing-and-review.md`](docs/engineering/testing-and-review.md)
 
 상세 규칙이 현재 이슈의 범위를 벗어나면 해당 문서를 불필요하게 적용하지 않는다.
