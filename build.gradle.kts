@@ -85,6 +85,21 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+
+    // `RateLimitPropertiesBindingTest` 는 compose.yaml 을 **읽어서** 그 기본값이 Java 기본값과 맞는지
+    // 대조한다. 그런데 Gradle 은 소스와 클래스패스만 입력으로 보므로, compose.yaml 만 고친 빌드는
+    // 태스크를 UP-TO-DATE/FROM-CACHE 로 건너뛰고 **초록색을 낸다** — 실측으로 확인했다:
+    //
+    //     $ sed -i '' 's|:-true}|:-}|' compose.yaml && ./gradlew cleanTest test
+    //     > Task :test FROM-CACHE        ← 캐시가 옛 결과를 그대로 내준다
+    //     BUILD SUCCESSFUL
+    //
+    // 읽는 파일을 입력으로 선언해야 그 파일이 바뀔 때 다시 돈다. 선언하지 않으면 이 테스트는 CI 의
+    // 콜드 캐시에서만 의미가 있고, 로컬과 증분 빌드에서는 거짓 초록이다.
+    inputs
+        .file(layout.projectDirectory.file("compose.yaml"))
+        .withPropertyName("composeFile")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // cloud is an application, not a library: keep only the executable boot jar so the Docker image copies

@@ -201,6 +201,30 @@ JWT 시크릿은 **32바이트 이상**이어야 한다(HS256).
 `LoginThrottle` 이 무차별 대입을 막고 있다. 정상 사용자가 걸렸다면 대기하거나 앱을 재기동한다.
 API 레벨 rate limit 은 아직 없다(#132).
 
+### 클라이언트가 RESOURCE_EXHAUSTED(또는 429)를 받는다
+
+테넌트별 요청 상한(#132)에 걸린 것이다. 응답의 `retry-after`(초)만큼 기다리면 통과한다.
+
+**먼저 판단할 것: 막아야 할 트래픽인가.** 거부가 뜬다고 곧장 상한을 올리면 남용을 허용하는 것이고,
+곧장 남용으로 단정하면 정상 고객을 막는다. 후자가 더 흔하다.
+
+```bash
+# 얼마나 거부되고 있나
+curl -s localhost:8083/actuator/prometheus | grep datapane_rate_limited_total
+
+# 상한이 적용되고는 있나 — 0 이 아니면 제한기가 고장나 통과시키는 중이다
+curl -s localhost:8083/actuator/prometheus | grep datapane_rate_limiter_errors_total
+```
+
+- **정상 트래픽인데 막힌다** → `.env` 의 `REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND`·`_BURST` 를
+  올리고 재배포. 기본값(10/s · burst 50)은 실측 없는 가설이다
+- **남용이다** → 해당 API 키를 콘솔(`/keys`)에서 폐기한다. 상한을 낮추는 것보다 정확하다
+- **지금 당장 풀어야 한다** → `REPUTATION_POOL_RATE_LIMIT_ENABLED=false` 후 재배포. 상한이 사라지므로
+  임시 조치로만 쓴다
+
+`acquire`(#148)는 fail-open 계약이라 SDK 가 이 거부를 예외로 던지지 않고 "조언 없음" 으로 다뤄야 한다.
+고객 작업이 429 때문에 멈췄다면 그건 SDK 버그다.
+
 ### Grafana 에 접속이 안 된다
 
 공개 도메인에 노출하지 않는다. SSH 터널로만 접근한다:

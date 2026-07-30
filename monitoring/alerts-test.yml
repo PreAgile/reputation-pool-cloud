@@ -604,3 +604,51 @@ tests:
       - eval_time: 84h
         alertname: GrpcAvailabilityBudgetBurnMedium
         exp_alerts: []
+
+  # 거부가 임계를 넘겨 지속되면 → DataPlaneRateLimitRejections 가 발화한다 (#132)
+  - interval: 1m
+    name: "데이터 플레인: 상한 거부 급증"
+    input_series:
+      # 분당 30건(초당 0.5) — 임계 10/분을 넘긴다
+      - series: "datapane_rate_limited_total"
+        values: "0+30x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DataPlaneRateLimitRejections
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "데이터 플레인 상한 거부가 분당 10건을 넘는다 — 남용이거나 상한이 낮다"
+              description: >
+                reputation-pool.rate-limit 설정을 먼저 확인한다. 정상 트래픽이면 상한을 올리고,
+                아니면 해당 API 키를 콘솔에서 폐기한다. 즉시 해제하려면 rate-limit.enabled=false.
+
+  # 거부가 조금 있어도 임계 아래면 → 발화하지 않는다 (정상적인 산발적 거부)
+  - interval: 1m
+    name: "데이터 플레인: 산발적 거부는 무시"
+    input_series:
+      # 분당 3건 — 임계 미만
+      - series: "datapane_rate_limited_total"
+        values: "0+3x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DataPlaneRateLimitRejections
+        exp_alerts: []
+
+  # 제한기가 예외로 통과시키면 → DataPlaneRateLimiterFailing 이 발화한다 (상한이 없는 상태)
+  - interval: 1m
+    name: "데이터 플레인: 제한기 고장(fail-open)"
+    input_series:
+      - series: "datapane_rate_limiter_errors_total"
+        values: "0+1x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DataPlaneRateLimiterFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "요청 상한이 적용되지 않고 있다 — 제한기가 예외로 통과시키는 중"
+              description: "app 로그에서 'rate limiter failed' 를 확인한다. 상한 없이 열려 있는 상태다."
+
