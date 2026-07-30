@@ -137,7 +137,7 @@ class RateLimitInterceptorTest {
         // 검증 도구에 맞춰 무르게 만드는 일이다.
         RateLimiter broken = mock(RateLimiter.class);
         when(broken.enabled()).thenReturn(true);
-        when(broken.check(any())).thenThrow(new IllegalStateException("boom"));
+        when(broken.tryConsume(any())).thenThrow(new IllegalStateException("boom"));
         RateLimitInterceptor interceptor = new RateLimitInterceptor(broken, registry);
 
         interceptAs("tenant-a", interceptor);

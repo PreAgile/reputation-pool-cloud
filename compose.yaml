@@ -62,12 +62,22 @@ services:
       REPUTATION_POOL_ADMIN_USERNAME: ${REPUTATION_POOL_ADMIN_USERNAME:-}
       REPUTATION_POOL_ADMIN_PASSWORD: ${REPUTATION_POOL_ADMIN_PASSWORD:-}
       REPUTATION_POOL_ADMIN_JWT_SECRET: ${REPUTATION_POOL_ADMIN_JWT_SECRET:-}
-      # Per-tenant request ceiling on the data plane (issue #132). All optional — the app's defaults
-      # apply when unset. ENABLED=false is the escape hatch: it makes the limiter a no-op without a
-      # rebuild, for when the limiter itself is suspected of blocking healthy traffic.
-      REPUTATION_POOL_RATE_LIMIT_ENABLED: ${REPUTATION_POOL_RATE_LIMIT_ENABLED:-}
-      REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND: ${REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND:-}
-      REPUTATION_POOL_RATE_LIMIT_BURST: ${REPUTATION_POOL_RATE_LIMIT_BURST:-}
+      # Per-tenant request ceiling on the data plane (issue #132). ENABLED=false is the escape hatch:
+      # it makes the limiter a no-op without a rebuild, for when the limiter itself is suspected of
+      # blocking healthy traffic.
+      #
+      # These carry explicit defaults rather than the `${VAR:-}` used above, and must keep doing so.
+      # `${VAR:-}` does not omit the variable when it is unset — it sets it to the **empty string**, and
+      # Spring cannot convert "" to a primitive: it becomes null and `@DefaultValue` does not apply
+      # (that only fires when the property is absent entirely). The app then dies at startup with
+      # `Failed to bind properties under 'reputation-pool.rate-limit.enabled' to boolean`. The admin
+      # variables above survive the same pattern only because they bind to String.
+      #
+      # The values must match RateLimitProperties' @DefaultValue. RateLimitPropertiesBindingTest reads
+      # this file and fails if they drift or if the `:-` form comes back.
+      REPUTATION_POOL_RATE_LIMIT_ENABLED: ${REPUTATION_POOL_RATE_LIMIT_ENABLED:-true}
+      REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND: ${REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND:-10}
+      REPUTATION_POOL_RATE_LIMIT_BURST: ${REPUTATION_POOL_RATE_LIMIT_BURST:-50}
     ports:
       # Loopback-only: reachable from the host for local dev, but not exposed to the network. This is the
       # premise of the login throttle's X-Forwarded-For trust — see the header comment and #28.
