@@ -28,6 +28,19 @@ export default defineConfig({
     // shots 프로젝트에는 일부러 넣지 않는다 — 마케팅 스크린샷(#16)은 영어 기준이다.
     { name: "e2e", testMatch: "e2e/**/*.spec.ts", use: { ...devices["Desktop Chrome"], locale: "ko-KR" } },
     { name: "visual", testMatch: "visual/**/*.spec.ts", use: { ...devices["Desktop Chrome"], locale: "ko-KR" } },
+    // tablet: 좁은 뷰포트에서 레이아웃이 깨지지 않는지 (#52 의 남은 항목).
+    //
+    // **스크린샷 비교가 아니라 불변식 단정이다.** 새 뷰포트에 베이스라인을 뜨면 화면이 바뀔 때마다
+    // 두 벌을 갱신해야 하고, 정작 "태블릿에서 깨졌다" 는 픽셀 diff 로는 원인이 안 읽힌다. 대신
+    // "페이지가 가로로 밀리지 않는다" 처럼 요구사항 자체를 단정한다 — 깨지면 무엇이 깨졌는지 바로 나온다.
+    //
+    // 768×1024 = 세로 태블릿. 사이드바(펼침 240px)를 뺀 본문이 가장 좁아지는 구간이라 여기서
+    // 통과하면 그 위 폭은 자연히 통과한다.
+    {
+      name: "tablet",
+      testMatch: "visual/**/*.responsive.spec.ts",
+      use: { ...devices["Desktop Chrome"], locale: "ko-KR", viewport: { width: 768, height: 1024 } },
+    },
     // shots: 마케팅 랜딩(#16)용 실제 대시보드 스크린샷을 `../landing/public/marketing/` 에 저장(비교 아님).
     // 찍는 대상은 이 앱의 화면이고 쓰는 쪽은 랜딩 앱이다 — 사본이 하나만 있도록 출력만 넘긴다(#15).
     // 레티나(deviceScaleFactor=2) · 모션 감소 · 넓은 뷰포트로 결정론적 캡처.
