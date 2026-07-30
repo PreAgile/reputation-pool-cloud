@@ -6,6 +6,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -240,5 +247,103 @@ class RateLimiterTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> new RateLimitProperties(true, 10, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("burst");
+    }
+
+    // ── 동시성 ────────────────────────────────────────────────────────────────────────────────────
+    //
+    // 이 클래스는 `ConcurrentHashMap` + 버킷 인스턴스 모니터로 스스로를 지킨다고 선언한다. 그런데
+    // 단일 스레드 테스트는 그 선언을 한 번도 건드리지 않는다 — `synchronized (bucket)` 을 통째로
+    // 지워도 위의 테스트는 전부 통과한다. 상한 강제는 경합에서 깨지는 것이 기본값이므로 검증한다.
+    //
+    // 결정론의 조건: **동시 구간에서 시계를 밀지 않는다.** 그러면 `refill()` 이 매번 elapsed <= 0 으로
+    // 빠져나가 토큰이 줄기만 하고, "정확히 burst 만큼"이라는 등식 단정이 성립한다. 시계를 함께 움직이면
+    // 허용 수가 타이밍에 따라 흔들려 부등식(<=)밖에 못 쓰고, 그건 유실된 소모를 놓친다.
+    // (`MutableClock.now` 는 volatile 이 아니지만 스레드 시작 전에 쓰고 이후로는 읽기만 하므로 안전하다.)
+
+    /** 풀 크기는 반드시 태스크 수 이상이어야 한다 — 아래 랑데부가 그 전제 위에 있다. */
+    private static void runConcurrently(int threadCount, java.util.function.IntConsumer body)
+            throws InterruptedException {
+        // ready/start 2단계 랑데부: 전원이 출발선에 선 뒤 동시에 풀려야 경합이 실제로 일어난다.
+        // 풀이 threadCount 보다 작으면 대기 중인 태스크가 스레드를 못 받아 ready.countDown() 조차
+        // 못 하고, 메인의 ready.await() 가 영원히 끝나지 않는다(GlobalResourceBudgetTest 와 같은 이유).
+        ExecutorService pool = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch ready = new CountDownLatch(threadCount);
+        CountDownLatch start = new CountDownLatch(1);
+
+        List<Runnable> tasks = IntStream.range(0, threadCount)
+                .<Runnable>mapToObj(i -> () -> {
+                    ready.countDown();
+                    try {
+                        start.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    body.accept(i);
+                })
+                .toList();
+        tasks.forEach(pool::execute);
+
+        ready.await();
+        start.countDown();
+        pool.shutdown();
+        assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    @DisplayName("한 테넌트에 여러 스레드가 동시에 몰려도 → 정확히 burst 만큼만 허용된다 (소모가 유실되지 않는다)")
+    void concurrentCallsOnOneTenantNeverExceedBurst() throws InterruptedException {
+        // burst 를 스레드 수에 가깝게 잡는 것이 이 테스트의 민감도를 결정한다. burst 가 작으면
+        // (예: 20/200) 대부분의 스레드가 이미 빈 버킷을 보고 **거절 경로 = 쓰기 없음**으로 빠져,
+        // 정작 다투어야 할 `tokens -= 1.0` 읽기-수정-쓰기에 들어가는 스레드가 초반 20 개뿐이다.
+        // 실측: 20/200 으로는 synchronized 를 지워도 3 회 중 1 회만 잡혔다. 150/200 이면 대부분의
+        // 스레드가 쓰기 경로에 들어가 유실이 드러난다.
+        //
+        // 라운드를 여러 번 도는 이유도 같다 — 경합 재현은 확률적이라 한 판으로는 놓칠 수 있다.
+        // 올바른 구현에서는 몇 판을 돌든 항상 통과하므로 플래키하지 않다(실패만 확률적이다).
+        int burst = 150;
+        int threads = 200;
+        int rounds = 5;
+
+        for (int round = 1; round <= rounds; round++) {
+            MutableClock clock = new MutableClock(START);
+            RateLimiter limiter = limiter(clock, 1, burst);
+            AtomicInteger allowed = new AtomicInteger();
+
+            // 전원이 같은 이름으로 동시에 들어오므로 버킷 생성(computeIfAbsent)부터 경합한다.
+            // 버킷이 둘 만들어져도, 소모가 유실돼도, 결과는 "burst 보다 많이 허용됨"으로 나타난다.
+            runConcurrently(threads, i -> {
+                if (limiter.tryConsume("hot").allowed()) {
+                    allowed.incrementAndGet();
+                }
+            });
+
+            assertThat(allowed.get()).as("%d 라운드의 허용 수", round).isEqualTo(burst);
+        }
+    }
+
+    @Test
+    @DisplayName("여러 테넌트를 동시에 두드려도 → 테넌트마다 정확히 자기 burst 만큼만 허용된다")
+    void concurrentCallsAcrossTenantsStayIsolated() throws InterruptedException {
+        MutableClock clock = new MutableClock(START);
+        int tenants = 20;
+        int burst = 3;
+        int callsPerTenant = 10;
+        RateLimiter limiter = limiter(clock, 1, burst);
+        AtomicInteger[] allowed =
+                IntStream.range(0, tenants).mapToObj(i -> new AtomicInteger()).toArray(AtomicInteger[]::new);
+
+        // 테넌트 하나당 10 개 스레드가 동시에 붙는다. 격리가 깨지면 어떤 테넌트는 burst 를 넘고
+        // 어떤 테넌트는 못 미친다 — 총합만 보면 상쇄돼 보이므로 테넌트별로 단정한다.
+        runConcurrently(tenants * callsPerTenant, i -> {
+            int tenant = i % tenants;
+            if (limiter.tryConsume("tenant-" + tenant).allowed()) {
+                allowed[tenant].incrementAndGet();
+            }
+        });
+
+        for (int t = 0; t < tenants; t++) {
+            assertThat(allowed[t].get()).as("tenant-%d 의 허용 수", t).isEqualTo(burst);
+        }
     }
 }
