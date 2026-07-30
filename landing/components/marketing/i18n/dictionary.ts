@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { IncidentSeverity } from "@/lib/incidents";
 import type { Locale } from "@/lib/locale";
 
 /**
@@ -103,6 +104,58 @@ export type Dict = {
     body: string;
     cta: string;
     orWrite: string;
+  };
+
+  /**
+   * 상태 페이지(#145). docs 처럼 로케일별 페이지를 복제하지 않고 **사전에 둔다** — 짧은 UI 문구
+   * 스무 개 남짓이라 사전 한 벌이 더 읽기 쉽고, 무엇보다 이 화면은 문장 하나하나가 "무엇을 아직
+   * 모르는지"를 정직하게 말하는 역할이라 두 언어가 갈리면 안 된다. `Record` 타입이 한쪽만 고치는
+   * 것을 컴파일 단계에서 막는다.
+   *
+   * 사고 **데이터**(제목·경과 서술·시각)는 여기 없다. 그건 `lib/incidents.ts` 가 단일 출처다 —
+   * 화면 문구와 사고 기록은 바뀌는 이유가 다르다.
+   */
+  status: {
+    meta: { title: string; description: string };
+    heading: string;
+    lead: string;
+
+    /** 머리의 현재 상태 배너. */
+    state: {
+      label: string;
+      /** 진행 중 사고가 **기록되지 않았을** 때. "정상"이라고 말하지 않는다(근거가 없다). */
+      none: string;
+      degraded: string;
+      outage: string;
+      /** 이 표시가 자동 관측이 아니라 수동 로그에서 나온다는 고지. */
+      derivedFrom: string;
+    };
+
+    /** 업타임 — 숫자가 없는 이유와 앞으로의 경로를 적는다. 빈 약속("곧 제공") 대신 근거를 쓴다. */
+    uptime: { heading: string; absent: string; rejected: string; next: string };
+
+    log: {
+      heading: string;
+      /** 로그가 비어 있을 때. */
+      empty: string;
+      /** 빈 로그가 "사고가 없었다"로 읽히지 않게 하는 범위 설명. */
+      scope: string;
+      /** `LOG_STARTED_ON` 앞에 붙는 라벨. 날짜는 데이터에서 온다. */
+      sinceLabel: string;
+      ongoing: string;
+      resolved: string;
+      startedLabel: string;
+      endedLabel: string;
+      durationLabel: string;
+      /** 심각도 라벨 — 색만으로 구분하지 않기 위해 항상 텍스트로 함께 낸다. */
+      severity: Record<IncidentSeverity, string>;
+    };
+
+    /** 왜 이 페이지가 앱 서버가 아니라 Pages 에 있는지. */
+    independence: { heading: string; body: string };
+
+    /** 로그에 없는 문제를 알리는 경로(mailto). */
+    report: { heading: string; body: string; cta: string };
   };
 
   footer: {

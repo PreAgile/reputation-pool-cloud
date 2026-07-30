@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/site";
 import { DOCS_PAGES, docsHref } from "@/lib/docs-manifest";
 import { LOCALES, type Locale } from "@/lib/locale";
+import { statusHref } from "@/lib/status";
 
 /**
  * 정적 내보내기(`output: "export"`)에서는 라우트 핸들러가 기본적으로 동적으로 취급되어 빌드가
@@ -29,9 +30,23 @@ export const dynamic = "force-static";
  */
 export default function sitemap(): MetadataRoute.Sitemap {
   const languages = { en: SITE_URL, ko: `${SITE_URL}/ko` };
+  // 상태 페이지(#145)의 두 언어 URL — 서로의 대안이다. docs 와 마찬가지로 `/status` 는 로케일 자동
+  // 판별 대상이 아니므로(미들웨어는 루트에서만 판별한다) 두 언어가 각각 색인되는 경로는 이 쌍뿐이다.
+  const statusLanguages = Object.fromEntries(
+    LOCALES.map((locale) => [locale, `${SITE_URL}${statusHref(locale)}`]),
+  ) as Record<Locale, string>;
   return [
     { url: SITE_URL, changeFrequency: "weekly", priority: 1, alternates: { languages } },
     { url: `${SITE_URL}/ko`, changeFrequency: "weekly", priority: 0.9, alternates: { languages } },
+    // 상태 페이지는 랜딩·docs 보다 낮은 우선순위로 둔다 — 검색으로 처음 만나는 문서가 아니라 이미
+    // 제품을 아는 사람이 문제가 생겼을 때 찾는 화면이다. 다만 그때 **찾을 수 있어야** 하므로 색인은
+    // 시킨다. `changeFrequency` 는 실제 갱신 주기대로 적는다(사고를 손으로 기입할 때만 바뀐다).
+    ...LOCALES.map((locale) => ({
+      url: `${SITE_URL}${statusHref(locale)}`,
+      changeFrequency: "weekly" as const,
+      priority: locale === "en" ? 0.5 : 0.4,
+      alternates: { languages: statusLanguages },
+    })),
     // docs 는 매니페스트에서 파생시킨다. 목록을 여기 손으로 적으면 페이지를 추가할 때마다 두 곳을
     // 고쳐야 하고, 실제로 #130 이 docs 6 페이지를 넣으면서 sitemap 을 잊어 색인 대상에서 빠져 있었다.
     // 로케일도 같은 이유로 `LOCALES` 에서 돌린다 — 언어를 추가하면 URL 이 자동으로 따라온다.
