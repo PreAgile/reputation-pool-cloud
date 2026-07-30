@@ -162,9 +162,62 @@ export const en: Dict = {
     orWrite: "or write to",
   },
 
+  status: {
+    meta: {
+      title: "Service status — reputation·pool",
+      description:
+        "Whether reputation·pool has a recorded incident open, and the log of the ones we have written down. Served from Cloudflare Pages, independent of the app server it reports on.",
+    },
+    heading: "Service status",
+    lead: "This page is served from Cloudflare Pages, not from the app server it reports on — so it is still here on the day you actually need it.",
+
+    state: {
+      label: "Right now",
+      none: "No incident is currently recorded",
+      degraded: "A degradation is in progress",
+      outage: "An outage is in progress",
+      derivedFrom:
+        "This line comes from the incident log below, which we write by hand. It means nobody has recorded an open incident — not that a machine just checked the service and found it healthy.",
+    },
+
+    uptime: {
+      heading: "Uptime",
+      absent:
+        "There is no uptime percentage here, because nothing measures one yet. A number we did not observe would be a claim, not a measurement, so we are leaving the space empty until it can be filled honestly.",
+      rejected:
+        "One option is already ruled out: reusing the engine's own Prometheus metrics. They are produced by the app server, so they go dark exactly when an outage makes them worth reading.",
+      next: "What belongs here is a probe from outside our infrastructure — an external monitor such as UptimeRobot to begin with, and a Cloudflare Worker on a cron writing to KV once we want to own the history. Both keep watching when our server does not.",
+    },
+
+    log: {
+      heading: "Incident log",
+      empty: "No incident has been recorded.",
+      scope:
+        "Entries are written by hand when something goes wrong, so this log holds what we noticed and wrote down — nothing before the date above is covered.",
+      sinceLabel: "Recording since",
+      ongoing: "Ongoing",
+      resolved: "Resolved",
+      startedLabel: "Started",
+      endedLabel: "Ended",
+      durationLabel: "Duration",
+      severity: { outage: "Outage", degraded: "Degraded" },
+    },
+
+    independence: {
+      heading: "Why this page lives somewhere else",
+      body: "The dashboard and the API run on our own server. This page is a static file on Cloudflare Pages with no server behind it, so a failure over there cannot take it down with it. That separation is the entire point — a status page hosted on the thing it monitors only answers you when you do not need it.",
+    },
+
+    report: {
+      heading: "Hitting something that is not here?",
+      body: "The log only contains what we noticed. If you are seeing a problem that is not listed, tell us — that is often how we find out.",
+      cta: "Email us",
+    },
+  },
+
   footer: {
     columns: [
-      { heading: "Product", links: ["Features", "How it works", "Docs"] },
+      { heading: "Product", links: ["Features", "How it works", "Docs", "Status"] },
       { heading: "Open source", links: ["GitHub", "Engine", "Changelog"] },
       { heading: "Company", links: ["Contact"] },
     ],

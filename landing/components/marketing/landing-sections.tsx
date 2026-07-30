@@ -3,6 +3,7 @@ import { buttonClass } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { DOCS_ROOT, docsHref } from "@/lib/docs-manifest";
 import { SITE_HOST } from "@/lib/site";
+import { statusHref } from "@/lib/status";
 import { BrowserFrame } from "./browser-frame";
 import { Brand } from "./logo";
 import { CONTACT_EMAIL, CONTACT_MAILTO, GITHUB_REPO_URL } from "./constants";
@@ -480,8 +481,12 @@ export function Contact({ dict, locale }: SectionProps) {
 function footerHrefs(locale: Locale): { href: string; external?: boolean }[][] {
   const base = LOCALE_PATH[locale];
   return [
-    // Product: Features, How it works, Docs(→ 전용 docs 사이트 #121, 로케일 유지 #143)
-    [{ href: `${base}#features` }, { href: `${base}#how` }, { href: DOCS_ROOT[locale] }],
+    // Product: Features, How it works, Docs(→ 전용 docs 사이트 #121, 로케일 유지 #143), Status(#145)
+    //
+    // 상태 페이지는 푸터에서 링크한다 — 서비스가 이상할 때 사람이 제일 먼저 훑는 자리이고, 랜딩·docs
+    // 어느 화면에서 막혔든 같은 위치에 있어야 하기 때문이다(푸터는 두 표면이 공유하는 유일한 영역이다).
+    // 오리진 다운 화면(#134)에서의 링크는 앱 서버 쪽 레이어라 여기 범위가 아니다.
+    [{ href: `${base}#features` }, { href: `${base}#how` }, { href: DOCS_ROOT[locale] }, { href: statusHref(locale) }],
     // Open source: GitHub, Engine, Changelog(→ Releases)
     [{ href: GITHUB_REPO_URL, external: true }, { href: GITHUB_REPO_URL, external: true }, { href: `${GITHUB_REPO_URL}/releases`, external: true }],
     // Company: Contact(mailto)

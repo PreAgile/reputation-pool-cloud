@@ -19,6 +19,16 @@
 /** 지원 로케일. 기본은 영어(en); 한국어를 더 선호한다는 신호가 있을 때만 ko. */
 export type Locale = "en" | "ko";
 
+/**
+ * 로케일마다 한 벌씩 있어야 하는 문자열. `Record` 이므로 로케일을 추가하면 값이 빠진 곳에서 컴파일이
+ * 깨진다 — 번역 누락이 런타임의 `undefined` 가 아니라 빌드 실패로 드러난다.
+ *
+ * docs 매니페스트(#121)가 먼저 쓰기 시작했고 상태 페이지의 사고 로그(#145)도 같은 형태가 필요해져
+ * 로케일 타입 옆으로 올린다. 두 모듈이 각자 `Record<Locale, string>` 을 다시 적으면 같은 개념이
+ * 이름 없이 흩어진다.
+ */
+export type Localised = Record<Locale, string>;
+
 /** 신호가 없거나 모르는 언어일 때의 기본값. 로그인·랜딩이 같은 값을 쓴다. */
 export const DEFAULT_LOCALE: Locale = "en";
 

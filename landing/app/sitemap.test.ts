@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import sitemap from "./sitemap";
 import { DOCS_PAGES, docsHref } from "@/lib/docs-manifest";
 import { LOCALES } from "@/lib/locale";
+import { statusHref } from "@/lib/status";
 
 /**
  * 오리진은 리터럴로 적는다. `SITE_URL` 을 import 해서 비교하면 자기 자신과 비교하는 셈이라 값이 바뀌어도
@@ -88,6 +89,34 @@ describe("사이트맵 (#16, 한국어 docs #143)", () => {
     expect(docs.length).toBeGreaterThan(0);
     for (const entry of docs) {
       expect(Object.values(entry.alternates?.languages ?? {})).toContain(entry.url);
+    }
+  });
+
+  // #145: 상태 페이지도 로케일당 한 벌씩 있다. 사이트맵에 넣는 것은 색인 때문만이 아니다 —
+  // `scripts/postexport-lang.mjs` 가 `<html lang="ko">` 보정 대상을 사이트맵에서 파생시키므로,
+  // 여기 빠지면 `/ko/status` 가 `lang="en"` 으로 나가고도 빌드는 초록색이 된다.
+  it("상태 페이지가 두 로케일 URL 로 사이트맵에 들어 있다", () => {
+    const urls = sitemap().map((e) => e.url);
+
+    expect(urls).toContain(`${ORIGIN}/status`);
+    expect(urls).toContain(`${ORIGIN}/ko/status`);
+  });
+
+  it("상태 페이지 두 엔트리가 서로를 언어 대안으로 가리킨다", () => {
+    const expected = { en: `${ORIGIN}/status`, ko: `${ORIGIN}/ko/status` };
+    const pair = sitemap().filter((e) => Object.values(expected).includes(e.url));
+
+    expect(pair).toHaveLength(2);
+    for (const entry of pair) {
+      expect(entry.alternates?.languages).toEqual(expected);
+    }
+  });
+
+  it("상태 페이지 URL 이 라우트 단일 출처(statusHref)와 일치한다", () => {
+    const urls = sitemap().map((e) => e.url);
+
+    for (const locale of LOCALES) {
+      expect(urls).toContain(`${ORIGIN}${statusHref(locale)}`);
     }
   });
 

@@ -25,10 +25,14 @@
  * 라벨, `<title>`, `meta description` 이 같은 값을 써야 갈리지 않는다). 그래서 사전처럼 로케일별
  * 레코드로 두고 페이지는 자기 로케일 값만 꺼내 쓴다.
  */
-import { DEFAULT_LOCALE, LOCALE_PATH, type Locale } from "@/lib/locale";
+import { DEFAULT_LOCALE, LOCALE_PATH, type Locale, type Localised } from "@/lib/locale";
 
-/** 로케일별 문자열. 로케일을 추가하면 여기서 컴파일이 깨져 빠진 번역이 드러난다. */
-export type Localised = Record<Locale, string>;
+/**
+ * 로케일별 문자열. 정의는 `lib/locale.ts` 로 옮겼다 — 상태 페이지의 사고 로그(#145)도 같은 타입이
+ * 필요해졌고, 그때 여기서 import 하면 "docs 매니페스트가 상태 페이지의 타입 출처"가 되어 버린다.
+ * 기존에 이 모듈에서 가져다 쓰던 곳이 깨지지 않도록 이름은 그대로 다시 내보낸다.
+ */
+export type { Localised };
 
 /**
  * 사이드바에서 페이지를 묶는 그룹. **식별자이고 라벨이 아니다** — 라벨은 로케일마다 다르므로
