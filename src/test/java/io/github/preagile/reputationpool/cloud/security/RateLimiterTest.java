@@ -52,11 +52,11 @@ class RateLimiterTest {
         MutableClock clock = new MutableClock(START);
         RateLimiter limiter = limiter(clock, 10, 3);
 
-        assertThat(limiter.check("t1").allowed()).isTrue();
-        assertThat(limiter.check("t1").allowed()).isTrue();
-        assertThat(limiter.check("t1").allowed()).isTrue();
+        assertThat(limiter.tryConsume("t1").allowed()).isTrue();
+        assertThat(limiter.tryConsume("t1").allowed()).isTrue();
+        assertThat(limiter.tryConsume("t1").allowed()).isTrue();
 
-        assertThat(limiter.check("t1").allowed()).isFalse();
+        assertThat(limiter.tryConsume("t1").allowed()).isFalse();
     }
 
     @Test
@@ -64,14 +64,14 @@ class RateLimiterTest {
     void refillsOverTime() {
         MutableClock clock = new MutableClock(START);
         RateLimiter limiter = limiter(clock, 10, 2);
-        limiter.check("t1");
-        limiter.check("t1");
-        assertThat(limiter.check("t1").allowed()).isFalse();
+        limiter.tryConsume("t1");
+        limiter.tryConsume("t1");
+        assertThat(limiter.tryConsume("t1").allowed()).isFalse();
 
         // 초당 10개면 100ms 에 1개가 찬다.
         clock.advance(Duration.ofMillis(100));
 
-        assertThat(limiter.check("t1").allowed()).isTrue();
+        assertThat(limiter.tryConsume("t1").allowed()).isTrue();
     }
 
     @Test
@@ -79,14 +79,14 @@ class RateLimiterTest {
     void refillCapsAtBurst() {
         MutableClock clock = new MutableClock(START);
         RateLimiter limiter = limiter(clock, 10, 3);
-        limiter.check("t1");
+        limiter.tryConsume("t1");
 
         clock.advance(Duration.ofHours(1));
 
-        assertThat(limiter.check("t1").allowed()).isTrue();
-        assertThat(limiter.check("t1").allowed()).isTrue();
-        assertThat(limiter.check("t1").allowed()).isTrue();
-        assertThat(limiter.check("t1").allowed()).isFalse();
+        assertThat(limiter.tryConsume("t1").allowed()).isTrue();
+        assertThat(limiter.tryConsume("t1").allowed()).isTrue();
+        assertThat(limiter.tryConsume("t1").allowed()).isTrue();
+        assertThat(limiter.tryConsume("t1").allowed()).isFalse();
     }
 
     @Test
@@ -95,10 +95,10 @@ class RateLimiterTest {
         MutableClock clock = new MutableClock(START);
         RateLimiter limiter = limiter(clock, 10, 1);
 
-        assertThat(limiter.check("noisy").allowed()).isTrue();
-        assertThat(limiter.check("noisy").allowed()).isFalse();
+        assertThat(limiter.tryConsume("noisy").allowed()).isTrue();
+        assertThat(limiter.tryConsume("noisy").allowed()).isFalse();
 
-        assertThat(limiter.check("quiet").allowed()).isTrue();
+        assertThat(limiter.tryConsume("quiet").allowed()).isTrue();
     }
 
     @Test
@@ -107,9 +107,9 @@ class RateLimiterTest {
         MutableClock clock = new MutableClock(START);
         // 초당 100개면 토큰 하나가 10ms 만에 차므로 반올림 없이는 0초가 나온다.
         RateLimiter limiter = limiter(clock, 100, 1);
-        limiter.check("t1");
+        limiter.tryConsume("t1");
 
-        RateLimiter.Decision denied = limiter.check("t1");
+        RateLimiter.Decision denied = limiter.tryConsume("t1");
 
         assertThat(denied.allowed()).isFalse();
         assertThat(denied.retryAfterSeconds()).isGreaterThanOrEqualTo(1L);
@@ -120,14 +120,14 @@ class RateLimiterTest {
     void retryAfterIsHonest() {
         MutableClock clock = new MutableClock(START);
         RateLimiter limiter = limiter(clock, 0.5, 1); // 2초에 1개
-        limiter.check("t1");
+        limiter.tryConsume("t1");
 
-        RateLimiter.Decision denied = limiter.check("t1");
+        RateLimiter.Decision denied = limiter.tryConsume("t1");
         assertThat(denied.allowed()).isFalse();
 
         clock.advance(Duration.ofSeconds(denied.retryAfterSeconds()));
 
-        assertThat(limiter.check("t1").allowed()).isTrue();
+        assertThat(limiter.tryConsume("t1").allowed()).isTrue();
     }
 
     @Test
@@ -137,7 +137,7 @@ class RateLimiterTest {
         RateLimiter limiter = new RateLimiter(new RateLimitProperties(false, 1, 1), clock);
 
         for (int i = 0; i < 100; i++) {
-            assertThat(limiter.check("t1").allowed()).isTrue();
+            assertThat(limiter.tryConsume("t1").allowed()).isTrue();
         }
         assertThat(limiter.enabled()).isFalse();
     }
@@ -147,12 +147,12 @@ class RateLimiterTest {
     void backwardClockDoesNotMintTokens() {
         MutableClock clock = new MutableClock(START);
         RateLimiter limiter = limiter(clock, 10, 2);
-        limiter.check("t1");
-        limiter.check("t1");
+        limiter.tryConsume("t1");
+        limiter.tryConsume("t1");
 
         clock.advance(Duration.ofSeconds(-60));
 
-        assertThat(limiter.check("t1").allowed()).isFalse();
+        assertThat(limiter.tryConsume("t1").allowed()).isFalse();
     }
 
     @Test
@@ -162,13 +162,13 @@ class RateLimiterTest {
         RateLimiter limiter = limiter(clock, 1000, 1);
         // 임계치를 넘겨야 sweep 이 돈다. 넘긴 뒤 한 번 더 호출해 sweep 을 유발한다.
         for (int i = 0; i < 10_002; i++) {
-            limiter.check("tenant-" + i);
+            limiter.tryConsume("tenant-" + i);
         }
         int beforeSweep = limiter.trackedTenantCount();
 
         // 모든 버킷이 가득 찰 만큼 시간을 밀고, sweep 을 유발하는 호출을 한 번 더 한다.
         clock.advance(Duration.ofSeconds(10));
-        limiter.check("trigger");
+        limiter.tryConsume("trigger");
 
         assertThat(beforeSweep).isGreaterThan(10_000);
         assertThat(limiter.trackedTenantCount()).isLessThan(beforeSweep);

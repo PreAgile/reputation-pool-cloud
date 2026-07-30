@@ -81,7 +81,7 @@ public final class RateLimitInterceptor implements ServerInterceptor {
 
         RateLimiter.Decision decision;
         try {
-            decision = limiter.check(tenantId);
+            decision = limiter.tryConsume(tenantId);
         } catch (RuntimeException e) {
             errors.increment();
             log.error("rate limiter failed; allowing call through (tenant={})", tenantId, e);

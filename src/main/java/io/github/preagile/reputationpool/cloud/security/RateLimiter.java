@@ -52,13 +52,20 @@ public final class RateLimiter {
     }
 
     /**
-     * Whether {@code tenantId} may make one more call right now. Consumes a token when it can; when it
-     * cannot, returns the wait until the next token accrues so the caller can send a {@code Retry-After}
-     * hint instead of an unqualified rejection.
+     * Consumes one token for {@code tenantId} and reports whether the call may proceed. <b>This is not a
+     * query.</b> An allowed call leaves the bucket one token lighter, so calling it twice costs two. A
+     * denied call consumes nothing and returns the wait until the next token accrues, so the caller can
+     * send a {@code Retry-After} hint instead of an unqualified rejection.
+     *
+     * <p><b>Why {@code tryConsume} and not {@code check}.</b> The name has to carry the side effect. Read
+     * {@code limiter.check(id);} with the result discarded — as the tests legitimately do to drain a
+     * bucket — and nothing tells you a token was spent; it reads as a no-op. {@code tryAcquire}, the
+     * Guava spelling, is deliberately avoided: {@code acquire} is this product's own domain verb for
+     * taking a resource lease, so {@code limiter.tryAcquire(...)} would read as that instead.
      *
      * <p>Disabled configuration always allows and records nothing — the escape hatch stays cheap.
      */
-    public Decision check(String tenantId) {
+    public Decision tryConsume(String tenantId) {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
         if (!properties.enabled()) {
             return Decision.allow();
