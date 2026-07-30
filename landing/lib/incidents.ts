@@ -148,14 +148,52 @@ export function formatDuration(minutes: number, locale: Locale): string {
 }
 
 /**
+ * 사고 시각이 지켜야 하는 형식 — `YYYY-MM-DDTHH:mm:ssZ`. 초까지 적고, 끝은 반드시 리터럴 `Z` 다.
+ *
+ * <b>`Date.parse()` 만으로는 이 계약을 지킬 수 없다.</b> 훨씬 느슨해서, 형식이 어긋난 값을 통과시킨 뒤
+ * **빌드 머신의 로컬 시간대**로 해석한다. KST 러너에서 실측한 결과다:
+ *
+ * ```
+ * "2026-08-01 09:12:00"  → 2026-08-01T00:12:00Z   ← 9 시간 밀린다
+ * "08/01/2026"           → 2026-07-31T15:00:00Z
+ * "2026-08-01"           → 2026-08-01T00:00:00Z   (날짜만인데 통과)
+ * ```
+ *
+ * CI 는 초록인데 작성자가 적은 시각과 공개되는 시각이 달라진다 — 사고 로그에서 시각이 틀리는 것은
+ * 로그가 없는 것보다 나쁘다.
+ */
+const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/**
+ * 위 형식을 만족하는 문자열만 epoch 밀리초로. 아니면 `null`.
+ *
+ * 정규식만으로는 부족해서 **되돌려 찍어 비교한다**: `Date.parse("2026-02-30T00:00:00Z")` 는 `NaN` 이
+ * 아니라 3 월 2 일로 굴러간다(실측). 오타 하나가 조용히 다른 날짜가 되는 것을 여기서 막는다.
+ *
+ * 오프셋 표기(`+09:00`)도 거부한다. 파싱은 되지만, 손으로 적는 로그에서 같은 순간을 두 가지로 적을 수
+ * 있게 두면 항목끼리 비교가 어려워지고 화면은 어차피 UTC 로만 표시한다.
+ */
+function parseUtcInstant(value: string): number | null {
+  if (!UTC_INSTANT.test(value)) return null;
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return null;
+  return `${new Date(at).toISOString().slice(0, 19)}Z` === value ? at : null;
+}
+
+/**
  * `2026-08-01T09:12:00Z` → `2026-08-01 09:12 UTC`.
  *
  * 시간대 변환을 하지 않는 이유: 정적 HTML 이라 독자의 시간대를 알 수 없고, 서버 시간대로 적으면
  * 어느 시간대인지 아무도 모른다. UTC 로 못 박고 그렇게 적혀 있음을 화면에 표시한다.
+ *
+ * {@link incidentDataProblems} 와 **같은 파서**를 쓴다. 검사와 표시가 서로 다른 기준을 쓰면 "검사는
+ * 통과했는데 화면에는 다른 시각이 뜨는" 상태가 생긴다.
  */
 export function formatUtc(iso: string): string {
-  const at = Date.parse(iso);
-  if (Number.isNaN(at)) throw new Error(`invalid incident timestamp: "${iso}"`);
+  const at = parseUtcInstant(iso);
+  if (at === null) {
+    throw new Error(`invalid incident timestamp: "${iso}" (expected YYYY-MM-DDTHH:mm:ssZ)`);
+  }
   return `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
@@ -174,16 +212,20 @@ export function incidentDataProblems(incidents: Incident[] = INCIDENTS): string[
     if (seen.has(incident.id)) problems.push(`중복 id: "${incident.id}"`);
     seen.add(incident.id);
 
-    const startedAt = Date.parse(incident.startedAt);
-    if (Number.isNaN(startedAt)) {
-      problems.push(`"${incident.id}" 의 startedAt 이 ISO 8601 이 아니다: "${incident.startedAt}"`);
+    const startedAt = parseUtcInstant(incident.startedAt);
+    if (startedAt === null) {
+      problems.push(
+        `"${incident.id}" 의 startedAt 이 UTC ISO 8601(YYYY-MM-DDTHH:mm:ssZ) 이 아니다: "${incident.startedAt}"`,
+      );
     }
     if (incident.resolvedAt === null) continue;
 
-    const resolvedAt = Date.parse(incident.resolvedAt);
-    if (Number.isNaN(resolvedAt)) {
-      problems.push(`"${incident.id}" 의 resolvedAt 이 ISO 8601 이 아니다: "${incident.resolvedAt}"`);
-    } else if (!Number.isNaN(startedAt) && resolvedAt < startedAt) {
+    const resolvedAt = parseUtcInstant(incident.resolvedAt);
+    if (resolvedAt === null) {
+      problems.push(
+        `"${incident.id}" 의 resolvedAt 이 UTC ISO 8601(YYYY-MM-DDTHH:mm:ssZ) 이 아니다: "${incident.resolvedAt}"`,
+      );
+    } else if (startedAt !== null && resolvedAt < startedAt) {
       problems.push(`"${incident.id}" 의 해소 시각이 발생 시각보다 이르다`);
     }
   }

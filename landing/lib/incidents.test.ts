@@ -125,12 +125,22 @@ describe("사고 로그 (#145)", () => {
       expect(formatUtc("2026-08-01T09:12:00Z")).toBe("2026-08-01 09:12 UTC");
     });
 
-    it("오프셋이 붙은 시각도 UTC 로 환산해 보여준다", () => {
-      expect(formatUtc("2026-08-01T18:12:00+09:00")).toBe("2026-08-01 09:12 UTC");
+    // 이 테스트는 "오프셋이 붙은 시각도 UTC 로 환산해 보여준다" 를 **대체**한다. 그쪽은 오프셋 표기를
+    // 허용했는데, 모듈이 선언한 계약("UTC ISO 8601")과 어긋나고 같은 순간을 두 가지로 적을 수 있게
+    // 만든다. 계약을 UTC 리터럴 하나로 좁히기로 했으므로(리뷰 지적) 이제 거부가 맞다.
+    it("오프셋 표기는 거부한다 → 같은 순간을 두 가지로 적을 수 있으면 항목끼리 비교가 안 된다", () => {
+      expect(() => formatUtc("2026-08-01T18:12:00+09:00")).toThrow(/invalid incident timestamp/);
     });
 
     it("파싱할 수 없는 값이면 → 조용히 넘기지 않고 던진다", () => {
       expect(() => formatUtc("어제쯤")).toThrow(/invalid incident timestamp/);
+    });
+
+    it("검사와 표시가 같은 파서를 쓴다 → 검사는 통과했는데 화면엔 다른 시각이 뜨는 일이 없다", () => {
+      // incidentDataProblems 가 받아 준 값은 formatUtc 도 반드시 받아야 한다.
+      const ok = incident({ id: "a", startedAt: "2026-08-01T09:12:00Z", resolvedAt: null });
+      expect(incidentDataProblems([ok])).toEqual([]);
+      expect(() => formatUtc(ok.startedAt)).not.toThrow();
     });
   });
 
@@ -149,6 +159,38 @@ describe("사고 로그 (#145)", () => {
       const problems = incidentDataProblems([incident({ id: "a", startedAt: "2026년 8월 1일" })]);
 
       expect(problems).toEqual([expect.stringContaining("startedAt")]);
+    });
+
+    // `Date.parse()` 는 아래 값들을 전부 통과시키고 **빌드 머신의 로컬 시간대**로 해석한다. KST 러너
+    // 실측: "2026-08-01 09:12:00" → 2026-08-01T00:12Z (9 시간 밀림). CI 는 초록인데 작성자가 적은
+    // 시각과 공개되는 시각이 달라진다. 시간대가 무엇이든 이 값들은 거부되어야 한다.
+    it.each([
+      ["날짜만", "2026-08-01"],
+      ["슬래시 형식", "08/01/2026"],
+      ["시간대 없는 datetime", "2026-08-01 09:12:00"],
+      ["오프셋 표기", "2026-08-01T18:12:00+09:00"],
+      ["소수 초", "2026-08-01T09:12:00.500Z"],
+      ["T 대신 공백", "2026-08-01 09:12:00Z"],
+      ["영어 날짜", "Aug 1 2026"],
+    ])("느슨한 시각 형식(%s)은 거부한다 → 로컬 시간대로 해석돼 조용히 밀린다", (_label, value) => {
+      expect(incidentDataProblems([incident({ id: "a", startedAt: value })])).toEqual([
+        expect.stringContaining("startedAt"),
+      ]);
+    });
+
+    it("존재하지 않는 날짜는 거부한다 → Date.parse 는 2026-02-30 을 3 월 2 일로 굴린다", () => {
+      const problems = incidentDataProblems([incident({ id: "a", startedAt: "2026-02-30T00:00:00Z" })]);
+
+      expect(problems).toEqual([expect.stringContaining("startedAt")]);
+    });
+
+    it("올바른 UTC 형식은 통과한다 → 엄격해진 검사가 정상 입력까지 막지 않는다", () => {
+      expect(
+        incidentDataProblems([
+          incident({ id: "a", startedAt: "2026-08-01T09:12:00Z", resolvedAt: "2026-08-01T09:48:00Z" }),
+          incident({ id: "b", startedAt: "2026-12-31T23:59:59Z", resolvedAt: null }),
+        ]),
+      ).toEqual([]);
     });
 
     it("해소가 발생보다 이르면 → 문제로 보고한다", () => {
