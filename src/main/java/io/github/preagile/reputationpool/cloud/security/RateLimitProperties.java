@@ -43,9 +43,15 @@ public record RateLimitProperties(
      * a self-inflicted outage that looks like a product failure.
      */
     public RateLimitProperties {
-        if (requestsPerSecond <= 0) {
+        // `isFinite` 가 먼저다. `NaN <= 0` 은 IEEE-754 상 false 이므로 아래 검사만으로는 NaN 이 그대로
+        // 통과하고, 그러면 refill 의 `accrued` 와 `tokens` 가 NaN 으로 오염돼 `tokens >= 1.0` 이 영원히
+        // false 가 된다 — 모든 테넌트가 영구 거부된다. 이 생성자가 막겠다고 선언한 바로 그 자기 유발
+        // 장애가, 막으려던 값(0)이 아니라 NaN 으로 재현되는 것이다. 게다가 `(long) Math.ceil(NaN)` 은
+        // 0 이라 Retry-After 가 "1초 뒤 오세요" 라는 거짓말을 붙여 보낸다.
+        // Infinity 는 반대로 tokens 를 늘 burst 로 고정해 상한을 조용히 무력화한다.
+        if (!Double.isFinite(requestsPerSecond) || requestsPerSecond <= 0) {
             throw new IllegalArgumentException(
-                    "rate-limit.requests-per-second must be > 0, but was " + requestsPerSecond);
+                    "rate-limit.requests-per-second must be a finite number > 0, but was " + requestsPerSecond);
         }
         if (burst < 1) {
             throw new IllegalArgumentException("rate-limit.burst must be >= 1, but was " + burst);
