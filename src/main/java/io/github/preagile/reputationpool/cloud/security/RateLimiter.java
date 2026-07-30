@@ -22,19 +22,34 @@ import java.util.concurrent.ConcurrentHashMap;
  * A shared store (Redis) is the usual answer and is deliberately not taken on now: it would add a
  * runtime dependency to guard a ceiling nobody has measured yet.
  *
- * <p><b>Bounded memory.</b> Buckets are keyed by tenant, and tenants are finite (a key must exist in the
- * database to authenticate), so this map cannot grow the way a per-IP map can. Full buckets are still
- * swept opportunistically: a bucket at capacity carries no information — recreating it yields the same
- * state — so idle tenants leave nothing behind.
+ * <p><b>Bounded memory, and why nothing is evicted.</b> Buckets are keyed by tenant, and tenants are
+ * finite: a key must exist in the database to authenticate, so only paying customers can create an entry.
+ * That is the difference from a per-IP limiter, where anyone on the internet mints keys and eviction is
+ * mandatory. Here the map's ceiling is the customer count, which we control. One entry costs roughly 90
+ * bytes (header, {@code double}, {@code Instant}, map node), so even 100k tenants is under 10MB.
+ *
+ * <p>An earlier version swept buckets that were at capacity — such a bucket is indistinguishable from a
+ * fresh one, so forgetting it changes no decision. The reasoning was sound; the mechanism was not, and it
+ * cost more than the memory it saved:
+ *
+ * <ul>
+ *   <li><b>The sweep could not make progress under the load that triggered it.</b> It ran once the map
+ *       passed a threshold and removed only full buckets — but a map that large means heavy traffic,
+ *       which means buckets are drained, not full. With nothing to remove the size stayed above the
+ *       threshold, so <em>every subsequent call</em> walked the whole map on the request thread, taking
+ *       one monitor per entry. The component that sheds load became the load. No hysteresis, no floor.
+ *   <li><b>Eviction raced with consumption.</b> A caller that obtained a bucket from {@code
+ *       computeIfAbsent} but had not yet entered its monitor could have that bucket removed underneath
+ *       it; it then spent a token on an orphan nobody could see, and its next call was handed a fresh
+ *       full bucket. The tenant gained up to {@code burst} extra calls. No lock fixes this — the
+ *       reference had already escaped.
+ * </ul>
+ *
+ * <p>Both faults belonged to the eviction, not to the limiter, so the eviction is gone. If the tenant
+ * count ever needs watching, {@link #trackedTenantCount()} is the seam to expose as a gauge — a number
+ * on a dashboard beats a scan on the hot path.
  */
 public final class RateLimiter {
-
-    /**
-     * Above this many tracked tenants the sweep runs on every check rather than opportunistically. Not a
-     * cap: it is a threshold at which "cheap and occasional" stops being cheap. Far above any plausible
-     * tenant count, so in practice the sweep stays rare.
-     */
-    private static final int SWEEP_EAGERLY_ABOVE = 10_000;
 
     private final RateLimitProperties properties;
     private final Clock clock;
@@ -71,9 +86,6 @@ public final class RateLimiter {
             return Decision.allow();
         }
         Instant now = clock.instant();
-        if (buckets.size() > SWEEP_EAGERLY_ABOVE) {
-            sweepFull(now);
-        }
         Bucket bucket = buckets.computeIfAbsent(tenantId, key -> new Bucket(properties.burst(), now));
         synchronized (bucket) {
             refill(bucket, now);
@@ -109,23 +121,7 @@ public final class RateLimiter {
         return Math.max(1L, (long) Math.ceil(seconds));
     }
 
-    /**
-     * Drops buckets that are at capacity: such a bucket is indistinguishable from a fresh one, so
-     * forgetting it changes no decision. Only touches buckets it can lock without waiting — a bucket in
-     * use is by definition not idle.
-     */
-    private void sweepFull(Instant now) {
-        buckets.forEach((tenantId, bucket) -> {
-            synchronized (bucket) {
-                refill(bucket, now);
-                if (bucket.tokens >= properties.burst()) {
-                    buckets.remove(tenantId, bucket);
-                }
-            }
-        });
-    }
-
-    /** Tracked bucket count — package-private so tests can assert idle tenants are swept. */
+    /** Tracked bucket count — package-private for tests, and the seam to expose as a gauge if needed. */
     int trackedTenantCount() {
         return buckets.size();
     }
