@@ -219,22 +219,27 @@ class RateLimiterTest {
     }
 
     @Test
-    @DisplayName("가득 찬(유휴) 버킷은 정리된다 → 테넌트가 늘어도 메모리가 남지 않는다")
-    void sweepsIdleBuckets() {
+    @DisplayName("테넌트가 아무리 늘어도 버킷을 버리지 않는다 → 버려진 버킷을 다시 만들면 상한이 초기화된다")
+    void neverEvictsBuckets() {
+        // 이 테스트가 `sweepsIdleBuckets`(가득 찬 버킷을 정리한다)를 대체한다. 그 정리는 제거됐다 —
+        // 이유는 RateLimiter 클래스 javadoc 에 있다(부하 상황에서 진행하지 못해 매 요청이 전체를
+        // 훑었고, 제거가 소비와 경합해 테넌트가 burst 만큼 더 받았다).
+        //
+        // 버리지 않는 것 자체가 지금은 **계약**이다: 버킷을 버리면 그 테넌트의 다음 호출이 가득 찬
+        // 새 버킷을 받아 상한이 조용히 초기화된다. 그래서 "메모리를 아낀다" 보다 이쪽이 우선한다.
         MutableClock clock = new MutableClock(START);
         RateLimiter limiter = limiter(clock, 1000, 1);
-        // 임계치를 넘겨야 sweep 이 돈다. 넘긴 뒤 한 번 더 호출해 sweep 을 유발한다.
         for (int i = 0; i < 10_002; i++) {
             limiter.tryConsume("tenant-" + i);
         }
-        int beforeSweep = limiter.trackedTenantCount();
+        int tracked = limiter.trackedTenantCount();
 
-        // 모든 버킷이 가득 찰 만큼 시간을 밀고, sweep 을 유발하는 호출을 한 번 더 한다.
+        // 모든 버킷이 가득 찰 만큼 시간을 밀어도(예전이라면 전부 정리 대상) 그대로 남는다.
         clock.advance(Duration.ofSeconds(10));
         limiter.tryConsume("trigger");
 
-        assertThat(beforeSweep).isGreaterThan(10_000);
-        assertThat(limiter.trackedTenantCount()).isLessThan(beforeSweep);
+        assertThat(tracked).isEqualTo(10_002);
+        assertThat(limiter.trackedTenantCount()).isEqualTo(10_003); // trigger 하나만 늘었다
     }
 
     @Test
@@ -345,5 +350,47 @@ class RateLimiterTest {
         for (int t = 0; t < tenants; t++) {
             assertThat(allowed[t].get()).as("tenant-%d 의 허용 수", t).isEqualTo(burst);
         }
+    }
+
+    @Test
+    @DisplayName("테넌트 수가 임계치를 넘고 새 테넌트가 계속 생겨도 → 어떤 테넌트도 burst 를 넘겨 허용되지 않는다")
+    void noTenantExceedsBurstWhileTenantsChurn() throws InterruptedException {
+        // 버킷 제거(sweep)가 있던 시절의 경합을 막는 회귀 가드다. 그때는 이랬다 —
+        // 한 스레드가 computeIfAbsent 로 갓 만들어진(=가득 찬) 버킷 참조를 얻고 아직 모니터에
+        // 들어가기 전에, 다른 스레드의 sweep 이 그 버킷을 맵에서 지운다. 그 스레드는 아무도 못 보는
+        // 고아 버킷에서 토큰을 쓰고, 그 테넌트의 다음 호출은 **가득 찬 새 버킷**을 받는다.
+        // 결과적으로 그 테넌트는 burst 보다 많이 허용된다.
+        //
+        // 실측(제거 전 코드): 이 시나리오로 3/3 재현, 매번 12~23 개 테넌트가 burst 를 넘었다.
+        // 제거가 되돌려지거나 다른 축출이 들어오면 이 테스트가 다시 빨개진다.
+        int burst = 3;
+        RateLimiter limiter = limiter(new MutableClock(START), 1, burst);
+
+        // 옛 임계치(10,000)를 넘겨 둔다. 각 채움용 테넌트는 1 개만 쓰므로 가득 차지 않고, 시계를
+        // 밀지 않으므로 리필도 없다 — 옛 sweep 이라면 아무것도 못 지우고 매 호출마다 전체를 훑던 상태다.
+        for (int i = 0; i <= 10_000; i++) {
+            limiter.tryConsume("filler-" + i);
+        }
+
+        // 경합 창(computeIfAbsent → synchronized)은 나노초라 한 번으로는 못 때린다.
+        // 라운드마다 새 테넌트를 만들어 창을 6,000 번 연다.
+        int threads = 200;
+        int rounds = 30;
+        java.util.Map<String, AtomicInteger> allowed = new java.util.concurrent.ConcurrentHashMap<>();
+
+        runConcurrently(threads, i -> {
+            for (int r = 0; r < rounds; r++) {
+                String tenant = "churn-" + i + "-" + r;
+                AtomicInteger count = allowed.computeIfAbsent(tenant, k -> new AtomicInteger());
+                for (int c = 0; c < burst + 2; c++) {
+                    if (limiter.tryConsume(tenant).allowed()) {
+                        count.incrementAndGet();
+                    }
+                }
+            }
+        });
+
+        assertThat(allowed).hasSize(threads * rounds);
+        assertThat(allowed.values()).allSatisfy(a -> assertThat(a.get()).isLessThanOrEqualTo(burst));
     }
 }
