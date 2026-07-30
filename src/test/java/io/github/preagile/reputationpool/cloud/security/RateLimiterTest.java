@@ -102,6 +102,62 @@ class RateLimiterTest {
     }
 
     @Test
+    @DisplayName("소진된 테넌트 옆의 새 테넌트는 버스트 전부를 쓴다 → 토큰 하나가 아니라 버킷 하나를 새로 받는다")
+    void freshTenantGetsFullBurstNotOneToken() {
+        MutableClock clock = new MutableClock(START);
+        RateLimiter limiter = limiter(clock, 10, 3);
+
+        // burst 1 로 검증하면 "quiet 이 토큰 하나를 받았다"까지만 보이고, 그것이 quiet **자신의**
+        // 가득 찬 버킷인지 남의 것을 한 모금 얻은 것인지 구분되지 않는다. burst 를 3 으로 두면 갈린다.
+        assertThat(limiter.tryConsume("noisy").allowed()).isTrue();
+        assertThat(limiter.tryConsume("noisy").allowed()).isTrue();
+        assertThat(limiter.tryConsume("noisy").allowed()).isTrue();
+        assertThat(limiter.tryConsume("noisy").allowed()).isFalse();
+
+        assertThat(limiter.tryConsume("quiet").allowed()).isTrue();
+        assertThat(limiter.tryConsume("quiet").allowed()).isTrue();
+        assertThat(limiter.tryConsume("quiet").allowed()).isTrue();
+        assertThat(limiter.tryConsume("quiet").allowed()).isFalse();
+
+        // 그리고 quiet 을 다 쓴 것이 noisy 를 되살리지도 않는다 — 격리는 양방향이다.
+        assertThat(limiter.tryConsume("noisy").allowed()).isFalse();
+    }
+
+    @Test
+    @DisplayName("남은 토큰이 1 미만이어도 retryAfter 는 그 잔량을 반영한다 → 0 으로 뭉개면 필요보다 오래 기다리게 한다")
+    void retryAfterReflectsPartialTokens() {
+        MutableClock clock = new MutableClock(START);
+        // 10초에 1개(0.1/s). 잔량이 0 일 때와 0.5 일 때 답이 10초 vs 5초로 갈리는 설정이라
+        // "잔량을 본다"와 "항상 0 으로 계산한다"가 구분된다. 기존 두 retryAfter 테스트는 모두
+        // 잔량이 정확히 0 인 지점만 짚어서 그 둘을 구분하지 못했다.
+        RateLimiter limiter = limiter(clock, 0.1, 1);
+        limiter.tryConsume("t1");
+
+        assertThat(limiter.tryConsume("t1").retryAfterSeconds()).isEqualTo(10L);
+
+        clock.advance(Duration.ofSeconds(5)); // 0.5 개가 찬다 — 아직 1 개가 아니라 여전히 거절
+
+        RateLimiter.Decision denied = limiter.tryConsume("t1");
+        assertThat(denied.allowed()).isFalse();
+        assertThat(denied.retryAfterSeconds()).isEqualTo(5L);
+    }
+
+    @Test
+    @DisplayName("잔량이 다른 두 테넌트는 retryAfter 도 다르다 → 대기 힌트가 남의 버킷에서 나오지 않는다")
+    void retryAfterIsPerTenant() {
+        MutableClock clock = new MutableClock(START);
+        RateLimiter limiter = limiter(clock, 0.1, 1);
+
+        limiter.tryConsume("early"); // early 의 잔량 0, 시각 START
+        clock.advance(Duration.ofSeconds(5));
+        limiter.tryConsume("late"); // late 는 지금 생겨서 잔량 0, 시각 START+5s
+
+        // 이 시점 잔량: early 0.5, late 0.0 — 같은 순간에 물어도 답이 달라야 한다.
+        assertThat(limiter.tryConsume("early").retryAfterSeconds()).isEqualTo(5L);
+        assertThat(limiter.tryConsume("late").retryAfterSeconds()).isEqualTo(10L);
+    }
+
+    @Test
     @DisplayName("거부할 때 retryAfter 는 최소 1초다 → 0 을 주면 호출자가 즉시 재시도해 루프가 된다")
     void retryAfterIsNeverZero() {
         MutableClock clock = new MutableClock(START);
