@@ -151,8 +151,8 @@ export function CellHeatmap({ rows, className }: { rows: HeatmapRow[]; className
       default:
         return;
     }
-    if (nr === r && nc === c) return;
     e.preventDefault();
+    if (nr === r && nc === c) return;
     focusCell([nr, nc]);
   }
 

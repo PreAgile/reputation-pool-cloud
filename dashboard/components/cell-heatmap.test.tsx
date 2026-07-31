@@ -132,6 +132,25 @@ describe("CellHeatmap — Resource × Context 상태 격자", () => {
     expect(inspector()).toHaveTextContent("p-good");
   });
 
+  it("격자 경계에서도 인식한 키는 preventDefault 한다 — 안 하면 포커스는 그대로인데 페이지가 스크롤된다", async () => {
+    const user = userEvent.setup();
+    render(<CellHeatmap rows={rows} />);
+
+    const captured: { keydown: KeyboardEvent | null } = { keydown: null };
+    document.addEventListener("keydown", (e) => {
+      captured.keydown = e;
+    });
+
+    // 첫 탭 정지는 [0,0](p-bad 행 머리) — 위·왼쪽 경계에 이미 있다.
+    await user.tab();
+
+    await user.keyboard("{ArrowUp}");
+    expect(captured.keydown?.defaultPrevented).toBe(true);
+
+    await user.keyboard("{ArrowLeft}");
+    expect(captured.keydown?.defaultPrevented).toBe(true);
+  });
+
   it("키보드로 옮긴 칸의 상세도 미니 상세에 반영한다", async () => {
     const user = userEvent.setup();
     render(<CellHeatmap rows={rows} />);
