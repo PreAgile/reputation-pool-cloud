@@ -74,8 +74,8 @@ class RateLimitPropertiesBindingTest {
         }
 
         assertThat(fromCompose)
-                .as("compose.yaml 에서 rate-limit 환경변수 세 개를 찾지 못했다 — 이름이 바뀌었는지 확인한다")
-                .hasSize(3);
+                .as("compose.yaml 에서 rate-limit 환경변수 네 개를 찾지 못했다 — 이름이 바뀌었는지 확인한다")
+                .hasSize(4);
         assertThat(fromCompose.values())
                 .as("`${VAR:-}` 는 빈 문자열을 주입해 primitive 바인딩을 깨뜨린다 — 기본값을 명시해야 한다")
                 .noneMatch(String::isEmpty);

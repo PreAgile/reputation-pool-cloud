@@ -160,9 +160,10 @@ REPUTATION_POOL_AUDIT_RETENTION=P0D     # 기본: 영구 보관 (P0D = 끄기). 
 ### 데이터 플레인 요청 상한 (#132)
 
 ```dotenv
-REPUTATION_POOL_RATE_LIMIT_ENABLED=true            # false 면 무제한 (사고 시 탈출구)
-REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND=10  # 테넌트당 지속 요청율
-REPUTATION_POOL_RATE_LIMIT_BURST=50                # 몰아 보낼 수 있는 양(버킷 용량)
+REPUTATION_POOL_RATE_LIMIT_ENABLED=true              # false 면 무제한 (사고 시 탈출구 — 아래 스트림 상한도 같이 꺼진다)
+REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND=10    # 테넌트당 지속 요청율
+REPUTATION_POOL_RATE_LIMIT_BURST=50                  # 몰아 보낼 수 있는 양(버킷 용량)
+REPUTATION_POOL_RATE_LIMIT_MAX_CONCURRENT_STREAMS=20 # 테넌트당 동시 SubscribeEvents 스트림 수(#132 후속)
 ```
 
 **테넌트별**이다 — `MAX_RESOURCES`/`MAX_CELLS`(전체 합계)와 다르다. 그쪽은 메모리 축을 막고 이쪽은
@@ -178,6 +179,14 @@ REPUTATION_POOL_RATE_LIMIT_BURST=50                # 몰아 보낼 수 있는 �
 
 거부는 `datapane.rate.limited` 카운터로 세고 알림 룰이 붙어 있다. `datapane.rate.limiter.errors` 가
 0 이 아니면 **상한이 적용되지 않는 상태**다(제한기가 예외로 통과시키는 중).
+
+`MAX_CONCURRENT_STREAMS` 는 다른 축이다. 위 두 값은 호출 빈도(토큰 버킷)를 재는데, `SubscribeEvents`
+는 한 번 열면 클라이언트가 끊을 때까지 살아 있는 스트림이라 "호출 1회" 로는 안 잡힌다 — 토큰 하나로
+스트림을 영원히 붙잡을 수 있다. 그래서 **동시에 열려 있는 구독 수**를 별도로 센다. 거부는
+`datapane.stream.subscriptions.rejected` 로, 상한 자체가 죽는 상태는 `datapane.stream.quota.errors`
+로 잡는다 — 두 실패 모두 요청율 상한과 똑같이 `RESOURCE_EXHAUSTED` 로 나가므로, 응답만 보고는 "요청이
+많은 것"과 "스트림이 많이 열린 것"을 구분할 수 없다. 아래 [트러블슈팅](troubleshooting.md)의 분기를
+참고할 것.
 
 같은 파일의 다른 운영 노브도 함께 알아둘 것: `REPUTATION_POOL_MAX_RESOURCES`(기본 100,000) ·
 `REPUTATION_POOL_MAX_CELLS`(기본 500,000)는 **테넌트별이 아니라 전체 합계** 상한이다(#84 — 공유 JVM

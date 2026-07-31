@@ -214,13 +214,22 @@ curl -s localhost:8083/actuator/prometheus | grep datapane_rate_limited_total
 
 # 상한이 적용되고는 있나 — 0 이 아니면 제한기가 고장나 통과시키는 중이다
 curl -s localhost:8083/actuator/prometheus | grep datapane_rate_limiter_errors_total
+
+# 구독(SubscribeEvents)만 막히는 것도 같은 RESOURCE_EXHAUSTED 로 나온다 — 아래 두 계열로 구분한다
+curl -s localhost:8083/actuator/prometheus | grep datapane_stream_subscriptions_rejected_total
+curl -s localhost:8083/actuator/prometheus | grep datapane_stream_quota_errors_total
 ```
 
+- **구독(`SubscribeEvents`)만 막히고 다른 RPC 는 멀쩡하다** → 요청율이 아니라 **동시 스트림 상한**이다
+  (`datapane_stream_subscriptions_rejected_total` 이 오르고 `datapane_rate_limited_total` 은 그대로).
+  위의 `REQUESTS_PER_SECOND`·`BURST` 를 올려도 증상이 그대로인 이유다. `.env` 의
+  `REPUTATION_POOL_RATE_LIMIT_MAX_CONCURRENT_STREAMS` 를 올리거나, 클라이언트가 안 쓰는 구독을
+  닫게 한다
 - **정상 트래픽인데 막힌다** → `.env` 의 `REPUTATION_POOL_RATE_LIMIT_REQUESTS_PER_SECOND`·`_BURST` 를
   올리고 재배포. 기본값(10/s · burst 50)은 실측 없는 가설이다
 - **남용이다** → 해당 API 키를 콘솔(`/keys`)에서 폐기한다. 상한을 낮추는 것보다 정확하다
-- **지금 당장 풀어야 한다** → `REPUTATION_POOL_RATE_LIMIT_ENABLED=false` 후 재배포. 상한이 사라지므로
-  임시 조치로만 쓴다
+- **지금 당장 풀어야 한다** → `REPUTATION_POOL_RATE_LIMIT_ENABLED=false` 후 재배포. 요청율 상한과 동시
+  스트림 상한이 함께 사라지므로 임시 조치로만 쓴다
 
 `acquire`(#148)는 fail-open 계약이라 SDK 가 이 거부를 예외로 던지지 않고 "조언 없음" 으로 다뤄야 한다.
 고객 작업이 429 때문에 멈췄다면 그건 SDK 버그다.

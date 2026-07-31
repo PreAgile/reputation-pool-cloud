@@ -473,3 +473,27 @@ groups:
           summary: "요청 상한이 적용되지 않고 있다 — 제한기가 예외로 통과시키는 중"
           description: "app 로그에서 'rate limiter failed' 를 확인한다. 상한 없이 열려 있는 상태다."
 
+      # 테넌트별 동시 SubscribeEvents 상한(#132 후속). 요청율 상한과 같은 RESOURCE_EXHAUSTED 로 나가서
+      # 응답만으로는 구분이 안 되므로 별도 카운터·별도 룰이 필요하다 — troubleshooting.md 의 분기 참고.
+      - alert: DataPlaneStreamQuotaRejections
+        expr: sum(rate(datapane_stream_subscriptions_rejected_total[5m])) * 60 > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "동시 스트림 구독 상한 거부가 분당 10건을 넘는다 — 남용이거나 상한이 낮다"
+          description: >
+            reputation-pool.rate-limit.max-concurrent-streams 를 먼저 확인한다. 정상 트래픽이면
+            상한을 올리고, 아니면 해당 API 키를 콘솔에서 폐기한다. 즉시 해제하려면 rate-limit.enabled=false.
+
+      # 상한 자체가 고장나 통과시키고 있다는 뜻이다(fail-open). 거부가 0 인 것과 **한도가 없는 것**은
+      # 완전히 다른 상태인데 겉보기 신호가 같다 — 이 카운터가 그 둘을 가른다.
+      - alert: DataPlaneStreamQuotaFailing
+        expr: sum(rate(datapane_stream_quota_errors_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "동시 스트림 상한이 적용되지 않고 있다 — 쿼터가 예외로 통과시키는 중"
+          description: "app 로그에서 'stream quota failed' 를 확인한다. 상한 없이 열려 있는 상태다."
+
