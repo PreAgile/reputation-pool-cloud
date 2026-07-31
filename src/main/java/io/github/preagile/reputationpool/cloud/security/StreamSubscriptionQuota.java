@@ -46,6 +46,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class StreamSubscriptionQuota {
 
+    private final boolean enabled;
+
     private final int maxPerTenant;
 
     /** Open-stream count per tenant. Entries are created on demand and never removed (see javadoc). */
@@ -53,7 +55,17 @@ public final class StreamSubscriptionQuota {
 
     public StreamSubscriptionQuota(RateLimitProperties properties) {
         Objects.requireNonNull(properties, "properties must not be null");
+        this.enabled = properties.enabled();
         this.maxPerTenant = properties.maxConcurrentStreams();
+    }
+
+    /**
+     * {@code false} means {@code reputation-pool.rate-limit.enabled=false} — the same kill switch that
+     * disables the request-rate bucket disables this ceiling too, so an operator has exactly one knob to
+     * turn off "the limiter" as a whole, not one that silently leaves the stream ceiling standing.
+     */
+    public boolean enabled() {
+        return enabled;
     }
 
     /**
@@ -61,11 +73,17 @@ public final class StreamSubscriptionQuota {
      * raises the tenant's count and the caller owes exactly one {@link #close(String)} when the stream
      * ends, on every termination path.
      *
+     * <p>Disabled configuration always admits and tracks nothing — the escape hatch stays cheap, same as
+     * {@link RateLimiter#tryConsume(String)}.
+     *
      * @return {@code true} if the stream fits under the ceiling (the count was raised); {@code false} if
      *     the tenant is already at it, in which case nothing changed
      */
     public boolean tryOpen(String tenantId) {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
+        if (!enabled) {
+            return true;
+        }
         AtomicInteger open = openStreams.computeIfAbsent(tenantId, key -> new AtomicInteger());
         // Check and raise in one atomic step: two threads racing for the last slot must not both win.
         // Same compare-and-set loop as GlobalResourceBudget#tryReserve.

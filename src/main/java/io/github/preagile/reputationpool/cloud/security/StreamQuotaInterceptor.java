@@ -1,6 +1,7 @@
 package io.github.preagile.reputationpool.cloud.security;
 
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
+import io.github.preagile.reputationpool.grpc.v1.ReputationAdvisorGrpc;
 import io.grpc.ForwardingServerCallListener;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
@@ -16,7 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Enforces {@link StreamSubscriptionQuota} on server-streaming calls (issue #132 follow-up), rejecting a
+ * Enforces {@link StreamSubscriptionQuota} on {@code SubscribeEvents} (issue #132 follow-up), rejecting a
  * tenant's excess subscriptions with {@link Status#RESOURCE_EXHAUSTED}.
  *
  * <p><b>Why an interceptor and not a service override.</b> Counting open streams needs both ends: +1 when
@@ -28,11 +29,14 @@ import org.slf4j.LoggerFactory;
  * A {@link ServerCall.Listener} is a separate mechanism that cannot collide with it, so the count is kept
  * here instead. It also puts the ceiling next to the request-rate ceiling, which is where a reader looks.
  *
- * <p><b>Only server-streaming calls are counted.</b> The five unary RPCs are already metered exactly by
- * the token bucket — one call, one token — so counting them here would double-charge and, worse, never
- * release (a unary call's "stream" is over before anyone could care). {@code
- * MethodDescriptor#getType()} is the discriminator, so this stays correct if another streaming RPC is
- * added later.
+ * <p><b>Only {@code SubscribeEvents} is counted — not "any server-streaming call".</b> This interceptor is
+ * registered globally, so it also sees gRPC's own health/reflection services; and {@link
+ * MethodDescriptor#getType()} alone cannot tell {@code SubscribeEvents} apart from some other
+ * server-streaming RPC the advisor service might grow later. Matching on {@code getType()} only would let
+ * an unrelated stream consume a tenant's subscription slots, and let a long-lived unrelated stream starve
+ * real {@code SubscribeEvents} calls. The full method name from {@link
+ * ReputationAdvisorGrpc#getSubscribeEventsMethod()} is compared instead — the exact identity this ceiling
+ * is documented (config name, metric names, error text) to be about.
  *
  * <p><b>Runs after authentication</b>, for the same reason {@link RateLimitInterceptor} does: the tenant
  * comes from {@link TenantContext#TENANT_ID}, which the auth interceptor puts there. Ordering is pinned in
@@ -63,6 +67,10 @@ public final class StreamQuotaInterceptor implements ServerInterceptor {
     /** Streams admitted because the quota itself failed. Non-zero means the ceiling is not being enforced. */
     private static final String ERRORS_COUNTER = "datapane.stream.quota.errors";
 
+    /** The one RPC this ceiling is about — see the class javadoc for why {@code getType()} is not enough. */
+    private static final String SUBSCRIBE_EVENTS_METHOD =
+            ReputationAdvisorGrpc.getSubscribeEventsMethod().getFullMethodName();
+
     private final StreamSubscriptionQuota quota;
     private final Counter rejected;
     private final Counter errors;
@@ -79,7 +87,10 @@ public final class StreamQuotaInterceptor implements ServerInterceptor {
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
             ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
-        if (call.getMethodDescriptor().getType() != MethodDescriptor.MethodType.SERVER_STREAMING) {
+        if (!quota.enabled()) {
+            return next.startCall(call, headers);
+        }
+        if (!SUBSCRIBE_EVENTS_METHOD.equals(call.getMethodDescriptor().getFullMethodName())) {
             return next.startCall(call, headers);
         }
         String tenantId = TenantContext.TENANT_ID.get();

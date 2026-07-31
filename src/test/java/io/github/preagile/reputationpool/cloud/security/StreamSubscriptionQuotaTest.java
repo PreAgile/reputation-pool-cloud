@@ -111,6 +111,21 @@ class StreamSubscriptionQuotaTest {
                 .hasMessageContaining("max-concurrent-streams");
     }
 
+    @Test
+    @DisplayName("enabled=false 면 → 상한이 1 이어도 여러 스트림을 그냥 통과시키고 아무것도 기록하지 않는다")
+    void disabledIsANoOp() {
+        StreamSubscriptionQuota quota = new StreamSubscriptionQuota(new RateLimitProperties(false, 10, 50, 1));
+
+        assertThat(quota.enabled()).isFalse();
+        for (int i = 0; i < 5; i++) {
+            assertThat(quota.tryOpen("acme")).isTrue();
+        }
+
+        // 기록하지 않는다 — 나중에 enabled 를 다시 켰을 때 유령 카운트로 시작하지 않는다.
+        assertThat(quota.openCount("acme")).isZero();
+        assertThat(quota.trackedTenantCount()).isZero();
+    }
+
     // ── 동시성 ──────────────────────────────────────────────────────────────────────────────────
     //
     // 규범(testing-and-review.md): 경쟁 시점을 스케줄러 운에 맡기지 않고 랑데부로 강제하고, 공유
@@ -173,12 +188,15 @@ class StreamSubscriptionQuotaTest {
         int ceiling = 200;
         StreamSubscriptionQuota quota = quota(ceiling);
         AtomicInteger stillOpen = new AtomicInteger();
+        // 무엇이 닫힐지를 스레드 스케줄링이 아니라 이 카운터가 결정한다 — "열고 둔 수" 가 곧 "홀수 번째로
+        // 연 수" 라는 뜻이 코드에 그대로 적힌다.
+        AtomicInteger seq = new AtomicInteger();
 
         // 절반은 열고 두고, 절반은 열었다가 곧바로 닫는다. 최종 카운트는 "열고 둔 수" 와 정확히 같아야
         // 한다 — 소모나 반납이 유실되면 어긋난다.
         runConcurrently(200, () -> {
             if (quota.tryOpen("mixed")) {
-                if (Thread.currentThread().getId() % 2 == 0) {
+                if (seq.getAndIncrement() % 2 == 0) {
                     quota.close("mixed");
                 } else {
                     stillOpen.incrementAndGet();

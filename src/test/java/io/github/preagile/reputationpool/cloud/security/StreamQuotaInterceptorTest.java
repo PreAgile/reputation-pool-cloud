@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
+import io.github.preagile.reputationpool.grpc.v1.ReputationAdvisorGrpc;
 import io.grpc.Context;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
@@ -24,6 +25,10 @@ import org.mockito.ArgumentCaptor;
 
 @DisplayName("StreamQuotaInterceptor: 서버 스트리밍 구독만 골라 테넌트별 동시 상한을 적용하는 인터셉터")
 class StreamQuotaInterceptorTest {
+
+    /** 이 상한이 실제로 겨냥하는 단 하나의 RPC — 다른 server-streaming 메서드와 구분하는 기준. */
+    private static final String SUBSCRIBE_EVENTS_METHOD =
+            ReputationAdvisorGrpc.getSubscribeEventsMethod().getFullMethodName();
 
     /** 프로토 없이 메서드 타입만 필요하므로 문자열 마셜러로 최소 디스크립터를 만든다. */
     private static final MethodDescriptor.Marshaller<String> MARSHALLER = new MethodDescriptor.Marshaller<>() {
@@ -58,10 +63,22 @@ class StreamQuotaInterceptorTest {
         when(next.startCall(any(), any())).thenReturn(delegate);
     }
 
+    /**
+     * {@code SERVER_STREAMING} 은 실제 {@code SubscribeEvents} 를 흉내 내고, 그 밖의 타입은 이 상한이
+     * 겨냥하지 않는 임의의 RPC(가짜 이름 "Probe")를 흉내 낸다 — 상한이 이름으로만 판별되므로 그 구분이
+     * 여기서부터 맞아야 한다.
+     */
     private static MethodDescriptor<String, String> method(MethodDescriptor.MethodType type) {
+        String fullMethodName = type == MethodDescriptor.MethodType.SERVER_STREAMING
+                ? SUBSCRIBE_EVENTS_METHOD
+                : "reputationpool.v1.ReputationAdvisor/Probe";
+        return method(type, fullMethodName);
+    }
+
+    private static MethodDescriptor<String, String> method(MethodDescriptor.MethodType type, String fullMethodName) {
         return MethodDescriptor.<String, String>newBuilder()
                 .setType(type)
-                .setFullMethodName("reputationpool.v1.ReputationAdvisor/Probe")
+                .setFullMethodName(fullMethodName)
                 .setRequestMarshaller(MARSHALLER)
                 .setResponseMarshaller(MARSHALLER)
                 .build();
@@ -69,7 +86,12 @@ class StreamQuotaInterceptorTest {
 
     private ServerCall.Listener<String> interceptAs(
             String tenantId, StreamQuotaInterceptor interceptor, MethodDescriptor.MethodType type) {
-        when(call.getMethodDescriptor()).thenReturn(method(type));
+        return interceptAs(tenantId, interceptor, method(type));
+    }
+
+    private ServerCall.Listener<String> interceptAs(
+            String tenantId, StreamQuotaInterceptor interceptor, MethodDescriptor<String, String> descriptor) {
+        when(call.getMethodDescriptor()).thenReturn(descriptor);
         Context context =
                 tenantId == null ? Context.current() : Context.current().withValue(TenantContext.TENANT_ID, tenantId);
         java.util.concurrent.atomic.AtomicReference<ServerCall.Listener<String>> captured =
@@ -97,6 +119,20 @@ class StreamQuotaInterceptorTest {
     }
 
     @Test
+    @DisplayName("enabled=false 면 → 상한이 1 이어도 여러 구독을 그냥 통과시킨다 (rate-limit.enabled 가 한 스위치다)")
+    void disabledQuotaAdmitsEverything() throws Exception {
+        StreamSubscriptionQuota quota = new StreamSubscriptionQuota(new RateLimitProperties(false, 10, 50, 1));
+        StreamQuotaInterceptor interceptor = interceptor(quota);
+
+        for (int i = 0; i < 5; i++) {
+            interceptAs("acme", interceptor, MethodDescriptor.MethodType.SERVER_STREAMING);
+        }
+
+        assertThat(quota.openCount("acme")).isZero();
+        verify(call, never()).close(any(), any());
+    }
+
+    @Test
     @DisplayName("일반(unary) 호출이면 → 슬롯을 쓰지 않고 그대로 통과시킨다")
     void unaryCallsAreNotCounted() throws Exception {
         StreamSubscriptionQuota quota = quota(1);
@@ -104,6 +140,24 @@ class StreamQuotaInterceptorTest {
 
         for (int i = 0; i < 5; i++) {
             interceptAs("acme", interceptor, MethodDescriptor.MethodType.UNARY);
+        }
+
+        assertThat(quota.openCount("acme")).isZero();
+        verify(call, never()).close(any(), any());
+    }
+
+    @Test
+    @DisplayName("SubscribeEvents 가 아닌 다른 server-streaming RPC 는 → 슬롯을 쓰지 않고 그대로 통과시킨다")
+    void otherServerStreamingRpcsAreNotCounted() throws Exception {
+        // 이 인터셉터는 전역 등록이라 gRPC health/reflection 의 스트리밍 메서드도 지나간다. 타입만 보면
+        // 그런 메서드도 SubscribeEvents 와 같은 슬롯을 소비하게 된다 — 이름으로 걸러야 한다.
+        StreamSubscriptionQuota quota = quota(1);
+        StreamQuotaInterceptor interceptor = interceptor(quota);
+        MethodDescriptor<String, String> otherStreamingMethod =
+                method(MethodDescriptor.MethodType.SERVER_STREAMING, "grpc.health.v1.Health/Watch");
+
+        for (int i = 0; i < 5; i++) {
+            interceptAs("acme", interceptor, otherStreamingMethod);
         }
 
         assertThat(quota.openCount("acme")).isZero();
@@ -221,6 +275,7 @@ class StreamQuotaInterceptorTest {
     @DisplayName("게이트가 예외를 던지면 → 구독을 통과시키고 에러 카운터를 올린다 (fail-open)")
     void quotaFailureLetsSubscriptionThrough() throws Exception {
         StreamSubscriptionQuota broken = mock(StreamSubscriptionQuota.class);
+        when(broken.enabled()).thenReturn(true);
         when(broken.tryOpen(any())).thenThrow(new IllegalStateException("boom"));
 
         interceptAs("acme", interceptor(broken), MethodDescriptor.MethodType.SERVER_STREAMING);
