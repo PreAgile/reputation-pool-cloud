@@ -134,10 +134,28 @@ function EventMarker(props: { cx: number; cy: number; color: string; title: stri
   );
 }
 
+/**
+ * useParams()가 준 인코딩된 경로 세그먼트를 canonical 값으로 디코드한다. 이미 디코드된 값이거나
+ * malformed percent-encoding(예: 리소스 이름에 리터럴 `%`)이면 decodeURIComponent 가 throw 하므로
+ * 원본을 그대로 돌려준다 — 상세 페이지가 그런 값으로도 죽지 않게.
+ */
+function safeDecode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 export default function ResourceDetailPage() {
   const params = useParams<{ kind: string; value: string }>();
-  const kind = params.kind; // 경로는 소문자, 백엔드가 대문자로 정규화
-  const value = params.value;
+  // useParams()는 URL 세그먼트를 **인코딩된 채로** 돌려준다(디코드하지 않는다). 아래에서 API 경로를
+  // 만들 때 encodeURIComponent 를 한 번 더 하므로, 그대로 쓰면 콜론(`:`)이 이중 인코딩된다
+  // (`decodo:isp:10186` → `decodo%253Aisp%253A10186`) → 백엔드가 그 경로를 401 로 거부한다.
+  // 여기서 한 번 디코드해 canonical 값으로 되돌린 뒤 아래에서 정확히 한 번만 인코딩한다. 브레드크럼
+  // 표시도 이 디코드된 값이라야 사람이 읽는 형태가 된다.
+  const kind = safeDecode(params.kind); // 경로는 소문자, 백엔드가 대문자로 정규화
+  const value = safeDecode(params.value);
   const toast = useToast();
 
   // 상세 로드 전에도 그릴 수 있도록 경로 파라미터로 브레드크럼을 구성(풀 오버뷰 / KIND / value).
