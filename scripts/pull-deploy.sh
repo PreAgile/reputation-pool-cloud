@@ -325,3 +325,10 @@ fi
 # 표식은 **여기서만** 갱신한다 — 위 어느 단계에서 죽어도 표식은 이전 커밋에 남고 다음 주기가 다시 배포한다.
 printf '%s\n' "$TARGET" > "$STATE_FILE"
 log "배포 완료: $SHORT"
+
+# 오래된 이미지 정리(best-effort). 배포마다 새 sha 이미지를 받으므로 성공 직후가 정리 시점이다 —
+# 실행 중 + 최근 몇 개는 롤백 여지로 남기고 나머지 reputation-pool-cloud 이미지만 지운다. 실패해도
+# 배포는 이미 끝났으므로 표식/성공에 영향을 주지 않는다.
+if [ -x "$REPO_DIR/scripts/prune-images.sh" ]; then
+	"$REPO_DIR/scripts/prune-images.sh" || log "이미지 정리 실패(무시) — 배포 자체는 성공"
+fi
