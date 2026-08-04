@@ -98,3 +98,22 @@
 
 	import origin_down
 }
+
+# gRPC 데이터 플레인 (스크래퍼 연동). app.poolroost.com 과 별도 호스트로 둔다 — 대시보드·REST 는 위
+# {$DOMAIN} 블록이 처리하고, 여기서는 Caddy 가 h2c 로 app:9093(gRPC)에 프록시한다.
+#
+# cloudflared(Cloudflare Tunnel)를 쓰지 않는 이유: cloudflared 는 평문 HTTP/2(h2c) 오리진을 지원하지
+# 않아 gRPC 가 통과하지 못한다(오리진에 HTTP/1.1 로 붙어 502, cloudflared #1641). Caddy 는 h2c 오리진을
+# 지원하므로 그 벽이 없다.
+#
+# Cloudflare proxied(orange)를 유지한다: zone 의 gRPC 설정이 ON 이라 엣지가 gRPC(application/grpc)를
+# 통과시키고, VCN 은 이미 Cloudflare IP 대역만 443 을 허용하므로(scripts/oci-origin-lock.sh) 오리진 IP
+# 은닉이 그대로 유지된다. Cloudflare SSL/TLS 모드는 Full(strict) — Caddy 인증서가 유효하므로 맞다.
+# grpc.poolroost.com 은 Cloudflare 에서 이 오리진(A 레코드, proxied)으로 향하게 둔다.
+#
+# 인증: app 의 gRPC 인터셉터가 x-api-key 메타데이터로 직접 인증하므로 Caddy 는 관여하지 않고 그대로
+# 통과시킨다(그래서 {$DOMAIN} 블록의 XFF 덮어쓰기 같은 처리도 불필요하다).
+{$GRPC_DOMAIN:grpc.poolroost.com} {
+	# 전체 경로(/패키지.서비스/메서드)를 gRPC 백엔드로. h2c:// 는 평문 HTTP/2 오리진에 붙는 스킴이다.
+	reverse_proxy h2c://app:9093
+}
