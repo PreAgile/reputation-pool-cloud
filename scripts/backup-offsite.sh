@@ -280,18 +280,53 @@ else
 		-in "$REPO_DIR/.env" -out "$tmp_env" "$ENV_CERT" \
 		|| { rm -f "$tmp_env"; die ".env 암호화 실패 (인증서를 확인한다: $ENV_CERT)"; }
 
-	# 평문이 그대로 올라가는 사고를 막는 마지막 관문. CMS envelopedData 는 OID 1.2.840.113549.1.7.3 —
-	# DER 로 `06 09 2a 86 48 86 f7 0d 01 07 03` 이다. 이 검사가 없으면 openssl 이 조용히 다른 것을
-	# 내놨을 때(버전 차이·옵션 오타) **시크릿을 평문으로 버킷에 올리게 된다.**
-	head -c 64 "$tmp_env" | od -An -tx1 | tr -d ' \n' | grep -q '06092a864886f70d010703' \
+	# 평문이 그대로 올라가는 사고를 막는 마지막 관문. 이 검사가 없으면 openssl 이 버전·옵션 차이로 다른
+	# 것을 내놨을 때 **시크릿을 평문으로 버킷에 올리게 된다.**
+	#
+	# **접두어 바이트가 아니라 DER 전체를 파싱한다.** OID 바이트열(`06092a864886f70d010703`)은 최상위
+	# 콘텐츠 타입만 나타내므로, 앞부분만 보면 뒤가 잘린 파일도 통과한다(실측: 앞 200바이트만 남긴 파일이
+	# 접두어 검사를 통과했고 전체 파싱에서만 걸렸다). `cms -cmsout` 은 구조를 끝까지 읽으므로 잘린 파일이
+	# 거부되고, 최상위 타입이 envelopedData 인지까지 확인한다.
+	assert_cms_enveloped() {
+		local f="$1" what="$2"
+		openssl cms -inform DER -cmsout -noout -in "$f" > /dev/null 2>&1 \
+			|| { log "error: $what — CMS DER 로 파싱되지 않는다(잘렸거나 다른 형식)"; return 1; }
+		openssl cms -inform DER -cmsout -print -in "$f" 2> /dev/null \
+			| grep -q 'pkcs7-envelopedData' \
+			|| { log "error: $what — 최상위 콘텐츠 타입이 envelopedData 가 아니다"; return 1; }
+		return 0
+	}
+	assert_cms_enveloped "$tmp_env" "암호화 결과" \
 		|| { rm -f "$tmp_env"; die "암호화 결과가 CMS envelopedData 가 아니다 — 업로드하지 않는다"; }
 
 	env_size="$(wc -c < "$tmp_env" | tr -d ' ')"
 	env_remote="$(oci os object head --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
 		--name "$env_object" --query '"content-length"' --raw-output 2> /dev/null || true)"
 
+	# `env/latest` 포인터를 **업로드했든 이미 있었든 항상** 갱신한다.
+	#
+	# 이름에 내용 해시를 쓰기 때문에 `.env` 가 A → B → A 로 되돌아가면 A 객체는 이미 있어 건너뛰는데
+	# 그 객체의 생성 시각은 과거다. 그러면 "시각순 최신" 은 여전히 B 이고, `--verify-latest` 와 복원 절차가
+	# **현재 설정이 아닌 옛 설정을 최신 백업으로 취급한다.** 포인터가 그 함정을 없앤다.
+	write_env_pointer() {
+		local ptr
+		ptr="$(mktemp)"
+		printf '%s\n' "$env_object" > "$ptr"
+		if oci os object put --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
+			--name "${ENV_PREFIX}latest" --file "$ptr" --force > /dev/null 2>&1; then
+			rm -f "$ptr"
+			log ".env 포인터 갱신: ${ENV_PREFIX}latest -> $env_object"
+		else
+			rm -f "$ptr"
+			# 포인터 실패는 백업 자체를 무효화하지 않지만(객체는 올라갔다) 복원이 옛 것을 고를 수 있으므로
+			# 알린다.
+			die ".env 포인터 갱신 실패 — 복원이 옛 백업을 고를 수 있다 (${ENV_PREFIX}latest)"
+		fi
+	}
+
 	if [ "$env_remote" = "$env_size" ]; then
-		log ".env 백업 최신 — 건너뜀 ($env_object)"
+		log ".env 백업 최신 — 업로드 건너뜀 ($env_object)"
+		[ "$DRY_RUN" = true ] || write_env_pointer
 	elif [ "$DRY_RUN" = true ]; then
 		log "[dry-run] .env 업로드했을 것: $env_object ($env_size bytes)"
 	else
@@ -302,6 +337,7 @@ else
 		[ "$env_head" = "$env_size" ] \
 			|| die ".env 업로드 검증 실패: $env_object (기대 $env_size, 원격 ${env_head:-없음})"
 		log ".env 업로드 완료: $env_object ($env_size bytes, CMS)"
+		write_env_pointer
 	fi
 	rm -f "$tmp_env"
 fi
@@ -371,17 +407,35 @@ if [ "$VERIFY_LATEST" = true ]; then
 	# .env 백업도 함께 본다. **복호화는 하지 않는다** — 개인키가 이 호스트에 없는 것이 설계이고, 여기서
 	# 복호화할 수 있다면 그 자체가 결함이다. 그래서 "CMS envelopedData 인지" 와 "비어 있지 않은지" 만 본다
 	# (평문이 올라갔거나 잘린 파일은 이 검사에서 걸린다). 실제 복호화 리허설은 노트북에서 §8-1 절차로 한다.
-	env_latest="$(oci os object list --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
-		--prefix "${OFFSITE_ENV_PREFIX:-env/}" --all \
-		--query 'sort_by(data[], &"time-created")[-1].name' --raw-output 2> /dev/null || true)"
+	# **시각순 최신이 아니라 `env/latest` 포인터를 읽는다.** 이름에 내용 해시를 쓰므로 `.env` 가
+	# A → B → A 로 되돌아가면 A 객체의 생성 시각은 과거이고, 시각순 최신은 여전히 B 다 — 그걸 검증하면
+	# **현재 설정이 아닌 옛 설정을 "최신 백업" 으로 확인해 주는** 셈이 된다.
+	env_prefix_v="${OFFSITE_ENV_PREFIX:-env/}"
+	env_latest=""
+	if oci os object get --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
+		--name "${env_prefix_v}latest" --file "$tmpd/latest" > /dev/null 2>&1; then
+		env_latest="$(tr -d '[:space:]' < "$tmpd/latest")"
+	else
+		# 포인터를 쓰기 전에 올린 백업이 있을 수 있다 — 시각순으로 떨어지되 그 사실을 알린다.
+		env_latest="$(oci os object list --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
+			--prefix "$env_prefix_v" --all \
+			--query 'sort_by(data[], &"time-created")[-1].name' --raw-output 2> /dev/null || true)"
+		[ -z "$env_latest" ] || [ "$env_latest" = null ] \
+			|| log "warn: ${env_prefix_v}latest 포인터가 없어 시각순으로 골랐다 — 내용이 되돌아간 경우 옛 백업일 수 있다"
+	fi
+
 	if [ -z "$env_latest" ] || [ "$env_latest" = null ]; then
 		log "warn: 원격에 .env 백업이 없다 — 인스턴스 소실 시 복원 불가 (OFFSITE_ENV_CERT 설정 확인)"
 	else
 		oci os object get --namespace "$NAMESPACE" --bucket-name "$BUCKET" --name "$env_latest" \
 			--file "$tmpd/env.cms" > /dev/null 2>&1 || die ".env 백업 다운로드 실패: $env_latest"
 		[ -s "$tmpd/env.cms" ] || die ".env 백업이 비어 있다: $env_latest"
-		head -c 64 "$tmpd/env.cms" | od -An -tx1 | tr -d ' \n' | grep -q '06092a864886f70d010703' \
-			|| die ".env 백업이 CMS envelopedData 가 아니다 — 평문이 올라갔거나 손상됐다: $env_latest"
+		# 업로드 측과 같은 이유로 DER 전체를 파싱한다 — 접두어만 보면 뒤가 잘린 파일이 통과한다.
+		openssl cms -inform DER -cmsout -noout -in "$tmpd/env.cms" > /dev/null 2>&1 \
+			|| die ".env 백업이 CMS DER 로 파싱되지 않는다(잘렸거나 손상): $env_latest"
+		openssl cms -inform DER -cmsout -print -in "$tmpd/env.cms" 2> /dev/null \
+			| grep -q 'pkcs7-envelopedData' \
+			|| die ".env 백업의 최상위 타입이 envelopedData 가 아니다 — 평문이 올라갔을 수 있다: $env_latest"
 		log "무결성 확인: $env_latest — CMS envelopedData ($(wc -c < "$tmpd/env.cms" | tr -d ' ') bytes)"
 	fi
 fi

@@ -636,14 +636,20 @@ ssh <서버> 'echo OFFSITE_ENV_CERT=$HOME/.rp-backup-cert.pem >> ~/.rp-backup.en
 #### 시크릿 복원 (노트북에서)
 
 ```bash
-# 1. 최신 .env 객체 이름 확인
-oci os object list --namespace <ns> --bucket-name rp-backups --prefix env/
+# 1. 현재 .env 를 가리키는 포인터를 읽는다 (목록의 "시각순 최신" 을 쓰지 않는다 — 아래 주의 참고)
+oci os object get --namespace <ns> --bucket-name rp-backups --name env/latest --file /tmp/ptr
+obj="$(cat /tmp/ptr)"
 # 2. 내려받아 개인키로 복호화
-oci os object get --namespace <ns> --bucket-name rp-backups --name env/env_<hash>.cms --file /tmp/e.cms
+oci os object get --namespace <ns> --bucket-name rp-backups --name "$obj" --file /tmp/e.cms
 openssl smime -decrypt -inform DER -inkey ~/.config/poolroost/rp-backup.key -in /tmp/e.cms > .env
 # 3. 확인 — 해시 앞 12자가 객체 이름과 같아야 한다
 openssl dgst -sha256 .env | awk '{print $NF}' | cut -c1-12
 ```
+
+> ⚠️ **목록에서 "가장 최근에 만들어진" 객체를 고르면 안 된다.** 이름이 내용 해시라서 `.env` 가
+> A → B → A 로 되돌아가면 A 객체는 이미 있어 다시 올리지 않고, 그 생성 시각은 과거다. 그러면 시각순
+> 최신은 여전히 B 이고 **옛 설정을 복원하게 된다.** 그래서 업로드마다(건너뛸 때도) `env/latest` 포인터를
+> 갱신하고, 복원·검증은 그 포인터를 읽는다.
 
 2026-08-05 실제로 왕복을 한 번 통과시켰다(업로드 → 다운로드 → 노트북 개인키로 복호화 → 해시 일치,
 시크릿 15개 복원). "복원해본 적 없는 백업은 백업이 아니다" 를 이 경로에도 적용한 것이다.
