@@ -217,7 +217,10 @@ jobs:
       # versions disagreed on SC2015). Pinning makes local and CI report identically; bump deliberately.
       - name: Shellcheck deploy scripts
         run: |
-          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 \
+          # LC_ALL 을 준다: 지적 대상 줄에 한글이 있으면 shellcheck 가 출력 인코딩에서
+          # `commitBuffer: invalid argument (cannot encode character …)` 로 죽어 **지적 내용을 보여주지
+          # 못한다.** 이 레포는 주석이 한글이라 거의 모든 지적이 그 경로를 탄다(실측).
+          docker run --rm -e LC_ALL=C.UTF-8 -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 \
             scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh \
             scripts/pull-deploy.sh scripts/install-pull-deploy.sh scripts/install-a1-hunter.sh \
             scripts/backup-offsite.sh scripts/cf-dns.sh scripts/migrate-host.sh

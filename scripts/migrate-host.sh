@@ -42,6 +42,8 @@
 #   ./scripts/migrate-host.sh --decommission migration-…       # 구 인스턴스 종료(가드 3개를 통과해야)
 #
 # 환경변수: MIGRATE_SSH_USER(기본 ubuntu) · MIGRATE_OLD_HOST(기본: CF 의 app 레코드에서 산출)
+#           MIGRATE_OLD_SSH / MIGRATE_NEW_SSH — SSH 목적지를 IP 와 따로 준다(ssh_config 별칭 등).
+#             예) MIGRATE_OLD_SSH=rp-bridge ./scripts/migrate-host.sh --to <신규IP> --dry-run
 #           MIGRATE_REPO_DIR(기본 /home/<user>/reputation-pool-cloud) · MIGRATE_REPO_URL · CF_ZONE
 # 전제: `cf-dns.sh` 가 쓰는 CF_API_TOKEN, 구·신 호스트 SSH 키, (--decommission 만) OCI CLI.
 set -euo pipefail
@@ -136,6 +138,37 @@ ZONE="${CF_ZONE:-poolroost.com}"
 # `accept-new` 는 처음 보는 키만 받고 변경은 여전히 거부한다.
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
 
+# IP 와 SSH 목적지를 분리한다. **IP 는 DNS 레코드와 `curl --resolve` 에 쓰이므로 반드시 IPv4** 여야 하지만,
+# SSH 로 그 IP 에 바로 붙을 수 있다는 보장은 없다 — 운영자는 보통 `~/.ssh/config` 별칭으로 접속하고
+# (IdentityFile·IdentitiesOnly·ProxyJump 가 거기 있다), 별칭 설정은 **이름으로 붙을 때만 적용된다.**
+# 실측: `ssh ubuntu@161.33.220.229` 는 `Permission denied (publickey)` 인데 `ssh rp-bridge` 는 된다.
+# 그래서 MIGRATE_OLD_SSH / MIGRATE_NEW_SSH 로 목적지를 따로 줄 수 있게 하고(값은 **그대로** 쓴다 —
+# 별칭이 User 를 이미 정하므로 `ubuntu@` 를 앞에 붙이면 오히려 깨진다), 미지정이면 `<user>@<ip>` 로 간다.
+#
+# Phase 0 이 이 값을 작업 디렉터리에 적어 두므로, 몇 달 뒤 `--rollback` 을 돌릴 때 env 를 다시 기억할
+# 필요가 없다.
+ssh_dest() {
+	local ip="$1" f
+	if [ -n "$NEW_IP" ] && [ "$ip" = "$NEW_IP" ]; then
+		if [ -n "${MIGRATE_NEW_SSH:-}" ]; then
+			printf '%s' "$MIGRATE_NEW_SSH"
+			return 0
+		fi
+		f="$WORKDIR/new-ssh"
+	else
+		if [ -n "${MIGRATE_OLD_SSH:-}" ]; then
+			printf '%s' "$MIGRATE_OLD_SSH"
+			return 0
+		fi
+		f="$WORKDIR/old-ssh"
+	fi
+	if [ -n "$WORKDIR" ] && [ -s "$f" ]; then
+		tr -d '[:space:]' < "$f"
+		return 0
+	fi
+	printf '%s@%s' "$SSH_USER" "$ip"
+}
+
 # `-n`(stdin 을 /dev/null 로) 이 기본인 이유: ssh 는 기본적으로 stdin 을 **읽어 원격으로 보낸다.** 그러면
 # 이 스크립트의 stdin 이 원격 명령에 먹혀 `read -r answer`(--decommission 의 확인 문구)가 즉시 EOF 를 받고,
 # 루프 안에서 부르면 그 루프의 입력까지 사라진다. 실제로 스트림을 보내야 하는 세 곳만 on_host_stdin 을 쓴다.
@@ -145,7 +178,7 @@ on_host() {
 	# SC2029: 클라이언트 쪽 확장이 **의도**다. 원격 명령 문자열은 여기(노트북)에서 $DOCKER_OLD·$REPO_DIR·
 	# 볼륨 이름 같은 로컬에서 판정한 값으로 조립한다 — 원격에는 그 변수가 존재하지 않는다.
 	# shellcheck disable=SC2029
-	ssh -n "${SSH_OPTS[@]}" "$SSH_USER@$host" "$@"
+	ssh -n "${SSH_OPTS[@]}" "$(ssh_dest "$host")" "$@"
 }
 
 # stdin 을 원격 명령에 그대로 흘려보낸다(.env·caddy-data·덤프 업로드 전용).
@@ -153,7 +186,7 @@ on_host_stdin() {
 	local host="$1"
 	shift
 	# shellcheck disable=SC2029
-	ssh "${SSH_OPTS[@]}" "$SSH_USER@$host" "$@"
+	ssh "${SSH_OPTS[@]}" "$(ssh_dest "$host")" "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -250,15 +283,17 @@ if [ "$MODE" = rollback ]; then
 	# 신규 호스트의 타이머를 **먼저** 끈다. 켜 둔 채로 두면 트래픽을 받지 않는 호스트의 정지된 DB 가 계속
 	# 오프사이트 버킷에 최신 타임스탬프로 올라간다 — 버킷의 "가장 최신 덤프" 가 버려진 호스트의 것이 되고
 	# `--verify-latest` 도 그것을 검증한다. Phase 5 의 "끄는 순서" 와 같은 사고를 방향만 바꿔 되풀이하는 것이다.
-	NEW_IP_RB="$(cat "$WORKDIR/new-ip" 2> /dev/null | tr -d '[:space:]' || true)"
-	if [ -n "$NEW_IP_RB" ]; then
-		step "신규 호스트 타이머 정지 ($NEW_IP_RB)"
-		NEW_TIMERS_RB="$(list_our_timers "$NEW_IP_RB")"
+	# NEW_IP 를 전역에 채운다 — ssh_dest 가 "신규 호스트인가" 를 이 값으로 판정한다(비워 두면 신규
+	# 호스트에 구 호스트의 SSH 목적지로 붙는다).
+	NEW_IP="$(tr -d '[:space:]' < "$WORKDIR/new-ip" 2> /dev/null || true)"
+	if [ -n "$NEW_IP" ]; then
+		step "신규 호스트 타이머 정지 ($NEW_IP)"
+		NEW_TIMERS_RB="$(list_our_timers "$NEW_IP")"
 		if [ -n "$NEW_TIMERS_RB" ]; then
 			printf '%s\n' "$NEW_TIMERS_RB" | sed 's/^/  /'
-			on_host "$NEW_IP_RB" "sudo systemctl disable --now $(printf '%s' "$NEW_TIMERS_RB" | tr '\n' ' ')" \
+			on_host "$NEW_IP" "sudo systemctl disable --now $(printf '%s' "$NEW_TIMERS_RB" | tr '\n' ' ')" \
 				|| die "신규 호스트 타이머 정지 실패 — 버려진 호스트가 버킷을 오염시킨다. 직접 확인한다"
-			[ -z "$(list_our_timers "$NEW_IP_RB")" ] || die "신규 호스트에 아직 도는 타이머가 있다"
+			[ -z "$(list_our_timers "$NEW_IP")" ] || die "신규 호스트에 아직 도는 타이머가 있다"
 		else
 			log "신규 호스트에 도는 타이머가 없다"
 		fi
@@ -366,6 +401,9 @@ valid_ipv4 "$OLD_IP" || die "구 호스트 IP 가 IPv4 로 보이지 않는다: 
 [ "$OLD_IP" != "$NEW_IP" ] || die "구 호스트와 신규 호스트가 같다 ($OLD_IP) — 이미 전환된 상태일 수 있다"
 printf '%s\n' "$OLD_IP" > "$WORKDIR/old-ip"
 printf '%s\n' "$NEW_IP" > "$WORKDIR/new-ip"
+# SSH 목적지를 남긴다 — 몇 달 뒤 --rollback 을 돌릴 때 MIGRATE_*_SSH 를 다시 기억하지 않아도 된다.
+printf '%s\n' "$(ssh_dest "$OLD_IP")" > "$WORKDIR/old-ssh"
+printf '%s\n' "$(ssh_dest "$NEW_IP")" > "$WORKDIR/new-ssh"
 
 log "구 호스트 $OLD_IP → 신규 호스트 $NEW_IP (작업 디렉터리 $WORKDIR)"
 
@@ -397,6 +435,15 @@ printf '  arch %s · mem %s · disk %s\n' "$NEW_ARCH" "$NEW_MEM" "$NEW_DISK"
 on_host "$NEW_IP" 'command -v git > /dev/null 2>&1' \
 	|| die "신규 호스트에 git 이 없다 — sudo apt-get install -y git 후 다시 실행한다"
 
+# Phase 2 의 `install-pull-deploy.sh`·`backup-offsite.sh --install` 과 Phase 5 의 `systemctl disable` 은
+# 비밀번호 없는 sudo 를 요구한다. 여기서 보지 않으면 **덤프를 뜨고 스택을 올린 뒤**(Phase 2 중반) 처음
+# 실패한다 — 되돌릴 것이 가장 많은 지점이다.
+for h in "$OLD_IP" "$NEW_IP"; do
+	on_host "$h" 'sudo -n true 2> /dev/null' \
+		|| die "$h 에서 비밀번호 없는 sudo 가 안 된다 — 타이머 설치·정지가 불가능하다"
+done
+log "양쪽 호스트 sudo 확인"
+
 # 아키텍처가 다르면 PGDATA 를 그대로 옮길 수 없다. 이 스크립트는 항상 논리 덤프를 쓰므로 문제가 없지만,
 # 손으로 볼륨을 복사하려는 유혹이 생기는 지점이라 명시적으로 남긴다.
 if [ "$OLD_ARCH" != "$NEW_ARCH" ]; then
@@ -412,7 +459,11 @@ fi
 if [ "$DRY_RUN" = true ]; then
 	step "--dry-run: 여기서 멈춘다 (아무것도 바꾸지 않았다)"
 	cat "$WORKDIR/plan.txt" | sed 's/^/  /'
-	printf '\n  이어서 실제 이전: %s --to %s --workdir %s\n' "$0" "$NEW_IP" "$WORKDIR"
+	# env 를 빼면 복붙한 명령이 IP 로 SSH 를 시도해 실패한다(별칭 설정이 적용되지 않는다).
+	ENV_HINT=""
+	[ -n "${MIGRATE_OLD_SSH:-}" ] && ENV_HINT="MIGRATE_OLD_SSH=$MIGRATE_OLD_SSH "
+	[ -n "${MIGRATE_NEW_SSH:-}" ] && ENV_HINT="${ENV_HINT}MIGRATE_NEW_SSH=$MIGRATE_NEW_SSH "
+	printf '\n  이어서 실제 이전: %s%s --to %s --workdir %s\n' "$ENV_HINT" "$0" "$NEW_IP" "$WORKDIR"
 	exit 0
 fi
 mark_done 0
