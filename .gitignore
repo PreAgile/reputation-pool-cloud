@@ -13,6 +13,9 @@ out/
 # 풀 기반 배포가 "끝까지 성공한 커밋" 을 적어 두는 표식(#15). 호스트마다 다르고 커밋 대상이 아니다.
 # git reset --hard 는 untracked 파일을 지우지 않으므로 배포를 거쳐도 남는다.
 .pull-deploy-state
+# 중복 실행 방지용 flock 대상(#167). /tmp 의 고정 이름은 다른 사용자가 선점해 배포를 조용히 멈출 수 있어
+# 체크아웃 안으로 옮겼다 — 그래서 여기에 생긴다.
+.pull-deploy.lock
 .claude/
 
 # 파이썬 바이트코드 — scripts/notify-mail.py 를 실행하거나 py_compile 하면 생긴다.
