@@ -26,8 +26,14 @@
 # ## 설정 (환경변수 또는 ~/.rp-backup.env)
 #   OFFSITE_BUCKET=rp-backups
 #   OFFSITE_PREFIX=db/
-#   OFFSITE_RETENTION_DAYS=30      # 원격 보존(서버 볼륨은 backup.sh 가 7일)
+#   OFFSITE_RETENTION_DAYS=30      # 원격 보존(서버 볼륨은 backup.sh 가 7일). env/ 는 대상 아님
 #   OFFSITE_VOLUME=               # 비우면 자동 탐색
+#   OFFSITE_ENV_CERT=/home/ubuntu/.rp-backup-cert.pem   # .env 를 암호화할 **공개** 인증서. 미설정이면 경고만
+#   OFFSITE_ENV_PREFIX=env/
+#
+# `.env`(DB 비밀번호·admin JWT·API 키)도 **인증서로 암호화해** 함께 올린다. DB 만 올려 두면 인스턴스가
+# 사라졌을 때 데이터는 있는데 열 열쇠가 없다. 개인키는 이 호스트에 두지 않는다 — 복호화는 운영자 노트북에서
+# 한다(§8-1 의 복원 절차). 그래서 이 호스트가 침해되어도 올린 시크릿을 되읽을 수 없다.
 #
 # 실패하면 메일로 알린다(`notify-mail.py`). 백업의 진짜 실패 모드는 "안 도는 것" 이 아니라 "안 도는데
 # 아무도 모르는 것" 이다.
@@ -238,8 +244,111 @@ done <<< "$local_list"
 log "업로드 $uploaded 건, 이미 있어 건너뜀 $skipped 건"
 
 # ---------------------------------------------------------------------------
+# .env 암호화 업로드
+# ---------------------------------------------------------------------------
+# DB 는 매일 여기로 올라가는데 `.env`(DB 비밀번호·admin JWT 시크릿·테넌트 API 키)는 **이 호스트에만**
+# 있다. 인스턴스가 유휴 회수되면(§10) 데이터는 남았는데 **열 열쇠가 없는** 상태가 되어 복원이 그 자리에서
+# 막힌다. 정식 해법은 시크릿 스토어(#6)지만 그때까지의 구멍이 너무 크다.
+#
+# **대칭 암호를 쓰지 않는다.** 복구 시나리오가 "이 호스트가 사라졌다" 이므로 복호화 수단이 이 호스트에
+# 있으면 백업이 아니다(암호를 여기 두면 침해 시 함께 털린다). 그래서 인증서(공개키)로만 암호화하고
+# 개인키는 운영자 노트북·비밀 관리자에 둔다 — 이 호스트는 **자기가 올린 것을 스스로 읽을 수 없다.**
+#
+# 도구는 openssl CMS(하이브리드: 랜덤 AES 키를 RSA 로 봉인)다. age·gpg 는 이 호스트도 운영자 맥도
+# 설치돼 있지 않았고(실측), openssl 은 양쪽 기본 설치라 새 의존성이 생기지 않는다. 대칭 키 봉인 방식이라
+# `.env` 크기 제한도 없다(RSA 직접 암호화는 키 길이에 묶인다).
+ENV_PREFIX="${OFFSITE_ENV_PREFIX:-env/}"
+ENV_CERT="${OFFSITE_ENV_CERT:-}"
+
+if [ -z "$ENV_CERT" ]; then
+	# 조용히 건너뛰지 않는다 — 이 스크립트가 막으려는 실패 형태가 정확히 "안 하는데 아무도 모르는 것" 이다.
+	log "warn: OFFSITE_ENV_CERT 미설정 — .env 가 오프사이트에 없다(인스턴스 소실 시 복원 불가). 설정법은 deployment.md §8-1"
+elif [ ! -f "$REPO_DIR/.env" ]; then
+	log "warn: $REPO_DIR/.env 가 없어 .env 백업을 건너뛴다"
+else
+	[ -f "$ENV_CERT" ] || die "OFFSITE_ENV_CERT 가 가리키는 인증서가 없다: $ENV_CERT"
+	command -v openssl > /dev/null 2>&1 || die "openssl 이 없다 — .env 를 평문으로 올리는 대신 실패한다"
+
+	# 이름에 내용 해시를 넣는다. `.env` 는 거의 바뀌지 않으므로 **서로 다른 내용당 객체 하나**만 쌓이고,
+	# 같은 내용을 매일 다시 올리지 않는다(원격 크기 비교 한 번으로 끝난다). openssl dgst 를 쓰는 이유는
+	# sha256sum 이 macOS 에 없어서다 — 이 스크립트를 노트북에서 손으로 돌릴 때도 같은 이름이 나와야 한다.
+	env_hash="$(openssl dgst -sha256 "$REPO_DIR/.env" | awk '{print $NF}' | cut -c1-12)"
+	env_object="${ENV_PREFIX}env_${env_hash}.cms"
+
+	tmp_env="$(mktemp)"
+	openssl smime -encrypt -aes-256-cbc -binary -outform DER \
+		-in "$REPO_DIR/.env" -out "$tmp_env" "$ENV_CERT" \
+		|| { rm -f "$tmp_env"; die ".env 암호화 실패 (인증서를 확인한다: $ENV_CERT)"; }
+
+	# 평문이 그대로 올라가는 사고를 막는 마지막 관문. 이 검사가 없으면 openssl 이 버전·옵션 차이로 다른
+	# 것을 내놨을 때 **시크릿을 평문으로 버킷에 올리게 된다.**
+	#
+	# **접두어 바이트가 아니라 DER 전체를 파싱한다.** OID 바이트열(`06092a864886f70d010703`)은 최상위
+	# 콘텐츠 타입만 나타내므로, 앞부분만 보면 뒤가 잘린 파일도 통과한다(실측: 앞 200바이트만 남긴 파일이
+	# 접두어 검사를 통과했고 전체 파싱에서만 걸렸다). `cms -cmsout` 은 구조를 끝까지 읽으므로 잘린 파일이
+	# 거부되고, 최상위 타입이 envelopedData 인지까지 확인한다.
+	assert_cms_enveloped() {
+		local f="$1" what="$2"
+		openssl cms -inform DER -cmsout -noout -in "$f" > /dev/null 2>&1 \
+			|| { log "error: $what — CMS DER 로 파싱되지 않는다(잘렸거나 다른 형식)"; return 1; }
+		openssl cms -inform DER -cmsout -print -in "$f" 2> /dev/null \
+			| grep -q 'pkcs7-envelopedData' \
+			|| { log "error: $what — 최상위 콘텐츠 타입이 envelopedData 가 아니다"; return 1; }
+		return 0
+	}
+	assert_cms_enveloped "$tmp_env" "암호화 결과" \
+		|| { rm -f "$tmp_env"; die "암호화 결과가 CMS envelopedData 가 아니다 — 업로드하지 않는다"; }
+
+	env_size="$(wc -c < "$tmp_env" | tr -d ' ')"
+	env_remote="$(oci os object head --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
+		--name "$env_object" --query '"content-length"' --raw-output 2> /dev/null || true)"
+
+	# `env/latest` 포인터를 **업로드했든 이미 있었든 항상** 갱신한다.
+	#
+	# 이름에 내용 해시를 쓰기 때문에 `.env` 가 A → B → A 로 되돌아가면 A 객체는 이미 있어 건너뛰는데
+	# 그 객체의 생성 시각은 과거다. 그러면 "시각순 최신" 은 여전히 B 이고, `--verify-latest` 와 복원 절차가
+	# **현재 설정이 아닌 옛 설정을 최신 백업으로 취급한다.** 포인터가 그 함정을 없앤다.
+	write_env_pointer() {
+		local ptr
+		ptr="$(mktemp)"
+		printf '%s\n' "$env_object" > "$ptr"
+		if oci os object put --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
+			--name "${ENV_PREFIX}latest" --file "$ptr" --force > /dev/null 2>&1; then
+			rm -f "$ptr"
+			log ".env 포인터 갱신: ${ENV_PREFIX}latest -> $env_object"
+		else
+			rm -f "$ptr"
+			# 포인터 실패는 백업 자체를 무효화하지 않지만(객체는 올라갔다) 복원이 옛 것을 고를 수 있으므로
+			# 알린다.
+			die ".env 포인터 갱신 실패 — 복원이 옛 백업을 고를 수 있다 (${ENV_PREFIX}latest)"
+		fi
+	}
+
+	if [ "$env_remote" = "$env_size" ]; then
+		log ".env 백업 최신 — 업로드 건너뜀 ($env_object)"
+		[ "$DRY_RUN" = true ] || write_env_pointer
+	elif [ "$DRY_RUN" = true ]; then
+		log "[dry-run] .env 업로드했을 것: $env_object ($env_size bytes)"
+	else
+		oci os object put --namespace "$NAMESPACE" --bucket-name "$BUCKET" --name "$env_object" \
+			--file "$tmp_env" --force > /dev/null 2>&1 || { rm -f "$tmp_env"; die ".env 업로드 실패: $env_object"; }
+		env_head="$(oci os object head --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
+			--name "$env_object" --query '"content-length"' --raw-output 2> /dev/null || true)"
+		[ "$env_head" = "$env_size" ] \
+			|| die ".env 업로드 검증 실패: $env_object (기대 $env_size, 원격 ${env_head:-없음})"
+		log ".env 업로드 완료: $env_object ($env_size bytes, CMS)"
+		write_env_pointer
+	fi
+	rm -f "$tmp_env"
+fi
+
+
+# ---------------------------------------------------------------------------
 # 원격 보존기간 정리
 # ---------------------------------------------------------------------------
+# 조회를 `--prefix "$PREFIX"`(db/) 로 좁히므로 `env/` 는 **정리 대상이 아니다.** 의도된 것이다 — `.env` 는
+# 몇 달씩 그대로일 수 있고, 나이로 지우면 **유일한 시크릿 사본이 만료되어 사라진다.** env/ 는 내용 해시로
+# 이름을 만들어 서로 다른 내용당 하나씩만 쌓이므로 무한히 늘지 않는다.
 if [ "$RETENTION_DAYS" -gt 0 ]; then
 	stale="$(printf '%s' "$remote_list" | python3 -c "
 import datetime, json, sys
@@ -293,6 +402,41 @@ if [ "$VERIFY_LATEST" = true ]; then
 		log "무결성 확인: $latest — pg_restore 가 읽을 수 있다 (TOC $(grep -c . "$tmpd/toc") 줄)"
 	else
 		die "무결성 확인 실패: $latest — pg_restore 가 읽지 못한다"
+	fi
+
+	# .env 백업도 함께 본다. **복호화는 하지 않는다** — 개인키가 이 호스트에 없는 것이 설계이고, 여기서
+	# 복호화할 수 있다면 그 자체가 결함이다. 그래서 "CMS envelopedData 인지" 와 "비어 있지 않은지" 만 본다
+	# (평문이 올라갔거나 잘린 파일은 이 검사에서 걸린다). 실제 복호화 리허설은 노트북에서 §8-1 절차로 한다.
+	# **시각순 최신이 아니라 `env/latest` 포인터를 읽는다.** 이름에 내용 해시를 쓰므로 `.env` 가
+	# A → B → A 로 되돌아가면 A 객체의 생성 시각은 과거이고, 시각순 최신은 여전히 B 다 — 그걸 검증하면
+	# **현재 설정이 아닌 옛 설정을 "최신 백업" 으로 확인해 주는** 셈이 된다.
+	env_prefix_v="${OFFSITE_ENV_PREFIX:-env/}"
+	env_latest=""
+	if oci os object get --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
+		--name "${env_prefix_v}latest" --file "$tmpd/latest" > /dev/null 2>&1; then
+		env_latest="$(tr -d '[:space:]' < "$tmpd/latest")"
+	else
+		# 포인터를 쓰기 전에 올린 백업이 있을 수 있다 — 시각순으로 떨어지되 그 사실을 알린다.
+		env_latest="$(oci os object list --namespace "$NAMESPACE" --bucket-name "$BUCKET" \
+			--prefix "$env_prefix_v" --all \
+			--query 'sort_by(data[], &"time-created")[-1].name' --raw-output 2> /dev/null || true)"
+		[ -z "$env_latest" ] || [ "$env_latest" = null ] \
+			|| log "warn: ${env_prefix_v}latest 포인터가 없어 시각순으로 골랐다 — 내용이 되돌아간 경우 옛 백업일 수 있다"
+	fi
+
+	if [ -z "$env_latest" ] || [ "$env_latest" = null ]; then
+		log "warn: 원격에 .env 백업이 없다 — 인스턴스 소실 시 복원 불가 (OFFSITE_ENV_CERT 설정 확인)"
+	else
+		oci os object get --namespace "$NAMESPACE" --bucket-name "$BUCKET" --name "$env_latest" \
+			--file "$tmpd/env.cms" > /dev/null 2>&1 || die ".env 백업 다운로드 실패: $env_latest"
+		[ -s "$tmpd/env.cms" ] || die ".env 백업이 비어 있다: $env_latest"
+		# 업로드 측과 같은 이유로 DER 전체를 파싱한다 — 접두어만 보면 뒤가 잘린 파일이 통과한다.
+		openssl cms -inform DER -cmsout -noout -in "$tmpd/env.cms" > /dev/null 2>&1 \
+			|| die ".env 백업이 CMS DER 로 파싱되지 않는다(잘렸거나 손상): $env_latest"
+		openssl cms -inform DER -cmsout -print -in "$tmpd/env.cms" 2> /dev/null \
+			| grep -q 'pkcs7-envelopedData' \
+			|| die ".env 백업의 최상위 타입이 envelopedData 가 아니다 — 평문이 올라갔을 수 있다: $env_latest"
+		log "무결성 확인: $env_latest — CMS envelopedData ($(wc -c < "$tmpd/env.cms" | tr -d ' ') bytes)"
 	fi
 fi
 
