@@ -8,9 +8,10 @@
 # ## 왜 필요한가
 # 지금 프로덕션은 크레딧으로 도는 x86 이고 `a1-hunter.service` 가 Always Free A1 을 24시간 사냥한다.
 # 용량이 열리는 순간은 예측할 수 없으므로, 그때 손으로 옮기면 **현재 호스트의 드리프트가 그대로
-# 복제된다**(실측: `.env` 에 PULL_DEPLOY_ENABLED=true 인데 `rp-pull-deploy.timer` 가 설치돼 있지 않아
-# 도는 이미지가 레포 HEAD 보다 한 커밋 낡았다). 그래서 이전은 "문서를 따라가는 수작업" 이 아니라
-# **호스트의 성질까지 복원하는 스크립트**여야 한다.
+# 복제된다**(실측 2026-08-05: 자동 배포 타이머는 설치돼 있었지만 `/tmp` 의 root 소유 잠금 파일 때문에
+# 5분마다 발화해 5분마다 죽고 있었고, 그 상태가 21시간 이어져 도는 이미지가 레포 HEAD 보다 뒤처져
+# 있었다. 실패는 journal 에만 남아 아무도 보지 않았다). 그래서 이전은 "문서를 따라가는 수작업" 이 아니라
+# **호스트의 성질까지 복원하고, 복원됐는지 확인하는 스크립트**여야 한다.
 #
 # ## 순서 원칙 — 되돌릴 수 없는 일을 마지막에
 #   Phase 0  사전 점검      아무것도 바꾸지 않는다 (--dry-run 은 여기서 끝난다)
@@ -234,7 +235,20 @@ if [ "$MODE" = rollback ]; then
 	# bootstrap.sh 는 멱등이라 재실행이 곧 재배포다. 컨테이너를 개별로 start 하지 않는 이유:
 	# Phase 5 이후 이미지·설정이 바뀌었을 수 있고, 그 경우 stale 한 조합으로 뜬다.
 	on_host "$OLD_IP" "cd $REPO_DIR && ./scripts/bootstrap.sh" || die "구 호스트 bootstrap 실패 — 수동 개입이 필요하다"
-	on_host "$OLD_IP" 'sudo systemctl enable --now rp-pull-deploy.timer rp-backup-offsite.timer 2>/dev/null || true'
+
+	# Phase 5 가 실제로 끈 유닛만 정확히 되살린다. 이름을 박아 두면(호스트마다 다를 수 있다) 조용히
+	# 아무것도 켜지 않고 "롤백 완료" 로 끝난다 — 자동 배포·백업이 죽은 채 남는 것이 최악이다.
+	if [ -s "$WORKDIR/old-timers.txt" ]; then
+		log "타이머 재활성"
+		while read -r unit; do
+			[ -n "$unit" ] || continue
+			on_host "$OLD_IP" "sudo systemctl enable --now $unit" \
+				|| log "warn: $unit 재활성 실패 — 직접 확인한다"
+			printf '  %s\n' "$unit"
+		done < "$WORKDIR/old-timers.txt"
+	else
+		log "warn: $WORKDIR/old-timers.txt 가 없다 — 타이머 상태를 직접 확인한다 (systemctl list-timers)"
+	fi
 
 	if [ -f "$SNAP" ]; then
 		step "DNS 복원 ($SNAP)"
@@ -573,8 +587,35 @@ else
 
 	# 타이머를 **먼저** 끈다. 순서를 바꾸면 구 호스트가 계속 배포를 시도하고 오프사이트 버킷에 옛 데이터를
 	# 최신 이름으로 올린다.
+	#
+	# 유닛 이름을 박아 두지 않고 **실제로 도는 것을 열거해서** 끈다. `install-pull-deploy.sh` 는 유닛을
+	# 커밋해 두지 않고 생성하므로(§7-1) 이름이 문서와 어긋날 수 있고, 틀린 이름으로 `disable` 하면
+	# systemctl 이 실패하는데 `|| true` 로 삼키면 **끈 줄 알고 넘어간다** — 이 스크립트를 쓰면서 실제로
+	# 그랬다(실제 이름은 `rp-pull-deploy` 가 아니라 `reputation-pool-deploy` 였다). 그래서 끈 뒤에
+	# 남은 것이 없는지 다시 확인한다.
 	log "타이머 정지"
-	on_host "$OLD_IP" 'sudo systemctl disable --now rp-pull-deploy.timer rp-backup-offsite.timer a1-hunter.service 2>/dev/null || true'
+	list_our_timers() {
+		on_host "$OLD_IP" 'systemctl list-units --type=timer --state=active --no-legend --plain' \
+			| awk '{print $1}' | grep -E '^(reputation-pool|rp-)' || true
+	}
+	OLD_TIMERS="$(list_our_timers)"
+	if [ -n "$OLD_TIMERS" ]; then
+		printf '%s\n' "$OLD_TIMERS" | sed 's/^/  /'
+		# 되돌릴 때 정확히 이것만 다시 켠다(--rollback 이 이 파일을 읽는다).
+		printf '%s\n' "$OLD_TIMERS" > "$WORKDIR/old-timers.txt"
+		# 원격 명령은 한 덩어리 문자열이므로 유닛 목록을 한 줄로 편다(로컬 word splitting 과 무관하다).
+		UNITS_INLINE="$(printf '%s' "$OLD_TIMERS" | tr '\n' ' ')"
+		on_host "$OLD_IP" "sudo systemctl disable --now $UNITS_INLINE" \
+			|| die "타이머 정지 실패 — 구 호스트가 계속 배포·백업을 시도한다"
+	else
+		log "정지할 타이머가 없다"
+	fi
+	LEFT_TIMERS="$(list_our_timers)"
+	[ -z "$LEFT_TIMERS" ] || die "아직 도는 타이머가 있다: $LEFT_TIMERS"
+
+	# a1-hunter 는 타이머가 아니라 상시 서비스다(Restart=always). 없는 호스트도 있으므로 실패는 넘긴다 —
+	# 이쪽은 버킷·배포를 건드리지 않아 남아 있어도 데이터를 오염시키지 않는다.
+	on_host "$OLD_IP" 'sudo systemctl disable --now a1-hunter.service 2> /dev/null || true'
 
 	log "컨테이너 정지 (볼륨·데이터는 보존)"
 	on_host "$OLD_IP" "$DOCKER_OLD ps --filter name=reputation-pool- --format '{{.Names}}' | xargs -r $DOCKER_OLD stop" \
