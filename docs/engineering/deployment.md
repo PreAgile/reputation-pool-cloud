@@ -595,6 +595,66 @@ Allow dynamic-group rp-prod-host to inspect buckets in tenancy
 **실패하면 메일이 온다**(`notify-mail.py`). 백업의 진짜 실패 모드는 "안 도는 것"이 아니라 *"안 도는데
 아무도 모르는 것"*이다.
 
+#### `.env` 도 함께 올린다 — 시크릿이 단일 실패점이기 때문
+
+DB 만 올려 두면 인스턴스가 사라졌을 때 **데이터는 있는데 열 열쇠가 없다.** `.env` 에는 DB 비밀번호·admin
+JWT 시크릿·테넌트 API 키가 있고 git 밖·그 호스트에만 존재한다. 정식 해법은 시크릿 스토어(#6)지만 그때까지
+구멍이 너무 크므로, `.env` 를 **인증서로 암호화해** 같은 버킷의 `env/` 접두어로 올린다.
+
+**대칭 암호를 쓰지 않는다.** 복구 시나리오가 "이 호스트가 사라졌다" 이므로 복호화 수단이 이 호스트에 있으면
+백업이 아니다(침해 시 함께 털린다). 공개 인증서로만 암호화하고 **개인키는 운영자 노트북·비밀 관리자에**
+둔다 — 이 호스트는 자기가 올린 것을 스스로 읽을 수 없다. 도구는 openssl CMS(랜덤 AES 키를 RSA 로 봉인하는
+하이브리드)다. age·gpg 는 서버에도 운영자 맥에도 없었고 openssl 은 양쪽 기본 설치라 새 의존성이 없다.
+
+준비 (한 번, **노트북에서**):
+
+```bash
+# 1. 키페어 생성 — 개인키는 절대 서버로 보내지 않는다
+openssl req -x509 -newkey rsa:4096 -sha256 -days 7300 -nodes \
+  -keyout ~/.config/poolroost/rp-backup.key -out ~/.config/poolroost/rp-backup-cert.pem \
+  -subj "/CN=reputation-pool offsite env backup"
+chmod 600 ~/.config/poolroost/rp-backup.key
+
+# 2. 인증서(공개)만 서버로
+ssh <서버> 'cat > ~/.rp-backup-cert.pem' < ~/.config/poolroost/rp-backup-cert.pem
+
+# 3. 서버 설정
+ssh <서버> 'echo OFFSITE_ENV_CERT=$HOME/.rp-backup-cert.pem >> ~/.rp-backup.env'
+```
+
+> 개인키를 잃으면 올려 둔 시크릿을 **영구히 못 읽는다.** 비밀 관리자에 함께 보관한다.
+> `OFFSITE_ENV_CERT` 를 설정하지 않으면 스크립트가 매 실행마다 경고를 남긴다(조용히 건너뛰지 않는다).
+
+객체 이름은 `env/env_<평문 sha256 앞 12자>.cms` 다. `.env` 는 거의 바뀌지 않으므로 **서로 다른 내용당
+객체 하나**만 쌓이고 같은 내용을 매일 다시 올리지 않는다. 그리고 **보존기간 정리는 `env/` 를 건드리지
+않는다** — 나이로 지우면 몇 달 그대로인 `.env` 의 유일한 사본이 만료되어 사라진다.
+
+`--verify-latest` 는 `.env` 백업도 확인하지만 **복호화하지는 않는다**(개인키가 여기 없는 것이 설계이고,
+여기서 복호화된다면 그 자체가 결함이다). CMS envelopedData 인지와 비어 있지 않은지만 본다 — 평문이
+올라갔거나 잘린 파일은 여기서 걸린다.
+
+#### 시크릿 복원 (노트북에서)
+
+```bash
+# 1. 최신 .env 객체 이름 확인
+oci os object list --namespace <ns> --bucket-name rp-backups --prefix env/
+# 2. 내려받아 개인키로 복호화
+oci os object get --namespace <ns> --bucket-name rp-backups --name env/env_<hash>.cms --file /tmp/e.cms
+openssl smime -decrypt -inform DER -inkey ~/.config/poolroost/rp-backup.key -in /tmp/e.cms > .env
+# 3. 확인 — 해시 앞 12자가 객체 이름과 같아야 한다
+openssl dgst -sha256 .env | awk '{print $NF}' | cut -c1-12
+```
+
+2026-08-05 실제로 왕복을 한 번 통과시켰다(업로드 → 다운로드 → 노트북 개인키로 복호화 → 해시 일치,
+시크릿 15개 복원). "복원해본 적 없는 백업은 백업이 아니다" 를 이 경로에도 적용한 것이다.
+
+> ⚠️ **손으로 이 스크립트를 돌릴 때**는 systemd 유닛이 주는 환경이 없다. `PATH` 에 `~/bin`(oci CLI)이
+> 없거나 `OCI_CLI_AUTH=instance_principal` 이 없으면 OCI CLI 가 **설정 파일을 만들지 물어보며 멈춘다**
+> (BatchMode SSH 에서는 그대로 걸린 것처럼 보인다):
+> ```bash
+> export PATH=$HOME/bin:$PATH OCI_CLI_AUTH=instance_principal
+> ```
+
 #### 복원
 
 ```bash

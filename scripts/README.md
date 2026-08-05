@@ -41,6 +41,10 @@
   개별 부품(`bootstrap.sh`·`restore.sh`·`cf-dns.sh`·`install-*`)을 부르므로 그 스크립트들이 하는 일을
   다시 구현하지 않는다 — 이 스크립트가 더하는 것은 **순서·전환 전 검증·되돌릴 근거**다.
 - `backup.sh` / `restore.sh` — 아래.
+- `backup-offsite.sh` 는 DB 덤프 외에 **`.env` 를 인증서로 암호화해** 같은 버킷의 `env/` 로 올린다.
+  DB 만 올려 두면 인스턴스 소실 시 데이터는 있는데 열 열쇠가 없다. 개인키는 **호스트에 두지 않는다** —
+  이 호스트는 자기가 올린 시크릿을 스스로 읽을 수 없다. 준비·복원 절차는
+  [`deployment.md` §8-1](../docs/engineering/deployment.md).
 - `dev-seed.sql` — 로컬 개발용 시드.
 
 ## DB 백업 / 복원
