@@ -690,6 +690,18 @@ export CF_API_TOKEN=…      # poolroost.com zone 한정 Zone:DNS:Edit. 또는 ~
 ./scripts/migrate-host.sh --to <신규IP>               # Phase 0~5
 ```
 
+**SSH 로 IP 에 바로 붙지 못하는 경우**(대개 그렇다 — `~/.ssh/config` 별칭에 `IdentityFile`·
+`IdentitiesOnly`·`ProxyJump` 가 있고, 그 설정은 **이름으로 붙을 때만** 적용된다) 목적지를 따로 준다.
+IP 는 DNS 레코드와 `curl --resolve` 에 쓰이므로 여전히 IPv4 여야 한다:
+
+```bash
+MIGRATE_OLD_SSH=rp-bridge MIGRATE_NEW_SSH=<신규별칭> \
+  ./scripts/migrate-host.sh --to <신규IP> --dry-run
+```
+
+Phase 0 이 이 값을 작업 디렉터리(`old-ssh`/`new-ssh`)에 적어 두므로, 나중에 `--rollback` 을 돌릴 때는
+env 를 다시 주지 않아도 된다.
+
 단계마다 마커를 남기므로 **중간에 끊기면 같은 작업 디렉터리로 재실행하면 이어서 진행**한다:
 
 ```bash
