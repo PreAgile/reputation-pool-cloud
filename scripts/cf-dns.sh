@@ -261,16 +261,27 @@ API="https://api.cloudflare.com/client/v4"
 
 # 성공 판정을 HTTP 코드가 아니라 응답의 `success` 로 한다 — Cloudflare 는 권한 부족 등을
 # 200 + success:false 로 주는 경우가 있어 `curl -f` 만으로는 조용히 통과한다.
+#
+# API_SOFT=true 면 die 하지 않고 non-zero 를 돌려준다. 전환 루프에서 **부분 전환을 되돌리기 위해** 필요하다
+# — 첫 레코드는 바뀌고 두 번째가 실패했는데 그대로 죽으면 zone 이 반쯤 옮겨진 채 남는다.
+API_SOFT=false
 api() {
 	local method="$1" path="$2" body="${3:-}" out
 	if [ -n "$body" ]; then
-		out="$(curl --config "$CURL_CFG" -X "$method" --data "$body" "$API$path")" \
-			|| die "API 호출 실패: $method $path"
+		if ! out="$(curl --config "$CURL_CFG" -X "$method" --data "$body" "$API$path")"; then
+			if [ "$API_SOFT" = true ]; then return 1; fi
+			die "API 호출 실패: $method $path"
+		fi
 	else
-		out="$(curl --config "$CURL_CFG" -X "$method" "$API$path")" \
-			|| die "API 호출 실패: $method $path"
+		if ! out="$(curl --config "$CURL_CFG" -X "$method" "$API$path")"; then
+			if [ "$API_SOFT" = true ]; then return 1; fi
+			die "API 호출 실패: $method $path"
+		fi
 	fi
-	printf '%s' "$out" | python3 -c "$PY_ASSERT_SUCCESS" || die "Cloudflare 가 실패를 반환했다: $method $path"
+	if ! printf '%s' "$out" | python3 -c "$PY_ASSERT_SUCCESS"; then
+		if [ "$API_SOFT" = true ]; then return 1; fi
+		die "Cloudflare 가 실패를 반환했다: $method $path"
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -342,19 +353,44 @@ if [ "$MODE" = switch ]; then
 	fi
 
 	# 스냅샷을 **바꾸기 전에** 남긴다. 이것이 롤백의 유일한 근거다 — 전환 후에 조회해서 만들면 이미 새 값이다.
-	printf '%s' "$TARGETS" \
-		| python3 -c 'import json,sys; json.dump(json.load(sys.stdin), sys.stdout, indent=2, ensure_ascii=False)' \
-			> "$TMP_JSON"
-	cp "$TMP_JSON" "$SNAPSHOT"
-	log "스냅샷 저장: $SNAPSHOT (롤백 근거 — 지우지 않는다)"
+	#
+	# ⛔ 이미 있으면 **덮어쓰지 않는다.** 부분 전환(app 은 PATCH 성공, grpc 는 실패) 뒤 같은 스냅샷 경로로
+	# 재실행하면 TARGETS 에는 아직 구 IP 인 레코드만 들어오는데, 그것으로 덮어쓰면 **먼저 옮겨진 레코드를
+	# 되돌릴 근거가 사라진다** — 그 상태에서 --restore 는 app 을 복원하지 못하고 app 과 grpc 가 서로 다른
+	# 호스트를 가리킨 채 남는다. Cloudflare API 의 일시적 실패 한 번으로 롤백 근거가 손상되면 안 된다.
+	if [ -s "$SNAPSHOT" ]; then
+		log "기존 스냅샷 보존: $SNAPSHOT (부분 전환 재개로 본다 — 덮어쓰지 않는다)"
+	else
+		printf '%s' "$TARGETS" \
+			| python3 -c 'import json,sys; json.dump(json.load(sys.stdin), sys.stdout, indent=2, ensure_ascii=False)' \
+				> "$TMP_JSON"
+		cp "$TMP_JSON" "$SNAPSHOT"
+		log "스냅샷 저장: $SNAPSHOT (롤백 근거 — 지우지 않는다)"
+	fi
 
 	log "전환 $OLD_IP -> $NEW_IP"
+	# 도중에 실패하면 **즉시 최초 스냅샷으로 되돌린 뒤** 실패로 끝낸다. 반쯤 옮겨진 zone 을 남기지 않는다.
+	# 복원은 검증된 경로를 그대로 재사용한다(자기 자신을 --restore 로 부른다).
+	API_SOFT=true
+	SWITCH_FAILED=""
 	while read -r rid rname rproxied; do
 		[ -n "$rid" ] || continue
-		api PATCH "/zones/$ZONE_ID/dns_records/$rid" \
-			"$(printf '{"content":"%s","proxied":%s}' "$NEW_IP" "$rproxied")" > /dev/null
-		printf '  %-28s -> %s (proxied=%s)\n' "$rname" "$NEW_IP" "$rproxied"
+		if api PATCH "/zones/$ZONE_ID/dns_records/$rid" \
+			"$(printf '{"content":"%s","proxied":%s}' "$NEW_IP" "$rproxied")" > /dev/null; then
+			printf '  %-28s -> %s (proxied=%s)\n' "$rname" "$NEW_IP" "$rproxied"
+		else
+			SWITCH_FAILED="$rname"
+			break
+		fi
 	done <<< "$(printf '%s' "$TARGETS" | python3 -c "$PY_TARGETS_FIELDS")"
+	API_SOFT=false
+
+	if [ -n "$SWITCH_FAILED" ]; then
+		log "PATCH 실패($SWITCH_FAILED) — 최초 스냅샷으로 되돌린다"
+		"$0" --restore "$SNAPSHOT" \
+			|| die "되돌리기까지 실패했다 — zone 이 부분 전환 상태다. 즉시 확인: $SNAPSHOT"
+		die "전환에 실패해 원상 복구했다 ($SWITCH_FAILED)"
+	fi
 
 	# 적용 후 실물을 다시 읽어 확인한다. PATCH 가 200 이라는 말과 레코드가 실제로 그 값이라는 말은 다르다.
 	LEFT="$(api GET "/zones/$ZONE_ID/dns_records?type=A&per_page=100" \

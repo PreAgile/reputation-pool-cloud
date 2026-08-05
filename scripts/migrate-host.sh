@@ -203,6 +203,26 @@ resolve_docker() {
 	fi
 }
 
+# 그 호스트에서 **실제로 도는** 우리 타이머를 열거한다. 유닛 이름을 박지 않는 이유: `install-*.sh` 가
+# 유닛을 커밋하지 않고 생성하므로 이름이 문서와 어긋날 수 있고(실제 이름은 `rp-pull-deploy` 가 아니라
+# `reputation-pool-deploy` 였다), 틀린 이름으로 `disable` 하면 실패하는데 그것을 삼키면 껐다고 착각한다.
+list_our_timers() {
+	on_host "$1" 'systemctl list-units --type=timer --state=active --no-legend --plain' \
+		| awk '{print $1}' | grep -E '^(reputation-pool|rp-)' || true
+}
+
+# 자동 배포·오프사이트 백업 타이머가 **둘 다 실제로 도는지** 본다. 이름 전체를 맞추는 대신 관측된 유닛
+# 목록에서 찾는다. 이 검증이 없으면 "이전은 성공했는데 새 호스트에 배포도 백업도 없는" 상태가 만들어진다.
+assert_ops_timers() {
+	local host="$1" label="$2" timers
+	timers="$(list_our_timers "$host")"
+	printf '%s\n' "$timers" | sed 's/^/    /'
+	printf '%s' "$timers" | grep -q 'deploy' \
+		|| die "$label 에 자동 배포 타이머가 돌지 않는다 — install-pull-deploy.sh 를 확인한다"
+	printf '%s' "$timers" | grep -q 'backup-offsite' \
+		|| die "$label 에 오프사이트 백업 타이머가 돌지 않는다 — backup-offsite.sh --install 을 확인한다"
+}
+
 # 볼륨 이름에는 compose 프로젝트 접두어가 붙는다(호스트마다 다를 수 있다). 접미로 찾는다 —
 # 박아 두면 다른 호스트에서 조용히 빈 볼륨을 만진다(backup-offsite.sh 와 같은 이유).
 find_volume() {
@@ -226,6 +246,23 @@ if [ "$MODE" = rollback ]; then
 	SNAP="$WORKDIR/dns-before.json"
 	OLD_IP="$(cat "$WORKDIR/old-ip" 2> /dev/null || true)"
 	[ -n "$OLD_IP" ] || die "$WORKDIR/old-ip 가 없다 — 이 디렉터리가 이전 작업의 것인지 확인한다"
+
+	# 신규 호스트의 타이머를 **먼저** 끈다. 켜 둔 채로 두면 트래픽을 받지 않는 호스트의 정지된 DB 가 계속
+	# 오프사이트 버킷에 최신 타임스탬프로 올라간다 — 버킷의 "가장 최신 덤프" 가 버려진 호스트의 것이 되고
+	# `--verify-latest` 도 그것을 검증한다. Phase 5 의 "끄는 순서" 와 같은 사고를 방향만 바꿔 되풀이하는 것이다.
+	NEW_IP_RB="$(cat "$WORKDIR/new-ip" 2> /dev/null | tr -d '[:space:]' || true)"
+	if [ -n "$NEW_IP_RB" ]; then
+		step "신규 호스트 타이머 정지 ($NEW_IP_RB)"
+		NEW_TIMERS_RB="$(list_our_timers "$NEW_IP_RB")"
+		if [ -n "$NEW_TIMERS_RB" ]; then
+			printf '%s\n' "$NEW_TIMERS_RB" | sed 's/^/  /'
+			on_host "$NEW_IP_RB" "sudo systemctl disable --now $(printf '%s' "$NEW_TIMERS_RB" | tr '\n' ' ')" \
+				|| die "신규 호스트 타이머 정지 실패 — 버려진 호스트가 버킷을 오염시킨다. 직접 확인한다"
+			[ -z "$(list_our_timers "$NEW_IP_RB")" ] || die "신규 호스트에 아직 도는 타이머가 있다"
+		else
+			log "신규 호스트에 도는 타이머가 없다"
+		fi
+	fi
 
 	step "구 호스트 재기동 ($OLD_IP)"
 	# bootstrap 을 부르기 전에 docker 도달성을 먼저 확인한다 — SSH 는 되는데 docker 권한이 없는 상태에서
@@ -267,8 +304,11 @@ if [ "$MODE" = rollback ]; then
 		sleep 5
 	done
 
-	rm -f "$WORKDIR/state/phase4.ok" "$WORKDIR/state/phase5.ok"
-	log "롤백 완료 — 구 호스트로 되돌렸다. 신규 호스트는 그대로 남아 있다(다시 시도 가능)"
+	# 반출·기동·검증 마커까지 **모두** 무효화한다. 롤백으로 구 호스트가 다시 쓰기를 받으므로 기존 덤프는
+	# 그 순간 낡는다. phase1~3 을 남기면 재시도가 덤프 생성과 행수 대조를 건너뛰고 곧장 Phase 4 로 가서
+	# **롤백 기간에 들어온 데이터가 빠진 채 DNS 를 전환**한다 — 검증도 건너뛰므로 유실을 감지할 수단이 없다.
+	rm -f "$WORKDIR"/state/phase[1-5].ok
+	log "롤백 완료 — 구 호스트로 되돌렸다. 재시도는 Phase 1 부터 다시 진행한다(덤프를 새로 뜬다)"
 	exit 0
 fi
 
@@ -494,13 +534,22 @@ else
 	on_host "$NEW_IP" "$DOCKER_NEW exec reputation-pool-backup /usr/local/bin/restore.sh /backups/$DUMP_NAME" \
 		| sed 's/^/  /' || die "DB 복원 실패"
 
-	# 호스트의 성질까지 복원한다. 이 단계를 빼면 지금 구 호스트에 있는 것과 똑같은 드리프트가
-	# (선언은 켜져 있는데 타이머가 없는 상태) 새 호스트에 재생산된다.
+	# 호스트의 성질까지 복원한다. 이 단계를 빼면 구 호스트에 있던 것과 똑같은 드리프트가(선언은 켜져
+	# 있는데 실제로 도는 타이머가 없는 상태) 새 호스트에 재생산된다.
+	#
+	# **실패를 삼키지 않는다.** 경고만 남기고 phase2.ok 를 기록하면, Phase 5 가 구 호스트에서 실제로 돌던
+	# 배포·백업 타이머를 끄므로 **어느 호스트에도 자동 배포와 오프사이트 백업이 없는** 상태가 "이전 성공"
+	# 으로 끝난다. 게다가 재실행도 마커 때문에 설치를 다시 시도하지 않는다.
+	# `--install` 은 유닛을 쓰고 enable 하는 일만 하고 OCI 접근 전에 종료하므로(backup-offsite.sh 참고)
+	# 여기서의 실패는 정책 문제가 아니라 sudo·경로 같은 구조적 문제다 — 중단하는 것이 맞다.
 	log "타이머 설치 (자동배포 · 오프사이트 백업)"
 	on_host "$NEW_IP" "cd $REPO_DIR && ./scripts/install-pull-deploy.sh" | sed 's/^/  /' \
-		|| log "warn: install-pull-deploy.sh 실패 — 수동 설치가 필요하다"
+		|| die "install-pull-deploy.sh 실패 — 신규 호스트에 자동 배포가 없는 채로 진행할 수 없다"
 	on_host "$NEW_IP" "cd $REPO_DIR && ./scripts/backup-offsite.sh --install" | sed 's/^/  /' \
-		|| log "warn: backup-offsite --install 실패 — 인스턴스 프린시펄 정책을 확인한다"
+		|| die "backup-offsite --install 실패 — 백업 없는 단일 호스트를 만들 수 없다"
+
+	step "신규 호스트 타이머 검증 (설치가 아니라 **도는지**를 본다)"
+	assert_ops_timers "$NEW_IP" "신규 호스트"
 
 	mark_done 2
 fi
@@ -593,12 +642,14 @@ else
 	# systemctl 이 실패하는데 `|| true` 로 삼키면 **끈 줄 알고 넘어간다** — 이 스크립트를 쓰면서 실제로
 	# 그랬다(실제 이름은 `rp-pull-deploy` 가 아니라 `reputation-pool-deploy` 였다). 그래서 끈 뒤에
 	# 남은 것이 없는지 다시 확인한다.
+	# 끄기 **전에** 신규 호스트가 그 일을 이어받았는지 확인한다. Phase 2 가 이미 검증하지만 여기서 한 번 더
+	# 보는 이유: 이전이 여러 번에 걸쳐 재개될 수 있고(마커로 Phase 2 를 건너뛴다), 그 사이에 신규 호스트에서
+	# 타이머가 죽었을 수 있다. 이 가드가 없으면 "양쪽 모두 배포·백업 없음" 이 성공으로 끝난다.
+	step "가드 — 신규 호스트가 배포·백업을 이어받았는가"
+	assert_ops_timers "$NEW_IP" "신규 호스트"
+
 	log "타이머 정지"
-	list_our_timers() {
-		on_host "$OLD_IP" 'systemctl list-units --type=timer --state=active --no-legend --plain' \
-			| awk '{print $1}' | grep -E '^(reputation-pool|rp-)' || true
-	}
-	OLD_TIMERS="$(list_our_timers)"
+	OLD_TIMERS="$(list_our_timers "$OLD_IP")"
 	if [ -n "$OLD_TIMERS" ]; then
 		printf '%s\n' "$OLD_TIMERS" | sed 's/^/  /'
 		# 되돌릴 때 정확히 이것만 다시 켠다(--rollback 이 이 파일을 읽는다).
@@ -610,7 +661,7 @@ else
 	else
 		log "정지할 타이머가 없다"
 	fi
-	LEFT_TIMERS="$(list_our_timers)"
+	LEFT_TIMERS="$(list_our_timers "$OLD_IP")"
 	[ -z "$LEFT_TIMERS" ] || die "아직 도는 타이머가 있다: $LEFT_TIMERS"
 
 	# a1-hunter 는 타이머가 아니라 상시 서비스다(Restart=always). 없는 호스트도 있으므로 실패는 넘긴다 —
