@@ -622,8 +622,42 @@ ssh <서버> 'cat > ~/.rp-backup-cert.pem' < ~/.config/poolroost/rp-backup-cert.
 ssh <서버> 'echo OFFSITE_ENV_CERT=$HOME/.rp-backup-cert.pem >> ~/.rp-backup.env'
 ```
 
-> 개인키를 잃으면 올려 둔 시크릿을 **영구히 못 읽는다.** 비밀 관리자에 함께 보관한다.
 > `OFFSITE_ENV_CERT` 를 설정하지 않으면 스크립트가 매 실행마다 경고를 남긴다(조용히 건너뛰지 않는다).
+
+##### 개인키 보관 — 이 백업의 단일 실패점
+
+개인키를 잃으면 올려 둔 시크릿을 **영구히 못 읽는다.** 백업의 백업이 필요하다는 뜻이고, **어디에 두면 안
+되는가**부터 정해야 한다:
+
+| 두면 안 되는 곳 | 이유 |
+|---|---|
+| 이 레포 | **public 이다** |
+| 프로덕션 호스트 | 이 설계의 전제를 깬다(호스트가 사라진 상황을 위한 백업이다) |
+| 암호문과 같은 버킷 | 실패 도메인이 같다 — 버킷 접근을 얻은 쪽이 암호문과 키를 동시에 갖는다 |
+
+사본은 **서로 다른 실패 도메인에** 두 개 이상 둔다. 실제 구성 예:
+
+1. **비밀 관리자**(1Password/Bitwarden 등)에 PEM 본문. 노트북 분실을 견디는 주 사본.
+2. **OS 키체인** — macOS 라면 `security add-generic-password -a <계정> -s <설명> -w "$(cat key.pem)"`.
+   되읽을 때 **hex 로 나오므로 디코딩이 필요하다**(모르면 "키가 깨졌다" 로 오진한다):
+   ```bash
+   security find-generic-password -a <계정> -w | xxd -r -p > key.pem
+   ```
+3. (선택) 패스프레이즈로 감싼 오프라인 사본 — 이건 USB·다른 머신·클라우드 드라이브 어디에 둬도 된다:
+   ```bash
+   openssl pkcs8 -topk8 -v2 aes-256-cbc -in key.pem -out key.enc.pem   # 패스프레이즈 입력
+   ```
+   패스프레이즈는 비밀 관리자에 둔다. 파일과 패스프레이즈가 **다른 곳에** 있어야 의미가 있다.
+
+어느 사본이든 **인증서와 짝이 맞는지** modulus 해시로 확인할 수 있다(내용을 출력하지 않고 검증된다):
+
+```bash
+openssl rsa  -in key.pem  -noout -modulus | openssl dgst -sha256
+openssl x509 -in cert.pem -noout -modulus | openssl dgst -sha256   # 두 값이 같아야 한다
+```
+
+서버의 인증서가 우리가 가진 것과 같은지는 지문으로 본다:
+`openssl x509 -in ~/.rp-backup-cert.pem -noout -fingerprint -sha256`.
 
 객체 이름은 `env/env_<평문 sha256 앞 12자>.cms` 다. `.env` 는 거의 바뀌지 않으므로 **서로 다른 내용당
 객체 하나**만 쌓이고 같은 내용을 매일 다시 올리지 않는다. 그리고 **보존기간 정리는 `env/` 를 건드리지
