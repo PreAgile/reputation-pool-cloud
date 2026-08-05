@@ -103,9 +103,23 @@ fi
 
 # 겹쳐 도는 것을 막는다. 배포가 폴링 간격보다 오래 걸리면 두 번째 실행이 같은 체크아웃을 동시에 만지게 된다.
 # flock 이 없는 환경은 없다고 가정하지 않고, 없으면 잠금 없이 진행하되 경고한다.
+#
+# 잠금 파일은 `/tmp` 가 아니라 **체크아웃 안**에 둔다(`.pull-deploy-state` 와 같은 자리). `/tmp` 의 고정
+# 이름은 다른 사용자가 먼저 만들어 둘 수 있고, 그러면 `exec 9>` 가 EACCES 로 실패해 `set -e` 가 스크립트를
+# 즉시 죽인다. 그 상태에서 타이머는 **5분마다 발화해 5분마다 죽으므로 배포가 완전히 멈추는데**, 실패가
+# journal 에만 남아 아무도 보지 않는다(2026-08-05 실증: 누군가 `sudo ./pull-deploy.sh` 를 한 번 돌려 root
+# 소유 0644 잠금이 남았고, 그 뒤 21시간 동안 모든 주기가 `Permission denied` 로 죽어 도는 이미지가 계속
+# 뒤처져 있었다. 증상은 "자동 배포가 켜져 있는데 배포가 안 된다" 였다).
+#
+# 체크아웃 안이면 소유자가 곧 배포 사용자라 이 경합이 성립하지 않고, 호스트에 두 체크아웃이 있어도
+# 각자의 잠금을 갖는다(전역 이름 하나로 서로를 막지 않는다).
+LOCK_FILE="$REPO_DIR/.pull-deploy.lock"
 if command -v flock > /dev/null 2>&1; then
-	exec 9> /tmp/reputation-pool-pull-deploy.lock
-	flock -n 9 || { log "다른 배포가 진행 중이다 — 이번 주기는 건너뛴다"; exit 0; }
+	if exec 9> "$LOCK_FILE"; then
+		flock -n 9 || { log "다른 배포가 진행 중이다 — 이번 주기는 건너뛴다"; exit 0; }
+	else
+		die "잠금 파일을 열 수 없다: $LOCK_FILE (소유자·권한을 확인한다)"
+	fi
 else
 	log "warn: flock 이 없어 중복 실행을 막지 못한다"
 fi
