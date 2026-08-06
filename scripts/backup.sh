@@ -11,8 +11,13 @@ PGDATABASE="${PGDATABASE:-reputation_pool}"
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 # 신선도 textfile 을 쓸 디렉터리(#131). compose 가 reputation-pool-metrics 볼륨을 여기 마운트한다.
-# 비우면 기록을 건너뛴다 — 이 스크립트는 로컬에서 볼륨 없이도 손으로 돌 수 있어야 한다.
-METRICS_DIR="${BACKUP_METRICS_DIR:-/metrics}"
+# 빈 값으로 주면 기록을 건너뛴다 — 이 스크립트는 로컬에서 볼륨 없이도 손으로 돌 수 있어야 한다.
+#
+# **`:-` 가 아니라 `-` 다.** `${VAR:-기본}` 은 변수가 **비어 있을 때도** 기본값을 쓰므로
+# `BACKUP_METRICS_DIR=` 로 껐다고 믿는 사람에게 `/metrics` 를 되돌려주고, 아래 `[ -n … ]` 검사는 영원히
+# 참이 되어 죽은 코드가 된다. `${VAR-기본}` 은 **미설정일 때만** 기본값을 쓰므로 빈 값이 그대로 남아
+# 그 검사가 의미를 갖는다.
+METRICS_DIR="${BACKUP_METRICS_DIR-/metrics}"
 # PGPASSWORD 는 환경에서 주입(compose 가 REPUTATION_POOL_DB_PASSWORD 로 전달).
 
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -57,5 +62,5 @@ if [ -n "$METRICS_DIR" ] && [ -d "$METRICS_DIR" ]; then
 		echo "warn: could not write freshness gauge to ${METRICS_DIR} (backup itself succeeded)"
 	fi
 else
-	echo "freshness gauge skipped (${METRICS_DIR} not mounted)"
+	echo "freshness gauge skipped (metrics dir '${METRICS_DIR}' not mounted)"
 fi

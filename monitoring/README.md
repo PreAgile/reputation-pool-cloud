@@ -40,7 +40,7 @@
 
 ## 알림
 
-룰은 세 갈래다(#79 이후). Prometheus 가 전부 평가하고(Prometheus UI 의 Alerts/ALERTS 시계열로도 확인 가능),
+룰은 네 갈래다(#79 이후, 백업 신선도는 #131). Prometheus 가 전부 평가하고(Prometheus UI 의 Alerts/ALERTS 시계열로도 확인 가능),
 firing 알림은 `prometheus.yml` 의 `alerting.alertmanagers` 배선을 통해 `alertmanager` 서비스로 넘어가 실제
 통지 라우팅까지 이어진다(#76).
 
