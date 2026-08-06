@@ -223,7 +223,8 @@ jobs:
           docker run --rm -e LC_ALL=C.UTF-8 -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 \
             scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh \
             scripts/pull-deploy.sh scripts/install-pull-deploy.sh scripts/install-a1-hunter.sh \
-            scripts/backup-offsite.sh scripts/cf-dns.sh scripts/migrate-host.sh
+            scripts/backup-offsite.sh scripts/cf-dns.sh scripts/migrate-host.sh \
+            scripts/deadline-notify.sh
 
       # 이 두 스크립트는 **호스트를 실제로 옮길 때 딱 한 번** 도는데, 그때 인자 처리에서 죽으면 가장
       # 곤란하다(다른 스크립트와 달리 매일 돌면서 스스로 증명하지 않는다). 그래서 인자 검증을 토큰·SSH·
@@ -294,6 +295,43 @@ jobs:
             env -u INVOCATION_ID OFFSITE_ALERT_MAIL=always RP_BACKUP_ENV=/nonexistent RP_MAIL_ENV=/nonexistent ./scripts/backup-offsite.sh
           expect_exit 2 "offsite: 알 수 없는 인자"       "알 수 없는 인자" \
             env -u INVOCATION_ID ./scripts/backup-offsite.sh --nope
+
+          # 데드라인 알림(#15)의 **발화 시점**을 고정한다. 이 스크립트의 실패 모드는 "안 알리는 것" 이고,
+          # 그것은 실제로 그 날짜가 되어야만 드러난다 — 즉 검증하지 않으면 영원히 검증되지 않은 채로 그날을
+          # 맞는다. 그래서 `RP_DEADLINE_TODAY` 로 "오늘" 을 주입해 다섯 시점과 그 사이 날짜를 매번 실행한다.
+          # (이 주입 훅이 스크립트에 있는 이유가 이 테스트다.)
+          dl_env="$(mktemp)"
+          printf 'DEADLINE_TRIAL_END=2026-08-26\n' > "$dl_env"
+
+          expect_dry_count() {
+            local want="$1" label="$2" today="$3" got
+            got="$(RP_DEADLINE_TODAY="$today" RP_DEADLINE_ENV="$dl_env" \
+              ./scripts/deadline-notify.sh --dry-run 2>&1 | grep -c 'dry-run' || true)"
+            if [ "$got" != "$want" ]; then
+              echo "[$label] $today: 발송 $want 건을 기대했는데 $got 건이었다" >&2; exit 1
+            fi
+            echo "ok: $label ($today -> $got 건)"
+          }
+
+          # 알려야 하는 날 — D-14 / 7 / 3 / 1 / 0
+          expect_dry_count 1 "deadline: D-14" 2026-08-12
+          expect_dry_count 1 "deadline: D-7"  2026-08-19
+          expect_dry_count 1 "deadline: D-3"  2026-08-23
+          expect_dry_count 1 "deadline: D-1"  2026-08-25
+          expect_dry_count 1 "deadline: D-0"  2026-08-26
+          # 알리지 않아야 하는 날 — 사이 날짜와 지나간 날. "이하" 로 잘못 구현하면 D-13 이 1 건이 되어 걸린다
+          expect_dry_count 0 "deadline: D-13(사이)"   2026-08-13
+          expect_dry_count 0 "deadline: D-20(멀다)"   2026-08-06
+          expect_dry_count 0 "deadline: D+1(지났다)"  2026-08-27
+
+          expect_exit 2 "deadline: 알 수 없는 인자" "알 수 없는 인자" ./scripts/deadline-notify.sh --nope
+          # 날짜 오타는 조용히 넘기지 않는다 — 넘기면 그 데드라인이 알림 없이 지나간다
+          printf 'DEADLINE_BROKEN=not-a-date\n' > "$dl_env"
+          out="$(RP_DEADLINE_ENV="$dl_env" ./scripts/deadline-notify.sh --dry-run 2>&1)" || true
+          printf '%s' "$out" | grep -Fq "날짜를 읽을 수 없다" \
+            || { echo "[deadline: 날짜 오타] 경고가 없다" >&2; printf '%s\n' "$out" >&2; exit 1; }
+          echo "ok: deadline: 날짜 오타 경고"
+          rm -f "$dl_env"
 
       # notify-mail.py runs on the server with no test suite around it; a syntax error would only
       # surface at the moment we actually need to send an alert. Compile it here.
