@@ -652,14 +652,42 @@ Allow dynamic-group rp-prod-host to inspect buckets in tenancy
 도는** 상태에서는 실패 메일도 오지 않고 어떤 지표도 움직이지 않는다(백업은 요청 경로가 아니다). 그래서
 두 스크립트가 마지막 성공 시각을 textfile 게이지로 남기고, `node-exporter` 가 그것을 노출한다:
 
-| 게이지 | 쓰는 쪽 | 임계 |
-|---|---|---|
-| `rp_backup_local_last_success_timestamp_seconds` | `backup.sh` (사이드카 컨테이너, `/metrics` 마운트) | 36h warning / 72h critical |
-| `rp_backup_remote_last_success_timestamp_seconds` | `backup-offsite.sh` (호스트, `docker run … alpine` 으로 볼륨에 쓴다) | 36h warning / 72h critical |
+| 게이지 | 무엇을 재는가 | 쓰는 쪽 | 임계 |
+|---|---|---|---|
+| `rp_backup_local_last_success_timestamp_seconds` | 로컬 `pg_dump` **성공 시각** | `backup.sh` (사이드카 컨테이너, `/metrics` 마운트) | 36h warning / 72h critical |
+| `rp_backup_remote_last_success_timestamp_seconds` | 업로드 **성공 시각** | `backup-offsite.sh` (호스트, `docker run … alpine` 으로 볼륨에 쓴다) | 36h warning / 72h critical |
+| `rp_backup_remote_newest_dump_timestamp_seconds` | **버킷에 있는 최신 덤프가 만들어진 시각** (#131 후속) | 같은 스크립트, 같은 `.prom` 파일에 함께 (rename 한 번으로 두 값이 동시에 바뀐다) | 36h warning / 72h critical |
 
 **로컬과 원격을 따로 본다** — 둘 중 하나만 끊기는 것이 실제 실패 모드이고, 오프사이트만 죽는 경우가 가장
 위험하다(서버에 덤프는 쌓이지만 인스턴스가 사라지면 함께 없어진다). 게이지가 아예 없는 경우는
 `BackupFreshnessMetricMissing` 이 따로 알린다 — 낡은 것과 없는 것은 다른 사고다.
+
+**"성공 시각" 두 개로는 안 잡히는 실패가 있다.** 앞의 두 게이지는 *마지막으로 성공한 시각*이고, 세 번째는
+*올라가 있는 덤프가 얼마나 낡았는가*다. 이 차이가 세 번째를 만든 이유다:
+
+```
+배포로 backup 사이드카가 08:30 에 재시작 → 덤프가 매일 08:30 에 생김
+오프사이트 타이머는 08:04 UTC 고정      → 매일 "어제 덤프" 를 올린다
+
+rp_backup_local_last_success…    매일 갱신 ✅ (덤프는 생긴다)
+rp_backup_remote_last_success…   매일 갱신 ✅ (업로드도 성공한다)
+버킷의 최신 덤프                   하루씩 낡는다 ❌ ← #131 만으로는 아무도 모른다
+```
+
+사이드카가 크론이 아니라 `while true; do backup.sh && sleep 86400; done` 루프라서 생긴다 — **컨테이너
+재시작 시각이 그대로 덤프 시각이 된다.** 현재는 07:49 덤프 vs 08:04 업로드로 15분 여유뿐이고, 배포 한 번이
+08:04 이후에 일어나면 그날부터 밀린다. 그 상태에서 두 SLI 는 초록인데 복원 지점만 뒤로 가고, **복원해야
+하는 날에만 드러난다.** `OffsiteNewestDumpStale` / `…Critical` 이 그 축을 본다.
+
+**세 번째 게이지는 파일명에서 뽑는다.** 오브젝트의 `time-created`(업로드 시각)를 쓰지 않는다 — 어제 덤프를
+오늘 올리면 그 값이 오늘이 되어 **정확히 위 버그를 숨긴다.** 파일명(`<db>_20260806T083130Z.dump`)은
+`backup.sh` 가 `date -u` 로 박은 생성 시각 그 자체이고 재업로드·복사로도 바뀌지 않는다. 시각을 못 뽑으면
+**0 을 쓰지 않고 그 줄만 뺀다**(0 은 나이를 수십 년으로 만들어 "덤프가 낡았다"는 *틀린* 진단으로 울린다) —
+그 부재는 `BackupFreshnessMetricMissing` 이 알린다.
+
+> **배포 후 한 번 돌린다.** 새 게이지는 오프사이트 타이머가 다음 08:04 UTC 에 돌 때 처음 생긴다. 그때까지
+> `BackupFreshnessMetricMissing`(warning)이 울리므로 배포 직후 `sudo systemctl start
+> rp-backup-offsite.service` 를 한 번 실행해 창을 닫는다.
 
 **쓰기 실패는 백업을 실패시키지 않는다.** 덤프·오브젝트는 이미 있으므로 관측 실패로 백업을 실패로 기록하면
 이 장치가 백업을 더 약하게 만든다. 대신 경고를 로그에 남긴다.

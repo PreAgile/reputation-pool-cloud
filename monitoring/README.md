@@ -155,9 +155,21 @@ docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prom
 
 | 게이지 | 쓰는 쪽 | 무엇 |
 |---|---|---|
-| `rp_backup_local_last_success_timestamp_seconds` | `backup.sh` (backup 사이드카, 컨테이너) | 마지막 로컬 `pg_dump` 성공 시각 |
-| `rp_backup_remote_last_success_timestamp_seconds` | `backup-offsite.sh` (호스트 systemd 타이머) | 마지막 Object Storage 업로드 성공 시각 |
+| `rp_backup_local_last_success_timestamp_seconds` | `backup.sh` (backup 사이드카, 컨테이너) | 마지막 로컬 `pg_dump` **성공 시각** |
+| `rp_backup_remote_last_success_timestamp_seconds` | `backup-offsite.sh` (호스트 systemd 타이머) | 마지막 Object Storage 업로드 **성공 시각** |
+| `rp_backup_remote_newest_dump_timestamp_seconds` | `backup-offsite.sh` (같은 `.prom` 파일에 함께) | 버킷에 있는 **가장 최신 덤프가 만들어진 시각** (#131 후속) |
 
+- **앞의 둘은 "성공 시각" 이고 세 번째는 "올라간 덤프의 나이" 다.** 이 차이가 세 번째 게이지를 만든
+  이유다. 덤프를 만드는 사이드카는 크론이 아니라 `while true; do backup.sh && sleep 86400` 루프라
+  **컨테이너 재시작 시각이 그대로 덤프 시각이 된다.** 배포가 오프사이트 타이머(08:04 UTC) 뒤에 일어나면
+  그날부터 덤프는 타이머보다 늦게 생기고, 오프사이트 스크립트는 **매일 "어제 덤프" 를 성공적으로 올린다.**
+  그러면 앞의 두 게이지는 매일 갱신되는데 버킷의 덤프만 하루씩 낡는다 — 두 SLI 가 초록인 채로 복원 지점이
+  뒤로 밀리고, **복원해야 하는 날에만 드러난다.** `OffsiteNewestDumpStale` 이 그 축을 본다.
+  (현재는 07:49 덤프 vs 08:04 업로드로 15분 여유뿐이라 배포 한 번이면 밀린다.)
+- **세 번째 게이지는 파일명에서 뽑는다.** 오브젝트의 `time-created`(업로드 시각)를 쓰지 않는다 — 어제
+  덤프를 오늘 올리면 그 값은 오늘이 되어 **정확히 이 게이지가 잡으려는 실패를 숨긴다.** 파일명
+  (`<db>_20260806T083130Z.dump`)은 `backup.sh` 가 `date -u` 로 박은 생성 시각 그 자체이고 재업로드·복사로도
+  바뀌지 않는다.
 - **로컬과 원격을 따로 본다.** 둘 중 하나만 끊기는 것이 실제 실패 모드다. 사이드카는 도는데 오프사이트
   타이머만 죽으면 서버에 덤프가 쌓이지만 인스턴스가 사라지는 순간 전부 없어진다 — 그 경우를 위해
   오프사이트를 만들었으므로 그것만 죽는 상황이 가장 위험하다.
@@ -168,7 +180,11 @@ docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prom
   밀리는데(정확히 24h 가 아니다) 1.5배 여유가 그 드리프트를 흡수한다.
 - **게이지 부재는 별도 알림이다.** 나이 룰은 게이지가 있을 때만 평가되므로, 게이지가 사라지면
   (node-exporter 가 죽었다 / 볼륨 마운트가 빠졌다 / 한 번도 성공하지 못했다) 조용해진다 —
-  `BackupFreshnessMetricMissing` 이 그 부재를 알린다. `SurgeThresholdMetricMissing`(#77)과 같은 이유다.
+  `BackupFreshnessMetricMissing` 이 **세 게이지 모두**의 부재를 알린다.
+  `SurgeThresholdMetricMissing`(#77)과 같은 이유다. 최신 덤프 시각을 못 구하면(파일명 규칙이 바뀌었다,
+  파싱이 깨졌다) 스크립트는 **0 을 쓰지 않고 그 줄만 뺀다** — 0 은 나이를 수십 년으로 만들어 "덤프가
+  낡았다" 는 틀린 진단으로 울린다. 부재로 다루는 편이 진단이 정확하다. 대가는 배포 직후 다음 타이머
+  실행까지의 롤아웃 창이고, `sudo systemctl start rp-backup-offsite.service` 한 번으로 닫는다.
 
 **왜 앱이 아니라 node-exporter 인가.** 백업은 셸 스크립트와 systemd 타이머가 하는 일이고, 특히 **원격**
 상태를 앱이 직접 조회하려면 앱에 OCI 접근을 줘야 한다. 앱은 공개 인터넷에 노출된 프로세스라 침해되면
