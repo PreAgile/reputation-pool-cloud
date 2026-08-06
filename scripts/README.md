@@ -47,6 +47,12 @@
   [`deployment.md` §8-1](../docs/engineering/deployment.md).
   실패 알림 메일은 **systemd 로 돌 때만** 나간다(손 실행 실패까지 메일로 오면 알림을 믿지 않게 된다).
   systemd 밖의 자동화에서 부른다면 `OFFSITE_ALERT_MAIL=always` 로 알림을 살려 둔다.
+- `deadline-notify.sh` — 정해진 날짜(체험 크레딧 만료·유예 종료)가 다가오면 **D-14/7/3/1/0** 에 메일로
+  알린다. 인프라 대비를 다 해 두고 실행 시점을 놓치는 것을 막는 장치다. 날짜는 코드가 아니라
+  `~/.rp-deadline.env` 에 있고(`DEADLINE_<이름>=YYYY-MM-DD`), 이전이 끝나면 줄을 지우면 된다.
+  `RP_DEADLINE_TODAY` 로 "오늘" 을 주입할 수 있어 CI 가 발화 시점을 매번 검증한다 —
+  이 알림의 실패 모드는 "안 알리는 것" 이라 실제 날짜를 기다리면 영원히 검증되지 않는다.
+  절차는 [`deployment.md` §10-1](../docs/engineering/deployment.md).
 - `dev-seed.sql` — 로컬 개발용 시드.
 
 ## DB 백업 / 복원
