@@ -509,6 +509,10 @@ groups:
   # 타이머만 죽으면 서버에는 덤프가 쌓이지만 인스턴스가 사라지는 순간 전부 없어진다(그 경우를 위해
   # 오프사이트를 만들었다). 반대로 오프사이트만 살아 있으면 매일 같은 낡은 덤프를 다시 확인하며 올린다.
   #
+  # **축은 셋이다**(세 번째는 #131 후속). 로컬 덤프 시각 · 오프사이트 업로드 시각 · **버킷에 있는 덤프의
+  # 나이**. 앞의 둘은 "마지막으로 성공한 시각" 이라 둘 다 매일 갱신되면서 정작 올라가는 덤프가 낡는 경우를
+  # 못 잡는다 — 그 이유는 `OffsiteNewestDumpStale` 앞의 주석에 있다.
+  #
   # 임계값: 백업 주기가 24h 이므로 36h(1.5주기)에 warning, 72h(3주기)에 critical. 한 번 놓친 것은 봐주고
   # 연속으로 놓친 것은 봐주지 않는다. 덤프 생성 시각은 사이드카의 `sleep 86400` 루프가 컨테이너 재시작마다
   # 밀리므로 정확히 24h 가 아니다 — 1.5주기 여유가 그 드리프트를 흡수한다.
@@ -558,14 +562,72 @@ groups:
             체험 크레딧 만료·유휴 회수(deployment.md §10)로 인스턴스가 사라지는 시나리오에서 이 상태가
             가장 위험하다. sudo systemctl start rp-backup-offsite.service 로 즉시 한 번 올린다.
 
-      # 게이지가 **낡은 것**과 **아예 없는 것**은 다른 사고다. 위 네 룰은 게이지가 존재할 때만 평가되므로,
+      # 위 네 룰은 전부 **"마지막으로 성공한 시각"** 을 본다. 그래서 못 잡는 실패가 하나 남는다:
+      # **업로드는 매일 성공하는데 올라가는 덤프가 낡은** 경우다.
+      #
+      # 덤프를 만드는 backup 사이드카는 크론이 아니라 `while true; do backup.sh && sleep 86400` 루프라
+      # **컨테이너 재시작 시각이 그대로 덤프 시각이 된다.** 배포가 오프사이트 타이머(08:04 UTC) 뒤에 일어나면
+      # 그날부터 덤프는 타이머보다 늦게 생기고, `backup-offsite.sh` 는 **매일 "어제 덤프"를 성공적으로
+      # 올린다.** 이때 위 네 룰의 시야는 이렇다:
+      #   rp_backup_local_last_success…   매일 갱신 — 덤프는 생기고 있다
+      #   rp_backup_remote_last_success…  매일 갱신 — 업로드도 성공한다
+      #   버킷의 최신 덤프                  하루씩 낡는다 ← 아무 룰도 보지 않는다
+      # 즉 **네 게이지가 전부 건강한데 복원 지점만 낡는다.** 복원해야 하는 날에만 드러난다.
+      #
+      # 그래서 `rp_backup_remote_newest_dump_timestamp_seconds` 를 따로 본다. 이 값은 업로드 시각이 아니라
+      # **버킷에 있는 가장 최신 덤프의 파일명에서 뽑은 생성 시각**이다(`<db>_20260806T083130Z.dump`).
+      # `time-created` 를 쓰지 않는 이유가 여기 있다 — 어제 덤프를 오늘 올리면 그 값은 오늘이 되어 정확히 이
+      # 실패를 숨긴다.
+      #
+      # 임계는 위와 같은 36h/72h 다. 다른 값을 쓸 이유가 없다 — 이 나이도 "며칠치 데이터를 잃는가" 를 재는
+      # 같은 척도이고, 오히려 `OffsiteBackupStale` 과 나란히 보일 때 두 축의 차이가 드러난다(업로드는 도는데
+      # 덤프만 낡았다 = 이 룰만 발화).
+      - alert: OffsiteNewestDumpStale
+        expr: time() - rp_backup_remote_newest_dump_timestamp_seconds > 36 * 3600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "버킷의 최신 덤프가 36시간 넘게 낡았다 — 업로드는 돌아도 올라가는 데이터가 어제 것이다"
+          description: >
+            업로드 자체는 성공하는 중일 수 있다(OffsiteBackupStale 이 조용하면 그렇다). 덤프 생성이 밀린
+            것이므로 docker compose ps backup 으로 사이드카 기동 시각을 보고, 그 시각이 오프사이트
+            타이머(systemctl list-timers rp-backup-offsite.timer, 08:04 UTC) 뒤라면 사이드카를 그 앞으로
+            재시작한다: docker compose restart backup. 버킷의 실제 최신 덤프는
+            ./scripts/backup-offsite.sh --verify-latest 로 확인한다.
+
+      - alert: OffsiteNewestDumpStaleCritical
+        expr: time() - rp_backup_remote_newest_dump_timestamp_seconds > 72 * 3600
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "버킷의 최신 덤프가 3일 넘게 낡았다 — 인스턴스가 사라지면 3일치를 잃는다"
+          description: >
+            오프사이트 백업의 복원 지점이 3일 이상 낡았다. 업로드 성공 여부와 무관하게 지금 복원하면 3일치를
+            잃는다. docker exec reputation-pool-backup /usr/local/bin/backup.sh 로 덤프를 즉시 만들고
+            sudo systemctl start rp-backup-offsite.service 로 올린다.
+
+      # 게이지가 **낡은 것**과 **아예 없는 것**은 다른 사고다. 위 여섯 룰은 게이지가 존재할 때만 평가되므로,
       # 게이지가 사라지면(node-exporter 가 죽었다, 볼륨 마운트가 빠졌다, 스크립트가 한 번도 성공하지 못했다)
       # 조용해진다 — 알림을 만든 이유가 사라지는 상태다. `SurgeThresholdMetricMissing`(#77)과 같은 이유로
       # 부재 자체를 알린다.
+      #
+      # **최신 덤프 게이지도 부재 대상에 넣는다.** 같은 `.prom` 파일에 원자적으로 함께 쓰이므로 파일이
+      # 사라지는 경우는 원격 게이지 부재로 이미 잡힌다 — 하지만 그것만이 부재 경로가 아니다.
+      # `backup-offsite.sh` 는 덤프 이름에서 시각을 못 뽑으면(파일명 규칙이 바뀌었다, 버킷·볼륨에 덤프가
+      # 없다, 파싱이 깨졌다) **그 줄만 빼고** 파일을 쓴다. 0 을 쓰면 나이가 수십 년으로 계산돼 "덤프가
+      # 낡았다"는 틀린 진단으로 울리기 때문인데, 그러면 다른 게이지는 다 건강한 채로 **이 축만 조용히
+      # 관측 불가**가 된다 — 이 룰이 막으려는 상태와 정확히 같다. 그래서 부재로 다룬다.
+      #
+      # 대가는 **롤아웃 창**이다. 이 변경을 배포한 직후에는 오프사이트 타이머가 다음 08:04 UTC 에 돌기
+      # 전까지 게이지가 없어 이 룰이 울린다(warning, 최대 하루). #131 배포 때와 같은 성질이고 해법도 같다 —
+      # 배포 후 `sudo systemctl start rp-backup-offsite.service` 를 한 번 돌린다(deployment.md §8-1).
       - alert: BackupFreshnessMetricMissing
         expr: >
           absent(rp_backup_local_last_success_timestamp_seconds)
           or absent(rp_backup_remote_last_success_timestamp_seconds)
+          or absent(rp_backup_remote_newest_dump_timestamp_seconds)
         for: 30m
         labels:
           severity: warning
