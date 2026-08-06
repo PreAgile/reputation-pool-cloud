@@ -646,6 +646,30 @@ Allow dynamic-group rp-prod-host to inspect buckets in tenancy
 **실패하면 메일이 온다**(`notify-mail.py`). 백업의 진짜 실패 모드는 "안 도는 것"이 아니라 *"안 도는데
 아무도 모르는 것"*이다.
 
+#### 안 도는 백업은 메일로 오지 않는다 — 신선도 SLI (#131)
+
+위 알림은 백업이 **돌다가 실패했을 때** 온다. 반대 경우, 즉 타이머가 죽거나 사이드카가 멈춰 **아예 안
+도는** 상태에서는 실패 메일도 오지 않고 어떤 지표도 움직이지 않는다(백업은 요청 경로가 아니다). 그래서
+두 스크립트가 마지막 성공 시각을 textfile 게이지로 남기고, `node-exporter` 가 그것을 노출한다:
+
+| 게이지 | 쓰는 쪽 | 임계 |
+|---|---|---|
+| `rp_backup_local_last_success_timestamp_seconds` | `backup.sh` (사이드카 컨테이너, `/metrics` 마운트) | 36h warning / 72h critical |
+| `rp_backup_remote_last_success_timestamp_seconds` | `backup-offsite.sh` (호스트, `docker run … alpine` 으로 볼륨에 쓴다) | 36h warning / 72h critical |
+
+**로컬과 원격을 따로 본다** — 둘 중 하나만 끊기는 것이 실제 실패 모드이고, 오프사이트만 죽는 경우가 가장
+위험하다(서버에 덤프는 쌓이지만 인스턴스가 사라지면 함께 없어진다). 게이지가 아예 없는 경우는
+`BackupFreshnessMetricMissing` 이 따로 알린다 — 낡은 것과 없는 것은 다른 사고다.
+
+**쓰기 실패는 백업을 실패시키지 않는다.** 덤프·오브젝트는 이미 있으므로 관측 실패로 백업을 실패로 기록하면
+이 장치가 백업을 더 약하게 만든다. 대신 경고를 로그에 남긴다.
+
+> ⚠️ **서버가 꺼져 있으면 이 장치로 잡히지 않는다.** Prometheus 도 함께 꺼지므로 서버 안의 어떤 것으로도
+> 감지할 수 없다 — 외부 dead man's switch 가 필요하고 **#174** 로 분리했다. 이 절이 덮는 것은 **서버는
+> 살아 있는데 백업이 낡은** 경우다. 유휴 회수(§10)·크레딧 만료 시나리오는 그 사각지대에 있다.
+
+자세한 배경과 임계값 근거는 [`monitoring/README.md`](../../monitoring/README.md) "백업 신선도".
+
 단 **메일은 systemd 로 돌 때만 나간다.** 손으로 돌리다 실패한 것까지 "오프사이트 백업이 실패했습니다"로
 나가면 화면에 이미 있는 에러가 한 번 더 오는 것이라 정보는 늘지 않고 알림 피로만 쌓이는데, 그러다 진짜
 실패 메일까지 흘려보게 되면 이 알림을 만든 이유가 사라진다. 게다가 메일 본문이 `journalctl -u
@@ -777,6 +801,7 @@ docker cp /tmp/dump reputation-pool-db:/tmp/dump
 | dashboard / grafana | 512MB 각 | |
 | alertmanager / backup | 256MB 각 | |
 | caddy | 128MB | |
+| node-exporter | 64MB | 백업 신선도 textfile 만 노출(#131) — collector 를 전부 끄므로 실사용은 수십 MB |
 
 > base `compose.yaml`에 서비스를 추가하면 `compose.prod.yaml`에도 상한과 `logging`을 추가해야 한다.
 > 빠뜨리면 그 컨테이너만 상한 없이 뜨고 로그가 무한히 쌓인다.

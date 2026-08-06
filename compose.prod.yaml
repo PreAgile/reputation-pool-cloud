@@ -110,3 +110,12 @@ services:
       resources:
         limits:
           memory: 256m
+
+  # 백업 신선도 SLI 의 노출 경로 (#131). 기본 collector 를 전부 끄고 textfile 하나만 켜므로(base 의 주석
+  # 참고) 실제 사용량은 수십 MB 다 — 64m 는 여유를 둔 값이고, 이 프로파일의 합계를 거의 움직이지 않는다.
+  node-exporter:
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 64m
