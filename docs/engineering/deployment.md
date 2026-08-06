@@ -11,7 +11,8 @@ Oracle Cloud Always Free A1(arm64) 단일 호스트 + Docker Compose 배포 절�
 | 계층 | 어디 | 비고 |
 |---|---|---|
 | DNS·CDN·TLS 엣지 | Cloudflare | 오리진 IP 은닉, DDoS 흡수 |
-| 랜딩(`www`)·문서(`docs`)·`status` | Cloudflare Pages | 백엔드와 **분리** — Oracle이 죽어도 살아있다 |
+| 랜딩·문서·`status` (apex `poolroost.com`) | Cloudflare Pages | 백엔드와 **분리** — Oracle이 죽어도 살아있다 |
+| `www`·`docs`·`status` 서브도메인 | Cloudflare 엣지 리다이렉트 | apex 의 해당 경로로 301. 정본은 하나다(§5-1) |
 | 대시보드 + REST(`/api`) + DB + 모니터링 | Oracle A1 (2 OCPU / 12GB, arm64) | `compose.yaml` + `compose.prod.yaml` |
 | 이미지 발행 | GitHub Actions → GHCR | `linux/arm64`, 서버는 pull만 |
 
@@ -281,6 +282,48 @@ DEPLOY_OVERLAYS=compose.prod.tls.yaml
 3. 발급을 확인한 뒤 **proxied(주황 구름)**로 전환하고, Cloudflare SSL/TLS 모드를 **Full (strict)**로 둔다.
    Caddy의 인증서가 유효하므로 strict가 맞다. 갱신은 proxied 상태에서도 동작한다(챌린지가 Cloudflare를 경유해 도착).
 4. Flexible 모드를 쓰지 않는다 — 엣지-오리진 구간이 평문이 되고 리다이렉트 루프의 원인이 된다.
+
+### 5-1. zone 레코드 구조 (#15)
+
+| 호스트 | 레코드 | 대상 | 무엇인가 |
+|---|---|---|---|
+| `poolroost.com` (apex) | CNAME (proxied) | `reputation-pool-cloud.pages.dev` | 랜딩·문서·status. **정본** |
+| `app` | A (proxied) | 오리진 IP | 대시보드 + REST(`/v1/**`) |
+| `grpc` | A (proxied) | 오리진 IP | gRPC 데이터 플레인 (h2c, #165) |
+| `www` · `docs` · `status` | CNAME (proxied) | `poolroost.com` | 레코드는 apex 를 가리키지만 **엣지 리다이렉트가 먼저 잡는다** |
+
+**서브도메인을 리다이렉트로 두고 직접 서빙하지 않는 이유.** 랜딩·문서·status 는 한 정적 빌드
+(`landing/`, `output: "export"`)에서 나오고 canonical·sitemap·hreflang 이 전부 `https://poolroost.com`
+기준으로 잡혀 색인이 이미 그 URL 로 돌고 있다. `docs.` 를 별도 표면으로 승격하면 정본을 옮기는 일이 되어
+그 셋을 전부 고치고 기존 색인을 301 로 정리해야 하는데, 얻는 것은 주소 미학뿐이다. #15 가 요구한 것은
+**앱 서버와 수명이 분리된 상시 표면**이고 그 분리는 apex→Pages 로 이미 성립한다.
+
+규칙은 Single Redirects(`http_request_dynamic_redirect` phase)에 넣는다. 순서가 의미를 갖는다:
+
+```
+1. http.host eq "www.poolroost.com"                              -> concat("https://poolroost.com", path)
+2. http.host eq "docs.poolroost.com" and uri.path eq "/"         -> "https://poolroost.com/docs"
+3. http.host eq "docs.poolroost.com"                             -> concat("https://poolroost.com/docs", path)
+4. http.host eq "status.poolroost.com"                           -> "https://poolroost.com/status"
+```
+
+전부 301 + 쿼리 보존이다. **2번이 3번보다 앞에 있어야 한다** — 없으면 `docs.poolroost.com/` 이
+`/docs/`(끝 슬래시)로 가고 Pages 가 그것을 `/docs` 로 308 하므로 방문자가 리다이렉트를 두 번 탄다.
+`regex_replace()` 로 한 규칙에 합칠 수도 있지만 **무료 플랜은 표현식에서 정규식을 쓸 수 없다.**
+
+레코드보다 **규칙을 먼저** 만든다. 순서를 뒤집으면 규칙이 없는 동안 그 호스트가 Pages 로 가는데, Pages
+프로젝트에 등록되지 않은 호스트라 그 사이 방문자가 오류를 본다.
+
+토큰 권한은 `Zone:DNS:Edit` 에 더해 **`Zone:Single Redirect:Edit`** 이 필요하다(대시보드 표기 기준.
+API 문서에는 옛 이름인 `Dynamic Redirect` 로 남아 있다).
+
+> 검증은 `--resolve` 로 엣지에 직접 붙어서 한다. 레코드를 만들기 전에 그 호스트를 한 번이라도 조회했다면
+> OS 리졸버가 **NXDOMAIN 을 캐시**해 두어 한동안 `Could not resolve host` 가 난다 — 설정이 틀린 것으로
+> 오진하기 쉽다(실제로 그랬다).
+>
+> ```bash
+> curl -sSI --resolve docs.poolroost.com:443:104.21.77.123 https://docs.poolroost.com/quickstart
+> ```
 
 ## 6. 오리진 잠그기 (공개 전 권장)
 
@@ -871,8 +914,8 @@ Caddy 용 Cloudflare DNS-01 플러그인을 따로 빌드하는 것보다 훨씬
 보며**, PATCH 도중 실패하면 **즉시 최초 스냅샷으로 되돌린 뒤** 실패로 끝낸다.
 
 **2. 전환 대상을 이름으로 고르면 랜딩이 죽는다.**
-이 zone 에는 오리진을 가리키는 레코드(`app`, `grpc`)와 Cloudflare Pages 를 가리키는 레코드
-(apex·`www`·`docs`·`status`)가 섞여 있고, Pages 쪽은 **오리진이 죽어도 살아 있어야 하는** 것들이다(§구성).
+이 zone 에는 오리진을 가리키는 레코드(`app`, `grpc`)와 오리진과 무관한 레코드(apex→Pages,
+`www`·`docs`·`status`→apex)가 섞여 있고, 뒤쪽은 **오리진이 죽어도 살아 있어야 하는** 것들이다(§5-1).
 그래서 `cf-dns.sh` 는 대상을 이름이 아니라 **"`content` 가 구 오리진 IP 인 A 레코드"** 로 고른다. 데이터로
 고르면 실수로 옮길 수가 없고, 오리진 레코드가 늘어나도 저절로 반영된다. 대상 개수 상한(`CF_MAX_TARGETS`,
 기본 6)도 둔다 — IP 오타나 부분 응답으로 zone 을 무더기로 옮기는 사고를 막는다.
