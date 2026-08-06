@@ -300,12 +300,19 @@ DEPLOY_OVERLAYS=compose.prod.tls.yaml
 
 규칙은 Single Redirects(`http_request_dynamic_redirect` phase)에 넣는다. 순서가 의미를 갖는다:
 
+```text
+1. http.host eq "www.poolroost.com"
+   -> concat("https://poolroost.com", http.request.uri.path)
+2. http.host eq "docs.poolroost.com" and http.request.uri.path eq "/"
+   -> "https://poolroost.com/docs"
+3. http.host eq "docs.poolroost.com"
+   -> concat("https://poolroost.com/docs", http.request.uri.path)
+4. http.host eq "status.poolroost.com"
+   -> "https://poolroost.com/status"
 ```
-1. http.host eq "www.poolroost.com"                              -> concat("https://poolroost.com", path)
-2. http.host eq "docs.poolroost.com" and uri.path eq "/"         -> "https://poolroost.com/docs"
-3. http.host eq "docs.poolroost.com"                             -> concat("https://poolroost.com/docs", path)
-4. http.host eq "status.poolroost.com"                           -> "https://poolroost.com/status"
-```
+
+필드 이름은 **줄이지 않았다.** Rules 언어에 `uri.path` 라는 필드는 없고 `http.request.uri.path` 뿐이라,
+축약해 적어 두면 복붙한 표현식이 그대로 거부된다.
 
 전부 301 + 쿼리 보존이다. **2번이 3번보다 앞에 있어야 한다** — 없으면 `docs.poolroost.com/` 이
 `/docs/`(끝 슬래시)로 가고 Pages 가 그것을 `/docs` 로 308 하므로 방문자가 리다이렉트를 두 번 탄다.
@@ -314,8 +321,9 @@ DEPLOY_OVERLAYS=compose.prod.tls.yaml
 레코드보다 **규칙을 먼저** 만든다. 순서를 뒤집으면 규칙이 없는 동안 그 호스트가 Pages 로 가는데, Pages
 프로젝트에 등록되지 않은 호스트라 그 사이 방문자가 오류를 본다.
 
-토큰 권한은 `Zone:DNS:Edit` 에 더해 **`Zone:Single Redirect:Edit`** 이 필요하다(대시보드 표기 기준.
-API 문서에는 옛 이름인 `Dynamic Redirect` 로 남아 있다).
+토큰 권한은 `Zone:DNS:Edit` 에 더해 **`Zone` → `Single Redirect` → `Edit`** 이 필요하다. phase 이름
+(`http_request_dynamic_redirect`)과 권한 이름(`Single Redirect`)이 다르다 — 권한을 phase 이름으로 찾으면
+목록에 없어서 헤맨다.
 
 > 검증은 `--resolve` 로 엣지에 직접 붙어서 한다. 레코드를 만들기 전에 그 호스트를 한 번이라도 조회했다면
 > OS 리졸버가 **NXDOMAIN 을 캐시**해 두어 한동안 `Could not resolve host` 가 난다 — 설정이 틀린 것으로
