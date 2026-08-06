@@ -336,6 +336,37 @@ if ! public_health_ok; then
 	rollback
 fi
 
+# 모니터링 설정 리로드.
+#
+# `compose up` 은 **설정 파일 내용이 바뀌었다는 이유로는 컨테이너를 재생성하지 않는다**(서비스 정의가 아니라
+# 마운트된 파일의 내용이다). 그래서 alerts.yml·prometheus.yml·alertmanager.yml 변경은 배포되어도 돌고 있는
+# 프로세스에 닿지 않는다 — 2026-08-06 #131 의 룰이 그렇게 반영되지 않았다. 마운트를 디렉터리로 바꿔
+# (compose.yaml 참고) 컨테이너가 새 파일을 볼 수 있게 했고, 남은 절반이 이 리로드다.
+#
+# 항상 보낸다. 설정이 안 바뀐 배포에서 리로드는 재파싱뿐이라 무해하고, "바뀌었는지" 를 판정하려면 이 변경이
+# git diff 를 읽는 로직을 갖게 된다 — 그 판정이 틀리면 조용히 반영되지 않는 원래 문제로 돌아온다.
+#
+# **실패해도 배포를 되돌리지 않는다.** 새 이미지는 이미 떴고 헬스도 통과했다. 리로드 실패는 설정이 옛것으로
+# 남는 것이고, Prometheus 는 잘못된 설정을 만나면 옛 설정으로 계속 도므로(그것이 설계다) 서비스가 멈추지
+# 않는다. 다만 조용히 넘기지 않는다 — 알림 룰이 옛것이면 그 사실을 로그에서 찾을 수 있어야 한다.
+reload_monitoring() {
+	local name rc=0
+	for name in reputation-pool-prometheus reputation-pool-alertmanager; do
+		if ! "${DOCKER[@]}" ps --format '{{.Names}}' | grep -qxF "$name"; then
+			log "warn: $name 이 돌지 않아 설정 리로드를 건너뛴다"
+			continue
+		fi
+		if "${DOCKER[@]}" kill -s HUP "$name" > /dev/null 2>&1; then
+			log "설정 리로드 신호 전송: $name"
+		else
+			log "warn: 설정 리로드 실패 — $name 은 옛 설정으로 계속 돈다"
+			rc=1
+		fi
+	done
+	return "$rc"
+}
+reload_monitoring || true
+
 # 표식은 **여기서만** 갱신한다 — 위 어느 단계에서 죽어도 표식은 이전 커밋에 남고 다음 주기가 다시 배포한다.
 printf '%s\n' "$TARGET" > "$STATE_FILE"
 log "배포 완료: $SHORT"
