@@ -273,6 +273,28 @@ jobs:
           expect_exit 1 "migrate: 없는 작업디렉터리"     "작업디렉터리가 없다"       ./scripts/migrate-host.sh --rollback /nonexistent-dir
           rm -rf migration-*
 
+          # 오프사이트 백업의 **알림 경로**를 고정한다. 이 스크립트는 실패했을 때만 메일을 보내므로,
+          # 메일이 안 나가게 된 회귀는 백업이 실패하는 날까지 드러나지 않는다 — 알림이 필요한 그날에.
+          # 그래서 "어떤 실행이 메일을 보내는가" 를 CI 가 매번 실행해서 증명한다.
+          #
+          # runner 에는 oci CLI 가 없으므로 세 케이스 모두 `die "oci CLI 가 없다"` 로 떨어지고, 우리가
+          # 보는 것은 그 die 가 **알림을 어떻게 처리했는가** 다.
+          #
+          # `INVOCATION_ID` 는 명시적으로 지우거나 넣는다. runner 프로세스가 systemd 아래에서 뜨면
+          # 그 변수를 상속할 수 있어서, 지우지 않으면 "손 실행" 케이스가 손 실행이 아니게 된다.
+          expect_exit 1 "offsite: ALERT_MAIL 오타 거부"  "auto|always|never" \
+            env -u INVOCATION_ID OFFSITE_ALERT_MAIL=alwyas RP_BACKUP_ENV=/nonexistent ./scripts/backup-offsite.sh
+          expect_exit 1 "offsite: 손 실행은 메일 생략"   "메일 생략" \
+            env -u INVOCATION_ID RP_BACKUP_ENV=/nonexistent ./scripts/backup-offsite.sh
+          # 이쪽이 이 변경의 핵심 안전망이다 — 자동 실행에서는 알림 경로에 **반드시 들어가야** 한다.
+          # (메일 설정이 없으니 발송은 실패하고, 그 사실을 로그로 남기는 것까지가 기존 동작이다.)
+          expect_exit 1 "offsite: systemd 실행은 메일 시도" "메일 설정이 없어" \
+            env INVOCATION_ID=ci-test RP_BACKUP_ENV=/nonexistent RP_MAIL_ENV=/nonexistent ./scripts/backup-offsite.sh
+          expect_exit 1 "offsite: always 는 손 실행도 메일" "메일 설정이 없어" \
+            env -u INVOCATION_ID OFFSITE_ALERT_MAIL=always RP_BACKUP_ENV=/nonexistent RP_MAIL_ENV=/nonexistent ./scripts/backup-offsite.sh
+          expect_exit 2 "offsite: 알 수 없는 인자"       "알 수 없는 인자" \
+            env -u INVOCATION_ID ./scripts/backup-offsite.sh --nope
+
       # notify-mail.py runs on the server with no test suite around it; a syntax error would only
       # surface at the moment we actually need to send an alert. Compile it here.
       - name: Compile python scripts
