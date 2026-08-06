@@ -595,6 +595,17 @@ Allow dynamic-group rp-prod-host to inspect buckets in tenancy
 **실패하면 메일이 온다**(`notify-mail.py`). 백업의 진짜 실패 모드는 "안 도는 것"이 아니라 *"안 도는데
 아무도 모르는 것"*이다.
 
+단 **메일은 systemd 로 돌 때만 나간다.** 손으로 돌리다 실패한 것까지 "오프사이트 백업이 실패했습니다"로
+나가면 화면에 이미 있는 에러가 한 번 더 오는 것이라 정보는 늘지 않고 알림 피로만 쌓이는데, 그러다 진짜
+실패 메일까지 흘려보게 되면 이 알림을 만든 이유가 사라진다. 게다가 메일 본문이 `journalctl -u
+rp-backup-offsite.service` 를 안내하므로 **손 실행 실패가 "타이머가 깨졌다"로 읽힌다**(2026-08-05 실제로
+그렇게 한 번 헷갈렸다 — 그 시각 타이머는 돌지도 않았고, 같은 날 08:03 정기 실행은 정상이었다).
+
+판정은 `INVOCATION_ID`(systemd 가 유닛 실행 시 항상 넣는다)로 한다. TTY 검사가 아니다 — 문제의 실행이
+`ssh <호스트> './scripts/…'` 였는데 그 형태는 pty 가 없어 TTY 로는 자동 실행과 구분되지 않는다. 판단을
+덮으려면 `OFFSITE_ALERT_MAIL` 을 쓴다(`auto` 기본 · `always` · `never`). systemd 밖의 자동화에서 부를
+때는 **`always` 를 명시해야 알림이 살아 있다.**
+
 #### `.env` 도 함께 올린다 — 시크릿이 단일 실패점이기 때문
 
 DB 만 올려 두면 인스턴스가 사라졌을 때 **데이터는 있는데 열 열쇠가 없다.** `.env` 에는 DB 비밀번호·admin
@@ -688,12 +699,10 @@ openssl dgst -sha256 .env | awk '{print $NF}' | cut -c1-12
 2026-08-05 실제로 왕복을 한 번 통과시켰다(업로드 → 다운로드 → 노트북 개인키로 복호화 → 해시 일치,
 시크릿 15개 복원). "복원해본 적 없는 백업은 백업이 아니다" 를 이 경로에도 적용한 것이다.
 
-> ⚠️ **손으로 이 스크립트를 돌릴 때**는 systemd 유닛이 주는 환경이 없다. `PATH` 에 `~/bin`(oci CLI)이
-> 없거나 `OCI_CLI_AUTH=instance_principal` 이 없으면 OCI CLI 가 **설정 파일을 만들지 물어보며 멈춘다**
-> (BatchMode SSH 에서는 그대로 걸린 것처럼 보인다):
-> ```bash
-> export PATH=$HOME/bin:$PATH OCI_CLI_AUTH=instance_principal
-> ```
+> **손으로 이 스크립트를 돌릴 때**는 systemd 유닛이 주는 환경이 없다. 스크립트가 `~/bin`(oci CLI 설치
+> 위치)이 있으면 스스로 `PATH` 에 붙이고 `OCI_CLI_AUTH` 도 `instance_principal` 을 기본값으로 쓰므로
+> 그냥 실행하면 된다. 이 보정 전에는 `ssh <호스트> './scripts/backup-offsite.sh'` 가 **oci CLI 가
+> 설치돼 있는데도** "oci CLI 가 없다" 로 죽었다(비대화형 셸은 `.profile` 을 읽지 않는다).
 
 #### 복원
 

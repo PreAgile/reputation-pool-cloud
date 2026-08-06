@@ -30,13 +30,15 @@
 #   OFFSITE_VOLUME=               # 비우면 자동 탐색
 #   OFFSITE_ENV_CERT=/home/ubuntu/.rp-backup-cert.pem   # .env 를 암호화할 **공개** 인증서. 미설정이면 경고만
 #   OFFSITE_ENV_PREFIX=env/
+#   OFFSITE_ALERT_MAIL=auto        # auto=systemd 실행일 때만 메일 | always | never
 #
 # `.env`(DB 비밀번호·admin JWT·API 키)도 **인증서로 암호화해** 함께 올린다. DB 만 올려 두면 인스턴스가
 # 사라졌을 때 데이터는 있는데 열 열쇠가 없다. 개인키는 이 호스트에 두지 않는다 — 복호화는 운영자 노트북에서
 # 한다(§8-1 의 복원 절차). 그래서 이 호스트가 침해되어도 올린 시크릿을 되읽을 수 없다.
 #
 # 실패하면 메일로 알린다(`notify-mail.py`). 백업의 진짜 실패 모드는 "안 도는 것" 이 아니라 "안 도는데
-# 아무도 모르는 것" 이다.
+# 아무도 모르는 것" 이다. 단 **손으로 돌리다 실패한 것은 메일로 보내지 않는다** — 화면에 이미 에러가 있고,
+# 조작 실수가 백업 실패 알림으로 나가면 알림 자체를 믿지 않게 된다(`should_mail` 참고).
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,6 +46,19 @@ cd "$REPO_DIR"
 
 export SUPPRESS_LABEL_WARNING=True
 export OCI_CLI_AUTH="${OCI_CLI_AUTH:-instance_principal}"
+
+# oci CLI 는 공식 설치 스크립트가 `~/bin` 에 넣는다. systemd 유닛에는 `--install` 이 그 경로를 PATH 로
+# 박아 주지만(아래 UNIT 참고), **손으로 돌릴 때는 그 환경이 없다.** 특히 `ssh <호스트> './scripts/…'`
+# 형태의 비대화형 셸은 `.profile` 을 읽지 않아 PATH 에 `~/bin` 이 없고, 그러면 아래 `command -v oci` 가
+# **설치돼 있는데도** 걸려 "oci CLI 가 없다" 로 죽는다(2026-08-05 실제로 그 알림 메일이 나갔다 — 같은 날
+# 08:03 의 타이머 실행은 정상이었다). 진단이 실제 원인("PATH 에 없다")과 어긋나는 것이 가장 나쁘므로,
+# 있으면 붙이고 없으면 원래대로 실패한다.
+if [ -d "$HOME/bin" ]; then
+	case ":$PATH:" in
+		*":$HOME/bin:"*) ;;
+		*) export PATH="$HOME/bin:$PATH" ;;
+	esac
+fi
 
 CONF="${RP_BACKUP_ENV:-$HOME/.rp-backup.env}"
 if [ -f "$CONF" ]; then
@@ -58,6 +73,7 @@ fi
 BUCKET="${OFFSITE_BUCKET:-rp-backups}"
 PREFIX="${OFFSITE_PREFIX:-db/}"
 RETENTION_DAYS="${OFFSITE_RETENTION_DAYS:-30}"
+ALERT_MAIL="${OFFSITE_ALERT_MAIL:-auto}"
 DRY_RUN=false
 VERIFY_LATEST=false
 ACTION=run
@@ -74,9 +90,40 @@ done
 
 log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1"; }
 
+# 메일을 보낼 실행인지 판단한다. **systemd 유닛으로 돌 때만 보내는 것이 기본이다.**
+#
+# 이 스크립트를 손으로 돌리다 실패하면(PATH·오타·인자) 그것까지 "오프사이트 백업이 실패했습니다" 메일로
+# 나간다. 화면에 이미 같은 에러가 떠 있으니 정보는 늘지 않고 알림 피로만 쌓이는데, 그러다 **진짜 실패
+# 메일까지 흘려보게 되는 것**이 이 스크립트가 애초에 막으려던 실패다. 게다가 메일 본문은 `journalctl -u
+# rp-backup-offsite.service` 를 안내하므로, 손 실행 실패가 "타이머가 깨졌다" 로 읽힌다(2026-08-05 실제로
+# 그렇게 한 번 헷갈렸다 — 그 시각 타이머는 돌지도 않았다).
+#
+# 판정에 `[ -t 1 ]`(TTY) 를 쓰지 않는다. 그 사고가 `ssh <호스트> './scripts/backup-offsite.sh'` 였는데
+# 그 형태는 pty 가 없어서 TTY 검사로는 자동 실행과 구분되지 않는다 — 정작 막아야 할 경우를 못 막는다.
+# `INVOCATION_ID` 는 systemd 가 유닛을 실행할 때 **항상** 넣어 주고 손 실행에는 없으므로 두 경우를
+# 정확히 가른다.
+#
+# 자동 실행인데 메일이 조용해지는 것이 이 판단의 유일한 위험이므로 덮을 손잡이를 남긴다
+# (`~/.rp-backup.env` 에서도 설정된다):
+#   OFFSITE_ALERT_MAIL=auto    기본 — systemd 실행일 때만 보낸다
+#   OFFSITE_ALERT_MAIL=always  손 실행에서도 보낸다 (cron 등 systemd 밖의 자동화)
+#   OFFSITE_ALERT_MAIL=never   보내지 않는다
+should_mail() {
+	case "$ALERT_MAIL" in
+		always) return 0 ;;
+		never) return 1 ;;
+		*) [ -n "${INVOCATION_ID:-}" ] ;;
+	esac
+}
+
 # 실패는 반드시 사람에게 닿아야 한다. 메일 설정이 없으면 로그만 남는다(그 사실도 로그에 남긴다).
 alert() {
 	local subject="$1" body="$2" rc=0
+	if ! should_mail; then
+		# 조용히 넘어가지 않는다 — 무엇을 왜 안 했는지까지 남겨야 이 생략이 사고로 오해되지 않는다.
+		log "메일 생략 — systemd 실행이 아니다(에러는 위에 있다). 강제하려면 OFFSITE_ALERT_MAIL=always"
+		return
+	fi
 	printf '%s\n' "$body" | python3 "$REPO_DIR/scripts/notify-mail.py" "$subject" > /dev/null 2>&1 || rc=$?
 	case "$rc" in
 		0) log "실패 알림 메일 발송" ;;
@@ -91,6 +138,15 @@ die() {
 		"$1" "$(hostname)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
 	exit 1
 }
+
+# 오타를 **알림 경로를 쓰기 전에** 잡는다. `OFFSITE_ALERT_MAIL=alwyas` 는 `should_mail` 의 기본 갈래로
+# 떨어져 **손 실행에서 메일이 조용히 안 나가는데 설정한 사람은 나간다고 믿는** 상태를 만든다. 알림 설정의
+# 오타는 알림이 필요한 날에만 드러나므로 시작 시점에 죽는 편이 낫다. `oci`·`docker` 확인보다 앞에 두는
+# 이유도 같다 — 도구가 무엇이 있든 이 설정은 이미 틀렸고, 이 뒤의 모든 `die` 가 이 값에 기대어 동작한다.
+case "$ALERT_MAIL" in
+	auto | always | never) ;;
+	*) die "OFFSITE_ALERT_MAIL 은 auto|always|never 여야 한다 (받은 값: '$ALERT_MAIL')" ;;
+esac
 
 SERVICE=/etc/systemd/system/rp-backup-offsite.service
 TIMER=/etc/systemd/system/rp-backup-offsite.timer

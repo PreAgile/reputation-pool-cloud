@@ -45,6 +45,8 @@
   DB 만 올려 두면 인스턴스 소실 시 데이터는 있는데 열 열쇠가 없다. 개인키는 **호스트에 두지 않는다** —
   이 호스트는 자기가 올린 시크릿을 스스로 읽을 수 없다. 준비·복원 절차는
   [`deployment.md` §8-1](../docs/engineering/deployment.md).
+  실패 알림 메일은 **systemd 로 돌 때만** 나간다(손 실행 실패까지 메일로 오면 알림을 믿지 않게 된다).
+  systemd 밖의 자동화에서 부른다면 `OFFSITE_ALERT_MAIL=always` 로 알림을 살려 둔다.
 - `dev-seed.sql` — 로컬 개발용 시드.
 
 ## DB 백업 / 복원
