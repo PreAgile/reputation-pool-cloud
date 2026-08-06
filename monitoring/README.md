@@ -180,6 +180,46 @@ docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prom
 > 필요하고 **#174** 로 분리했다. 이 절이 덮는 것은 **서버는 살아 있는데 백업이 낡은** 경우다.
 > 유휴 회수·크레딧 만료(#15)는 그 사각지대에 있다.
 
+## 설정 변경은 어떻게 반영되나
+
+`monitoring/` 아래 파일을 고쳐 머지하면 배포 타이머가 5분 내 `git pull` 하지만, **그것만으로는 돌고 있는
+프로세스에 닿지 않는다.** `compose up` 은 마운트된 파일의 *내용*이 바뀌었다는 이유로 컨테이너를 재생성하지
+않기 때문이다(서비스 정의가 아니다). 그래서 두 가지가 갖춰져야 한다.
+
+**① 마운트가 디렉터리여야 한다.** 단일 파일 bind mount 는 호스트에서 그 파일이 **교체**될 때
+(`git pull` 은 새 파일을 쓰고 rename 한다) 컨테이너가 삭제된 옛 inode 를 계속 가리킨다. 그러면 배포가
+성공해도 컨테이너 안의 설정은 예전 그대로이고 **SIGHUP 리로드조차 옛 파일을 다시 읽는다.**
+
+2026-08-06 에 실측한 대조가 이걸 그대로 보여준다 — 같은 배포, 같은 `git pull`, 두 컨테이너 모두 재생성되지
+않았는데 결과가 갈렸다:
+
+| | 마운트 | 새 내용이 보였나 | inode (호스트 / 컨테이너) |
+|---|---|---|---|
+| `grafana` | **디렉터리** | ✅ 새 패널 반영 | 534764 / 534764 |
+| `prometheus` | 단일 파일 | ❌ 새 룰 그룹 없음 | 535249 / 575320 |
+
+그래서 `prometheus`·`alertmanager` 도 `./monitoring` 을 디렉터리로 마운트한다. 컨테이너 안 경로는 그대로라
+(`/etc/prometheus/alerts.yml` 등) `rule_files` 나 `--config.file` 은 바뀌지 않았다.
+
+**② 프로세스에 리로드 신호를 줘야 한다.** `pull-deploy.sh` 가 배포 성공 후 두 컨테이너에 `SIGHUP` 을
+보낸다. 항상 보낸다 — 설정이 안 바뀐 배포에서는 재파싱뿐이라 무해하고, "바뀌었는지" 를 판정하는 로직을
+두면 그 판정이 틀릴 때 원래 문제(조용히 반영되지 않음)로 되돌아간다.
+
+리로드 실패는 배포를 되돌리지 않는다. 새 이미지는 이미 떴고 헬스도 통과했으며, Prometheus 는 잘못된 설정을
+만나면 **옛 설정으로 계속 도는 것이 설계**라 서비스가 멈추지 않는다. 대신 로그에 남긴다.
+
+손으로 확인·리로드할 때:
+
+```bash
+# 컨테이너가 새 파일을 보고 있나
+docker exec reputation-pool-prometheus grep -c <새로 추가한 문구> /etc/prometheus/alerts.yml
+# 리로드
+docker kill -s HUP reputation-pool-prometheus
+# 룰 그룹이 실제로 로드됐나 (이게 최종 확인이다)
+docker exec reputation-pool-prometheus wget -qO- http://localhost:9090/api/v1/rules \
+  | tr ',' '\n' | grep -oE '"name":"reputation-pool-[a-z-]+"' | sort -u
+```
+
 ## 알림 라우팅
 
 ### 역할 분담 (하이브리드)
