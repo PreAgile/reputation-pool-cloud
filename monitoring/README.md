@@ -10,6 +10,7 @@
 | `prometheus` | `app:8083/actuator/prometheus` 를 15초마다 스크레이프, 시계열 저장, `slo-rules.yml`(SLI) + `alerts.yml`(알림) 평가. 보존 32일(#79 — 30일 버짓 계산에 필요, 기본값은 15일) | 호스트 미노출(compose 내부 전용) |
 | `alertmanager` | firing 알림을 받아 grouping/dedup/silence/정비창 처리 후 receiver 로 통지(#76) | 호스트 미노출(compose 내부 전용) |
 | `grafana` | Prometheus 데이터소스 + 프로비저닝된 대시보드 | `127.0.0.1:3001` (loopback, 로컬 확인용) |
+| `node-exporter` | **백업 신선도 게이지만** 노출(#131). 기본 collector 를 전부 끄고 textfile 하나만 켠다 — 호스트 지표가 목적이 아니라 `/proc`·`/sys` 마운트나 host network 없이 볼륨 하나만 읽는다 | 호스트 미노출(compose 내부 전용) |
 
 - SLO 목표와 에러버짓: **[`docs/engineering/slo.md`](../docs/engineering/slo.md)**
 - 대시보드: `http://localhost:3001` (기본 admin/admin — 프로덕션은 `GRAFANA_ADMIN_PASSWORD` 주입)
@@ -39,7 +40,7 @@
 
 ## 알림
 
-룰은 세 갈래다(#79 이후). Prometheus 가 전부 평가하고(Prometheus UI 의 Alerts/ALERTS 시계열로도 확인 가능),
+룰은 네 갈래다(#79 이후, 백업 신선도는 #131). Prometheus 가 전부 평가하고(Prometheus UI 의 Alerts/ALERTS 시계열로도 확인 가능),
 firing 알림은 `prometheus.yml` 의 `alerting.alertmanagers` 배선을 통해 `alertmanager` 서비스로 넘어가 실제
 통지 라우팅까지 이어진다(#76).
 
@@ -47,6 +48,7 @@ firing 알림은 `prometheus.yml` 의 `alerting.alertmanagers` 배선을 통해 
 |---|---|---|---|
 | **에러버짓 소진율** | `alerts.yml` · `reputation-pool-error-budget` (지표는 `slo-rules.yml`) | 사용자가 겪는 **증상**을 SLO 목표에서 도출된 소진율로 평가 | `critical`(page) + `warning` |
 | **원인·포화 신호** | `alerts.yml` · `reputation-pool-signals` | 사용자가 겪기 *전에* 또는 *증상 없이* 나빠지는 것(DB풀·도메인 급증·체크포인트) | `warning` |
+| **백업 신선도** | `alerts.yml` · `reputation-pool-backup-freshness` | 백업이 **안 도는 것**을 알린다(#131). 돌다가 실패하는 경우는 스크립트가 메일로 알린다 | `warning` + `critical` |
 | **워치독** | `alerts.yml` · `reputation-pool-liveness` + `*MetricMissing` | 알림 자체가 고장 났음을 알린다 | `critical`/`warning` |
 
 **page 를 울릴 자격이 있는 것은 첫 갈래뿐이다.** 원인 신호를 소진율로 승격하지 않는 이유는
@@ -143,6 +145,40 @@ docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prom
 > `reputation_pool_restore_failures_total` 이고 `PoolRestoreFailed` 룰이 그걸 본다.
 > 덮어쓰기 자체를 막는 것(저장 건너뛰기 / 해당 테넌트 서빙 거부)은 가용성 트레이드오프가 있는 동작
 > 변경이라 별도 이슈로 다룬다.
+
+### 백업 신선도 (#131)
+
+`backup-offsite.sh` 는 **돌다가 실패하면** 메일을 보낸다. 그런데 백업의 실패 모드는 두 가지이고 그 알림은
+한쪽만 덮는다 — 타이머가 죽거나 사이드카가 멈춰 **아예 안 도는** 경우에는 실패 메일도 오지 않고 어떤
+지표도 움직이지 않는다(백업은 요청 경로가 아니다). 알아차리는 시점이 "복원해야 하는 날" 이 된다. #80 의
+체크포인트와 같은 형태의 증상 없는 고장이고, 같은 방식으로 막는다.
+
+| 게이지 | 쓰는 쪽 | 무엇 |
+|---|---|---|
+| `rp_backup_local_last_success_timestamp_seconds` | `backup.sh` (backup 사이드카, 컨테이너) | 마지막 로컬 `pg_dump` 성공 시각 |
+| `rp_backup_remote_last_success_timestamp_seconds` | `backup-offsite.sh` (호스트 systemd 타이머) | 마지막 Object Storage 업로드 성공 시각 |
+
+- **로컬과 원격을 따로 본다.** 둘 중 하나만 끊기는 것이 실제 실패 모드다. 사이드카는 도는데 오프사이트
+  타이머만 죽으면 서버에 덤프가 쌓이지만 인스턴스가 사라지는 순간 전부 없어진다 — 그 경우를 위해
+  오프사이트를 만들었으므로 그것만 죽는 상황이 가장 위험하다.
+- **정상은 톱니다.** 24시간 주기로 0 에서 올라가다 다음 백업에서 0 으로 떨어진다. 단조 증가로 바뀌면
+  그 축이 죽은 것이다.
+- **임계는 36h(warning) / 72h(critical)** — 주기가 24h 이므로 1.5배와 3배다. 한 번 놓친 것은 봐주고
+  연속으로 놓친 것은 봐주지 않는다. 사이드카가 `sleep 86400` 루프라 덤프 시각이 컨테이너 재시작마다
+  밀리는데(정확히 24h 가 아니다) 1.5배 여유가 그 드리프트를 흡수한다.
+- **게이지 부재는 별도 알림이다.** 나이 룰은 게이지가 있을 때만 평가되므로, 게이지가 사라지면
+  (node-exporter 가 죽었다 / 볼륨 마운트가 빠졌다 / 한 번도 성공하지 못했다) 조용해진다 —
+  `BackupFreshnessMetricMissing` 이 그 부재를 알린다. `SurgeThresholdMetricMissing`(#77)과 같은 이유다.
+
+**왜 앱이 아니라 node-exporter 인가.** 백업은 셸 스크립트와 systemd 타이머가 하는 일이고, 특히 **원격**
+상태를 앱이 직접 조회하려면 앱에 OCI 접근을 줘야 한다. 앱은 공개 인터넷에 노출된 프로세스라 침해되면
+오프사이트 버킷까지 열리고, 그러면 "여기가 털려도 저기는 남는다"는 오프사이트 백업의 전제가 깨진다.
+그래서 OCI 를 이미 보고 있는 스크립트가 결과만 textfile 로 남긴다.
+
+> ⚠️ **서버가 꺼져 있는 경우는 이 장치로 잡히지 않는다.** Prometheus 도 함께 꺼지므로 서버 안의 어떤
+> 것으로도 감지할 수 없다 — self-hosted 감시는 감시 대상과 운명을 공유한다. 그건 외부 dead man's switch 가
+> 필요하고 **#174** 로 분리했다. 이 절이 덮는 것은 **서버는 살아 있는데 백업이 낡은** 경우다.
+> 유휴 회수·크레딧 만료(#15)는 그 사각지대에 있다.
 
 ## 알림 라우팅
 

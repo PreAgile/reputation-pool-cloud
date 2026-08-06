@@ -28,6 +28,7 @@
 #   OFFSITE_PREFIX=db/
 #   OFFSITE_RETENTION_DAYS=30      # 원격 보존(서버 볼륨은 backup.sh 가 7일). env/ 는 대상 아님
 #   OFFSITE_VOLUME=               # 비우면 자동 탐색
+#   OFFSITE_METRICS_VOLUME=       # 신선도 textfile 볼륨(#131). 비우면 자동 탐색
 #   OFFSITE_ENV_CERT=/home/ubuntu/.rp-backup-cert.pem   # .env 를 암호화할 **공개** 인증서. 미설정이면 경고만
 #   OFFSITE_ENV_PREFIX=env/
 #   OFFSITE_ALERT_MAIL=auto        # auto=systemd 실행일 때만 메일 | always | never
@@ -438,6 +439,46 @@ for item in items:
 			log "warn: 삭제 실패: $obj"
 		fi
 	done <<< "$stale"
+fi
+
+# ---------------------------------------------------------------------------
+# 신선도 게이지 (#131)
+# ---------------------------------------------------------------------------
+# 이 스크립트는 **돌다가 실패하면** 메일을 보내지만, 타이머가 죽어 **아예 안 도는** 경우에는 아무 신호가
+# 없다. 그 공백을 메우는 것이 이 게이지다 — 여기까지 도달했다는 것이 "원격 업로드가 끝났다"이고, 도달하지
+# 못하면 게이지가 낡아 `OffsiteBackupStale` 이 울린다. 위의 `die` 들이 전부 이 줄 앞에 있는 것이 설계다.
+#
+# **쓰기 실패로 백업을 실패시키지 않는다.** 오브젝트는 이미 버킷에 있다. 관측을 못 해서 백업을 실패로
+# 기록하면 이 변경이 백업을 더 약하게 만든다 — 대신 경고를 남겨 그 사실이 조용히 묻히지 않게 한다.
+if [ "$DRY_RUN" = true ]; then
+	log "[dry-run] 신선도 게이지를 갱신했을 것"
+else
+	# 볼륨 이름은 compose 프로젝트 접두어가 붙는다 — 덤프 볼륨과 같은 이유로 접미로 찾는다.
+	METRICS_VOLUME="${OFFSITE_METRICS_VOLUME:-}"
+	if [ -z "$METRICS_VOLUME" ]; then
+		METRICS_VOLUME="$("${DOCKER[@]}" volume ls --format '{{.Name}}' | grep -E '_reputation-pool-metrics$' | head -1 || true)"
+	fi
+	if [ -z "$METRICS_VOLUME" ]; then
+		# 조용히 넘어가지 않는다 — 게이지가 없으면 `BackupFreshnessMetricMissing` 이 울리는데, 그때
+		# 원인이 이 줄이었다는 것을 로그에서 찾을 수 있어야 한다.
+		log "warn: 신선도 볼륨을 찾지 못했다 (_reputation-pool-metrics) — 게이지를 갱신하지 못했다"
+	else
+		# 원자적 쓰기: node-exporter 는 `*.prom` 만 읽으므로 `.tmp` 에 쓴 뒤 rename 한다. 쓰는 중간을
+		# 스크레이프하면 잘린 파일을 파싱하게 된다(textfile collector 의 알려진 함정).
+		if {
+			printf '# HELP rp_backup_remote_last_success_timestamp_seconds Unix time of the last successful offsite upload.\n'
+			printf '# TYPE rp_backup_remote_last_success_timestamp_seconds gauge\n'
+			printf 'rp_backup_remote_last_success_timestamp_seconds %s\n' "$(date -u +%s)"
+		} | "${DOCKER[@]}" run --rm -i -v "$METRICS_VOLUME":/m alpine:3 \
+			sh -c 'cat > /m/rp-backup-remote.prom.tmp && mv /m/rp-backup-remote.prom.tmp /m/rp-backup-remote.prom' \
+			> /dev/null; then
+			# stdout 만 버린다(docker 의 진행 출력). stderr 는 journal 로 흘려보낸다 — 실패 이유가
+			# 대개 거기 있고, 그것까지 지우면 아래 warn 만 남아 원인을 다시 찾아야 한다.
+			log "신선도 게이지 갱신: rp_backup_remote_last_success_timestamp_seconds"
+		else
+			log "warn: 신선도 게이지 갱신 실패 (업로드 자체는 성공했다)"
+		fi
+	fi
 fi
 
 # ---------------------------------------------------------------------------

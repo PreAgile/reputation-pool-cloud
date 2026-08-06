@@ -219,6 +219,40 @@ services:
       - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
       - ./scripts/restore.sh:/usr/local/bin/restore.sh:ro
       - reputation-pool-backups:/backups
+      # 덤프 성공 시각을 여기에 쓴다 — node-exporter 가 읽어 Prometheus 에 노출한다(#131).
+      - reputation-pool-metrics:/metrics
+    restart: unless-stopped
+
+  # 백업 신선도 SLI 의 노출 경로 (#131).
+  #
+  # ## 왜 필요한가
+  # `backup-offsite.sh` 는 **돌다가 실패하면** 메일을 보내지만, 타이머가 죽어 **아예 안 도는** 경우에는
+  # 아무 신호가 없다. 조용한 실패의 전형이고 #80 의 `CheckpointStale` 이 막은 것과 같은 형태다. 그래서
+  # 두 스크립트가 마지막 성공 시각을 `.prom` 파일로 남기고, 이 컨테이너가 그것을 스크레이프 가능한
+  # 형태로 노출한다(`alerts.yml` 의 `BackupStale`/`OffsiteBackupStale`).
+  #
+  # ## 왜 노드 메트릭은 켜지 않는가
+  # **`--collector.disable-defaults` 로 전부 끄고 textfile 하나만 켠다.** 필요한 것은 textfile collector
+  # 뿐이고, 호스트 메트릭(cpu·메모리·디스크)을 켜려면 `/proc`·`/sys` 를 마운트하고 host PID·network 를
+  # 공유해야 한다 — 공개 서버에서 그건 이 이슈가 요구하지 않은 보안 표면 확대다. 전부 끄면 이 컨테이너는
+  # 볼륨 하나만 읽는 격리된 프로세스가 되고 메모리도 수십 MB 로 끝난다. 호스트 지표가 필요해지면 그때
+  # collector 를 켜는 별도 결정으로 다룬다.
+  #
+  # ## 왜 정적 파일 서버가 아니라 node-exporter 인가
+  # textfile collector 가 `*.prom` 파싱·중복 검사·형식 검증을 이미 한다(잘못 쓴 파일은 스크레이프 오류로
+  # 드러난다). 같은 것을 직접 만들면 그 검증을 다시 구현해야 한다.
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    container_name: reputation-pool-node-exporter
+    command:
+      - --collector.disable-defaults
+      - --collector.textfile
+      - --collector.textfile.directory=/metrics
+      # 호스트 포트를 열지 않는다 — prometheus/grafana/alertmanager 와 같은 posture(compose 네트워크 전용).
+      - --web.listen-address=:9100
+    volumes:
+      # read-only: 이 컨테이너는 읽기만 한다. 쓰는 쪽은 backup 사이드카와 호스트의 backup-offsite.sh 다.
+      - reputation-pool-metrics:/metrics:ro
     restart: unless-stopped
 
 volumes:
@@ -228,6 +262,11 @@ volumes:
   reputation-pool-grafana-data:
   reputation-pool-alertmanager-data:
   reputation-pool-backups:
+  # 백업 신선도 textfile (#131). 쓰는 쪽이 둘이라 named volume 을 쓴다 — backup 사이드카는 컨테이너
+  # 마운트로, 호스트의 backup-offsite.sh 는 `docker run -v … alpine` 으로 쓴다(그 스크립트가 덤프를 꺼낼
+  # 때 이미 쓰는 패턴이다). bind mount 로 두면 호스트에 디렉터리를 미리 만들어야 하고 bootstrap.sh 가
+  # 그 일을 하지 않으므로, 새 사전 조건을 만들지 않는 쪽을 택했다.
+  reputation-pool-metrics:
 
 # Compose Spec 의 secrets(environment 소스, #76): 커스텀 entrypoint/envsubst 렌더링 없이 호스트 환경
 # 변수 값을 파일로 자동 마운트한다(/run/secrets/<name>). REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL 이

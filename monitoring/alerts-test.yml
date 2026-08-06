@@ -730,3 +730,120 @@ tests:
         alertname: DataPlaneStreamQuotaFailing
         exp_alerts: []
 
+
+  # ---------------------------------------------------------------------------
+  # 백업 신선도 (#131)
+  # ---------------------------------------------------------------------------
+  # 이 룰들은 `time() - gauge` 로 나이를 재므로, 테스트에서 36h·72h 를 만들려면 두 가지 방법이 있다:
+  # ① eval_time 을 40h/80h 로 밀고 시계열을 그만큼 길게 주기(1m 간격이면 2400~4800 샘플), ② 게이지 값을
+  # **음수로** 주어 원점(promtool 의 t=0)에서 이미 나이가 큰 상태를 만들기.
+  #
+  # ②를 쓴다. 시계열이 30개로 끝나고 임계값 산수가 한눈에 보인다. 게이지 값 -130000 은 "실제로 그 시각에
+  # 백업했다"는 뜻이 아니라 **나이를 만드는 장치**다 — 5분 lookback 때문에 샘플 간격은 1m 을 유지해야
+  # 하므로(①은 그래서 샘플이 수천 개가 된다) 값을 미는 편이 싸다.
+  #
+  # 계산: eval_time 30m = 1800s. age = 1800 - gauge.
+  #   gauge=-130000 → age 131800 (36h=129600 초과, 72h=259200 미달) → warning 만
+  #   gauge=-260000 → age 261800 (둘 다 초과)                      → warning + critical
+
+  # 로컬·원격 둘 다 방금 성공했다 → 발화하지 않는다 (조용한 정상 상태)
+  - interval: 1m
+    name: "백업 신선도: 로컬·원격 모두 최신"
+    input_series:
+      - series: "rp_backup_local_last_success_timestamp_seconds"
+        values: "1700x30"
+      - series: "rp_backup_remote_last_success_timestamp_seconds"
+        values: "1700x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BackupStale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: OffsiteBackupStale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BackupFreshnessMetricMissing
+        exp_alerts: []
+
+  # 로컬 덤프가 36h 를 넘겼다(72h 는 아니다) → warning 만, critical 은 아니다
+  - interval: 1m
+    name: "백업 신선도: 로컬 덤프가 36시간 초과 → warning"
+    input_series:
+      - series: "rp_backup_local_last_success_timestamp_seconds"
+        values: "-130000x30"
+      - series: "rp_backup_remote_last_success_timestamp_seconds"
+        values: "1700x30"
+    alert_rule_test:
+      # 조건은 처음부터 참이지만 for: 10m 이 차지 않았다 → pending
+      - eval_time: 5m
+        alertname: BackupStale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "로컬 DB 덤프가 36시간 넘게 갱신되지 않았다 — backup 사이드카를 확인한다"
+              description: "docker compose ps backup 과 docker logs reputation-pool-backup 을 본다. 사이드카는 성공 시 24h, 실패 시 1h 뒤 재시도하므로 실패가 만성이면 로그에 반복해서 남는다.\n"
+      - eval_time: 30m
+        alertname: BackupStaleCritical
+        exp_alerts: []
+      # 원격은 건강하므로 오프사이트 룰은 조용하다 — 두 축이 독립임을 잠근다
+      - eval_time: 30m
+        alertname: OffsiteBackupStale
+        exp_alerts: []
+
+  # 오프사이트가 72h 를 넘겼다 → warning 과 critical 이 함께 발화한다
+  - interval: 1m
+    name: "백업 신선도: 오프사이트가 72시간 초과 → warning + critical"
+    input_series:
+      - series: "rp_backup_local_last_success_timestamp_seconds"
+        values: "1700x30"
+      - series: "rp_backup_remote_last_success_timestamp_seconds"
+        values: "-260000x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OffsiteBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "오프사이트 업로드가 36시간 넘게 없다 — 백업이 이 서버와 운명을 공유하는 상태"
+              description: "systemctl list-timers rp-backup-offsite.timer 와 journalctl -u rp-backup-offsite.service 를 본다. 타이머가 죽어 있으면 ./scripts/backup-offsite.sh --install 로 다시 설치한다.\n"
+      - eval_time: 30m
+        alertname: OffsiteBackupStaleCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "오프사이트 업로드가 3일 넘게 없다 — 인스턴스가 사라지면 3일치를 잃는다"
+              description: "체험 크레딧 만료·유휴 회수(deployment.md §10)로 인스턴스가 사라지는 시나리오에서 이 상태가 가장 위험하다. sudo systemctl start rp-backup-offsite.service 로 즉시 한 번 올린다.\n"
+      # 로컬은 건강하다
+      - eval_time: 30m
+        alertname: BackupStale
+        exp_alerts: []
+
+  # 게이지 한쪽이 사라졌다(원격만 없음) → 부재 자체를 알린다. 낡은 것과 없는 것은 다른 사고다.
+  - interval: 1m
+    name: "백업 신선도: 원격 게이지가 사라짐 → 부재 알림"
+    input_series:
+      - series: "rp_backup_local_last_success_timestamp_seconds"
+        values: "1700x60"
+    alert_rule_test:
+      # for: 30m 이 차기 전에는 pending
+      - eval_time: 20m
+        alertname: BackupFreshnessMetricMissing
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: BackupFreshnessMetricMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "백업 신선도 게이지가 없다 — 백업 상태를 아무도 관측하지 못하는 중"
+              description: "node-exporter 컨테이너와 reputation-pool-metrics 볼륨 마운트를 확인한다. 스크립트가 한 번도 성공하지 못했다면 게이지 파일 자체가 없다 — 그 경우 백업 로그를 먼저 본다.\n"
+      # 게이지가 없으므로 나이 룰은 평가되지 않는다(그래서 부재 룰이 필요하다)
+      - eval_time: 45m
+        alertname: OffsiteBackupStale
+        exp_alerts: []

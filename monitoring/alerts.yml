@@ -497,3 +497,80 @@ groups:
           summary: "동시 스트림 상한이 적용되지 않고 있다 — 쿼터가 예외로 통과시키는 중"
           description: "app 로그에서 'stream quota failed' 를 확인한다. 상한 없이 열려 있는 상태다."
 
+
+  # 백업 신선도 (#131) — "며칠째 새 백업이 없다"를 관측 가능하게 만든다.
+  #
+  # 기존 알림은 백업이 **돌다가 실패했을 때** 메일로 온다(`backup-offsite.sh` 의 `alert`). 여기서 막는 것은
+  # 그 반대 경우다: 타이머가 죽거나 사이드카가 멈춰 **아예 안 도는** 상태. 그러면 실패 메일도 오지 않고
+  # 어떤 지표도 움직이지 않아, 알아차리는 시점이 "복원해야 하는 날" 이 된다. #80 의 `CheckpointStale` 과
+  # 같은 형태의 공백이고 같은 방식으로 막는다.
+  #
+  # **로컬과 원격을 따로 본다.** 둘 중 하나만 끊기는 것이 실제 실패 모드다 — 사이드카는 도는데 오프사이트
+  # 타이머만 죽으면 서버에는 덤프가 쌓이지만 인스턴스가 사라지는 순간 전부 없어진다(그 경우를 위해
+  # 오프사이트를 만들었다). 반대로 오프사이트만 살아 있으면 매일 같은 낡은 덤프를 다시 확인하며 올린다.
+  #
+  # 임계값: 백업 주기가 24h 이므로 36h(1.5주기)에 warning, 72h(3주기)에 critical. 한 번 놓친 것은 봐주고
+  # 연속으로 놓친 것은 봐주지 않는다. 덤프 생성 시각은 사이드카의 `sleep 86400` 루프가 컨테이너 재시작마다
+  # 밀리므로 정확히 24h 가 아니다 — 1.5주기 여유가 그 드리프트를 흡수한다.
+  - name: reputation-pool-backup-freshness
+    rules:
+      - alert: BackupStale
+        expr: time() - rp_backup_local_last_success_timestamp_seconds > 36 * 3600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "로컬 DB 덤프가 36시간 넘게 갱신되지 않았다 — backup 사이드카를 확인한다"
+          description: >
+            docker compose ps backup 과 docker logs reputation-pool-backup 을 본다. 사이드카는 성공 시 24h,
+            실패 시 1h 뒤 재시도하므로 실패가 만성이면 로그에 반복해서 남는다.
+
+      - alert: BackupStaleCritical
+        expr: time() - rp_backup_local_last_success_timestamp_seconds > 72 * 3600
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "로컬 DB 덤프가 3일 넘게 없다 — 복원 지점이 3일 이상 낡았다"
+          description: >
+            이 시점에 장애가 나면 3일치 데이터를 잃는다. 사이드카를 즉시 확인하고, 급하면 수동으로
+            docker exec reputation-pool-backup /usr/local/bin/backup.sh 를 돌린다.
+
+      - alert: OffsiteBackupStale
+        expr: time() - rp_backup_remote_last_success_timestamp_seconds > 36 * 3600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "오프사이트 업로드가 36시간 넘게 없다 — 백업이 이 서버와 운명을 공유하는 상태"
+          description: >
+            systemctl list-timers rp-backup-offsite.timer 와 journalctl -u rp-backup-offsite.service 를 본다.
+            타이머가 죽어 있으면 ./scripts/backup-offsite.sh --install 로 다시 설치한다.
+
+      - alert: OffsiteBackupStaleCritical
+        expr: time() - rp_backup_remote_last_success_timestamp_seconds > 72 * 3600
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "오프사이트 업로드가 3일 넘게 없다 — 인스턴스가 사라지면 3일치를 잃는다"
+          description: >
+            체험 크레딧 만료·유휴 회수(deployment.md §10)로 인스턴스가 사라지는 시나리오에서 이 상태가
+            가장 위험하다. sudo systemctl start rp-backup-offsite.service 로 즉시 한 번 올린다.
+
+      # 게이지가 **낡은 것**과 **아예 없는 것**은 다른 사고다. 위 네 룰은 게이지가 존재할 때만 평가되므로,
+      # 게이지가 사라지면(node-exporter 가 죽었다, 볼륨 마운트가 빠졌다, 스크립트가 한 번도 성공하지 못했다)
+      # 조용해진다 — 알림을 만든 이유가 사라지는 상태다. `SurgeThresholdMetricMissing`(#77)과 같은 이유로
+      # 부재 자체를 알린다.
+      - alert: BackupFreshnessMetricMissing
+        expr: >
+          absent(rp_backup_local_last_success_timestamp_seconds)
+          or absent(rp_backup_remote_last_success_timestamp_seconds)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "백업 신선도 게이지가 없다 — 백업 상태를 아무도 관측하지 못하는 중"
+          description: >
+            node-exporter 컨테이너와 reputation-pool-metrics 볼륨 마운트를 확인한다. 스크립트가 한 번도
+            성공하지 못했다면 게이지 파일 자체가 없다 — 그 경우 백업 로그를 먼저 본다.

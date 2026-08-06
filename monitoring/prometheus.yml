@@ -28,3 +28,16 @@ scrape_configs:
       - targets: ["app:8083"]
         labels:
           service: reputation-pool-cloud
+
+  # 백업 신선도 (#131). 앱이 아니라 이쪽에서 오는 이유: 백업은 셸 스크립트와 systemd 타이머가 하는 일이고,
+  # 특히 **원격 오브젝트** 상태를 앱이 직접 조회하려면 앱에 OCI 접근을 줘야 한다 — 공개 노출 프로세스가
+  # 침해되면 오프사이트 버킷까지 열리므로 "여기가 털려도 저기는 남는다"는 전제가 깨진다. 그래서 OCI 를
+  # 이미 보고 있는 스크립트가 결과만 textfile 로 남기고, node-exporter 가 그것을 노출한다.
+  #
+  # 이 대상이 죽으면 신선도 게이지도 사라지므로 `BackupFreshnessMetricMissing`(absent)이 그 경우를 잡는다
+  # — 게이지가 낡은 것과 게이지가 아예 없는 것은 다른 사고다.
+  - job_name: reputation-pool-backup-freshness
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          service: reputation-pool-cloud
