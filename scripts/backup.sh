@@ -39,14 +39,23 @@ echo "pruned dumps older than ${RETENTION_DAYS} days"
 # 원자적 쓰기: node-exporter 는 `*.prom` 만 읽으므로 `.tmp` 에 쓴 뒤 rename 한다. 그렇게 하지 않으면
 # 쓰는 중간을 스크레이프해 잘린 파일을 파싱하게 된다(textfile collector 의 알려진 함정).
 if [ -n "$METRICS_DIR" ] && [ -d "$METRICS_DIR" ]; then
-	{
+	# `A && B || C` 를 쓰지 않는다 — 그것은 if-then-else 가 아니라서 B(성공 로그)가 실패하면 C(경고)까지
+	# 실행돼 두 메시지가 함께 나온다(shellcheck SC2015).
+	#
+	# stderr 를 버리지 않는다. 실패하는 경우는 대개 권한·마운트 문제이고 셸이 그 이유를 stderr 에 적는데
+	# (`… .prom.tmp: Permission denied`), 그것을 지우면 사이드카 로그에 "could not write" 만 남아 원인을
+	# 다시 찾아야 한다. 리다이렉션 자체의 실패는 `2> /dev/null` 로도 억제되지 않으므로(셸이 보고한다)
+	# 지우려는 시도가 실효도 없었다 — 실측으로 확인했다.
+	if {
 		printf '# HELP rp_backup_local_last_success_timestamp_seconds Unix time of the last successful local pg_dump.\n'
 		printf '# TYPE rp_backup_local_last_success_timestamp_seconds gauge\n'
 		printf 'rp_backup_local_last_success_timestamp_seconds %s\n' "$(date -u +%s)"
-	} > "${METRICS_DIR}/rp-backup-local.prom.tmp" 2> /dev/null \
-		&& mv "${METRICS_DIR}/rp-backup-local.prom.tmp" "${METRICS_DIR}/rp-backup-local.prom" 2> /dev/null \
-		&& echo "freshness gauge written: ${METRICS_DIR}/rp-backup-local.prom" \
-		|| echo "warn: could not write freshness gauge to ${METRICS_DIR} (backup itself succeeded)"
+	} > "${METRICS_DIR}/rp-backup-local.prom.tmp" \
+		&& mv "${METRICS_DIR}/rp-backup-local.prom.tmp" "${METRICS_DIR}/rp-backup-local.prom"; then
+		echo "freshness gauge written: ${METRICS_DIR}/rp-backup-local.prom"
+	else
+		echo "warn: could not write freshness gauge to ${METRICS_DIR} (backup itself succeeded)"
+	fi
 else
 	echo "freshness gauge skipped (${METRICS_DIR} not mounted)"
 fi

@@ -465,15 +465,19 @@ else
 	else
 		# 원자적 쓰기: node-exporter 는 `*.prom` 만 읽으므로 `.tmp` 에 쓴 뒤 rename 한다. 쓰는 중간을
 		# 스크레이프하면 잘린 파일을 파싱하게 된다(textfile collector 의 알려진 함정).
-		{
+		if {
 			printf '# HELP rp_backup_remote_last_success_timestamp_seconds Unix time of the last successful offsite upload.\n'
 			printf '# TYPE rp_backup_remote_last_success_timestamp_seconds gauge\n'
 			printf 'rp_backup_remote_last_success_timestamp_seconds %s\n' "$(date -u +%s)"
 		} | "${DOCKER[@]}" run --rm -i -v "$METRICS_VOLUME":/m alpine:3 \
 			sh -c 'cat > /m/rp-backup-remote.prom.tmp && mv /m/rp-backup-remote.prom.tmp /m/rp-backup-remote.prom' \
-			> /dev/null 2>&1 \
-			&& log "신선도 게이지 갱신: rp_backup_remote_last_success_timestamp_seconds" \
-			|| log "warn: 신선도 게이지 갱신 실패 (업로드 자체는 성공했다)"
+			> /dev/null; then
+			# stdout 만 버린다(docker 의 진행 출력). stderr 는 journal 로 흘려보낸다 — 실패 이유가
+			# 대개 거기 있고, 그것까지 지우면 아래 warn 만 남아 원인을 다시 찾아야 한다.
+			log "신선도 게이지 갱신: rp_backup_remote_last_success_timestamp_seconds"
+		else
+			log "warn: 신선도 게이지 갱신 실패 (업로드 자체는 성공했다)"
+		fi
 	fi
 fi
 
