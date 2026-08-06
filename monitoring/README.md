@@ -211,11 +211,13 @@ docker run --rm -v "$PWD/monitoring:/w:ro" -w /w --entrypoint promtool prom/prom
 손으로 확인·리로드할 때:
 
 ```bash
-# 컨테이너가 새 파일을 보고 있나
-docker exec reputation-pool-prometheus grep -c <새로 추가한 문구> /etc/prometheus/alerts.yml
+# 컨테이너가 새 파일을 보고 있나 (방금 추가한 룰 이름으로 바꿔 쓴다 — 반드시 따옴표로 감싼다.
+# 따옴표가 없으면 셸이 꺾쇠를 리다이렉션으로 해석한다)
+docker exec reputation-pool-prometheus grep -c 'BackupStale' /etc/prometheus/alerts.yml
 # 리로드
 docker kill -s HUP reputation-pool-prometheus
-# 룰 그룹이 실제로 로드됐나 (이게 최종 확인이다)
+# 룰 그룹이 실제로 로드됐나 — **이게 최종 확인이다.** 위 리로드 로그는 성공이라고 말하면서 옛 파일을
+# 읽을 수 있으므로(단일 파일 마운트 시절의 함정) 로그를 믿지 않고 로드된 결과를 본다.
 docker exec reputation-pool-prometheus wget -qO- http://localhost:9090/api/v1/rules \
   | tr ',' '\n' | grep -oE '"name":"reputation-pool-[a-z-]+"' | sort -u
 ```
