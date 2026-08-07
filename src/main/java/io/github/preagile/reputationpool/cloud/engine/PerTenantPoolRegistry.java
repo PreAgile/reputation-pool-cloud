@@ -1,8 +1,9 @@
 package io.github.preagile.reputationpool.cloud.engine;
 
-import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.metering.MeterRecorder;
 import io.github.preagile.reputationpool.cloud.metering.TenantMeteringSink;
+import io.github.preagile.reputationpool.cloud.policy.EnginePolicy;
+import io.github.preagile.reputationpool.cloud.policy.EnginePolicySource;
 import io.github.preagile.reputationpool.cloud.tenant.Tenant;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
@@ -36,9 +37,20 @@ import java.util.random.RandomGenerator;
  * and audit history: {@link #build} joins the broadcaster's and audit trail's {@code forPool(tenantId)}
  * views into the tenant's sink, so one tenant's live gRPC subscriber never sees another's events (paired
  * with cloud's {@code subscriptionPoolId()} override on the advisor service, which scopes each
- * subscription to its tenant) and one tenant's audit rows are written under its own {@code pool_id}. The
- * {@code clock} and the global fan-out sink (alerting + metrics, which aggregate across tenants) are the
- * only <em>shared</em> pieces.
+ * subscription to its tenant) and one tenant's audit rows are written under its own {@code pool_id}.
+ * Since #179 the engine tuning is per-tenant too: {@link #build} asks the {@link EnginePolicySource} for
+ * this tenant's {@link EnginePolicy} instead of reading one global set of knobs, so the window, the
+ * cool/recover thresholds, the lease TTL, the cooldown backoff cap and the exploration floor are all a
+ * property of the tenant rather than of the instance. The {@code clock} and the global fan-out sink
+ * (alerting + metrics, which aggregate across tenants) are the only <em>shared</em> pieces.
+ *
+ * <p><b>Policy is read once, when the pool is built.</b> {@code ResourcePool}'s {@code engine} and
+ * {@code leaseTtl} fields are {@code final}, so a running pool cannot be re-tuned in place; a stored
+ * policy change therefore takes effect the next time that tenant's pool is built (eviction or restart),
+ * which the control plane states explicitly rather than pretending otherwise. Rebuilding on every change
+ * was rejected: {@link #evict} drops the in-memory pool, and reputation state, leases and the blocklist
+ * live there — so "change a number" would silently reset the tenant's reputation and drop its in-flight
+ * leases, trading availability for tuning. Replacing only the engine needs an upstream reassembly API.
  *
  * <p><b>The store seam.</b> Stores are made by an injected {@code storeFactory} (tenant id &rarr;
  * store), so the composition root owns the concrete {@code PostgresResourceStore(dataSource, clock,
@@ -64,7 +76,7 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
     private final EventBroadcaster broadcaster;
     private final PostgresAuditTrail auditTrail;
     private final EventSink sharedSink;
-    private final ReputationPoolProperties properties;
+    private final EnginePolicySource policySource;
     private final TenantRepository tenantRepository;
     private final Function<String, ResourceStore> storeFactory;
     private final MeterRecorder meterRecorder;
@@ -74,7 +86,7 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
             EventBroadcaster broadcaster,
             PostgresAuditTrail auditTrail,
             EventSink sharedSink,
-            ReputationPoolProperties properties,
+            EnginePolicySource policySource,
             TenantRepository tenantRepository,
             Function<String, ResourceStore> storeFactory,
             MeterRecorder meterRecorder) {
@@ -82,7 +94,7 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
         this.broadcaster = Objects.requireNonNull(broadcaster, "broadcaster must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
         this.sharedSink = Objects.requireNonNull(sharedSink, "sharedSink must not be null");
-        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.policySource = Objects.requireNonNull(policySource, "policySource must not be null");
         this.tenantRepository = Objects.requireNonNull(tenantRepository, "tenantRepository must not be null");
         this.storeFactory = Objects.requireNonNull(storeFactory, "storeFactory must not be null");
         this.meterRecorder = Objects.requireNonNull(meterRecorder, "meterRecorder must not be null");
@@ -111,7 +123,17 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
     /** Builds (idempotently) and returns the managed pool+store pair for {@code tenantId}. */
     public ManagedPool manage(String tenantId) {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
-        return pools.computeIfAbsent(tenantId, this::build);
+        ManagedPool existing = pools.get(tenantId);
+        if (existing != null) {
+            return existing;
+        }
+        // Resolve the policy outside computeIfAbsent. Since #179 that lookup hits the database, and the
+        // mapping function of a ConcurrentHashMap runs while holding the bin's lock — doing I/O there
+        // would stall every other tenant whose id hashes to the same bin for the duration of the query.
+        // Two threads racing here both resolve and only one's pool is kept; the discarded one is
+        // harmless, because a policy is read at build time anyway and the loser's is the same or older.
+        EnginePolicy policy = policySource.policyFor(tenantId);
+        return pools.computeIfAbsent(tenantId, id -> build(id, policy));
     }
 
     /** The pools built so far — the set the lifecycle checkpoints on each interval. */
@@ -133,15 +155,17 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
         return ids;
     }
 
-    private ManagedPool build(String tenantId) {
+    private ManagedPool build(String tenantId, EnginePolicy policy) {
         // One store confined to this tenant's pool_id namespace: its save() deletes/inserts only this
         // tenant's rows and its load() reads only this tenant's rows.
         ResourceStore store = storeFactory.apply(tenantId);
+        // Every knob comes from this tenant's own policy (#179) — including the two that used to be
+        // unreachable because the strategies were built with their no-arg constructors.
         ReputationEngine engine = new ReputationEngine(
-                new AdaptiveCooldownPolicy(),
-                properties.engine().windowSize(),
-                properties.engine().coolAfter(),
-                properties.engine().recoverAfter());
+                new AdaptiveCooldownPolicy(policy.cooldownMaxExponent()),
+                policy.windowSize(),
+                policy.coolAfter(),
+                policy.recoverAfter());
         // Fan out to this tenant's own event stream and audit history (the broadcaster's and audit
         // trail's forPool(tenantId) views, #29), the global fan-out sink (alerting + metrics), and a
         // tenant-bound metering sink. The tenant is fixed by which pool emitted — no tenant field on the
@@ -154,11 +178,11 @@ public final class PerTenantPoolRegistry implements TenantPoolRegistry {
                 new TenantMeteringSink(tenantId, meterRecorder)));
         ResourcePool pool = new ResourcePool(
                 engine,
-                new WeightedRandomSelectionStrategy(),
+                new WeightedRandomSelectionStrategy(policy.explorationFloor()),
                 tenantSink,
                 clock,
                 RandomGenerator.getDefault(),
-                properties.leaseTtl());
+                policy.leaseTtl());
         return new ManagedPool(tenantId, pool, store);
     }
 }

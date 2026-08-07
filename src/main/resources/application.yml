@@ -118,12 +118,30 @@ reputation-pool:
       window: PT15M
       block-duration: PT15M
       global-max-per-second: 20
+  # 이 인스턴스의 엔진 *기본값*(이슈 #179). 자기 정책을 저장하지 않은 테넌트가 그대로 이 값으로 돈다 —
+  # 정책 행이 하나도 없으면 #179 이전과 동작이 완전히 같다. 테넌트별 정책은 컨트롤 플레인의
+  # PUT /api/tenants/{id}/engine-policy 로 넣는다.
   lease-ttl: PT30S
   checkpoint-interval: PT30S
   engine:
     window-size: 10
     cool-after: 2
     recover-after: 2
+    # upstream 의 no-arg 기본값과 같은 값이다(AdaptiveCooldownPolicy.DEFAULT_MAX_EXPONENT=6,
+    # WeightedRandomSelectionStrategy.DEFAULT_EXPLORATION_FLOOR=1.0). 예전엔 no-arg 생성자로 박혀 있어
+    # 운영자도 바꿀 수 없던 값이라, 노브로 꺼내면서 기본값은 그대로 뒀다.
+    cooldown-max-exponent: 6
+    exploration-floor: 1.0
+  # 테넌트 정책이 위 기본값에서 얼마나 멀어질 수 있는지의 상한(이슈 #179). window-size 는 셀 하나가 들고
+  # 있는 결과 개수라, 테넌트에게 열어 주면 limits(#84)가 셀 단위로는 볼 수 없는 배수가 열린다 — 셀 몇 개로도
+  # 힙을 먹을 수 있다. 상한은 정책을 *저장할 때* 걸어 400 으로 거절한다(풀 생성 시점이면 이미 늦다).
+  #
+  # 전역 예산을 테넌트 수로 나누지 않는다. 그건 GlobalResourceBudget 이 일부러 피한 설계이고(혼자인 테넌트를
+  # 천장 아래로 묶고, 테넌트가 들락날락할 때마다 재계산해야 한다), 대신 "이 인스턴스가 스스로 정한 기본값의
+  # 몇 배까지"로 잡는다. 인스턴스 설정이 다르면 상한도 다르지만 재계산은 없다. 이 배수 자체는 실측되지
+  # 않은 가설이다 — limits 의 기본값과 같은 성격이다.
+  policy-ceiling:
+    max-multiple-of-default: ${REPUTATION_POOL_POLICY_CEILING_MAX_MULTIPLE:10}
   audit:
     purge-interval: PT1H
     # Opt-in audit retention (ISO-8601, e.g. P30D). P0D (the default) means never purge — the trail

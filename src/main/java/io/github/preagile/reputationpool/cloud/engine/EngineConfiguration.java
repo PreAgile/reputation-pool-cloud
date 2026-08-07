@@ -35,12 +35,15 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * {@code CompositeEventSink} are cloud-side ports of the (unconsumed) server module's classes. Pool
  * events fan out to both the live gRPC stream and the durable audit trail.
  *
- * <p><b>Per-tenant isolation (#9b, #29).</b> There is no single pool or single store bean any more: the
- * {@link PerTenantPoolRegistry} owns one pool + one tenant-scoped store per tenant, created lazily. The
- * {@code clock} and the global fan-out sink (alerting + metrics, which aggregate across tenants) are
- * shared; pool state, its persisted rows, and — since #29 — each tenant's event stream and audit
- * history (the broadcaster's and audit trail's {@code forPool(tenantId)} views, the stream paired with
- * cloud's {@code subscriptionPoolId()} subscription-scope override) are not.
+ * <p><b>Per-tenant isolation (#9b, #29, #179).</b> There is no single pool or single store bean any more:
+ * the {@link PerTenantPoolRegistry} owns one pool + one tenant-scoped store per tenant, created lazily.
+ * The {@code clock} and the global fan-out sink (alerting + metrics, which aggregate across tenants) are
+ * shared; pool state, its persisted rows, each tenant's event stream and audit history (#29 — the
+ * broadcaster's and audit trail's {@code forPool(tenantId)} views, the stream paired with cloud's
+ * {@code subscriptionPoolId()} subscription-scope override), and its engine tuning (#179 — resolved per
+ * tenant through {@code EnginePolicySource}) are not. The {@code reputation-pool.engine.*} and
+ * {@code reputation-pool.lease-ttl} properties below are now this instance's <em>defaults</em>: what a
+ * tenant runs when it has no stored policy of its own.
  */
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
@@ -146,7 +149,7 @@ public class EngineConfiguration {
             EventBroadcaster broadcaster,
             PostgresAuditTrail auditTrail,
             EventSink poolEventSink,
-            ReputationPoolProperties props,
+            io.github.preagile.reputationpool.cloud.policy.EnginePolicySource enginePolicySource,
             TenantRepository tenantRepository,
             Function<String, ResourceStore> resourceStoreFactory,
             io.github.preagile.reputationpool.cloud.metering.MeterRecorder meterRecorder) {
@@ -155,7 +158,7 @@ public class EngineConfiguration {
                 broadcaster,
                 auditTrail,
                 poolEventSink,
-                props,
+                enginePolicySource,
                 tenantRepository,
                 resourceStoreFactory,
                 meterRecorder);

@@ -192,6 +192,32 @@ REPUTATION_POOL_RATE_LIMIT_MAX_CONCURRENT_STREAMS=20 # 테넌트당 동시 Subsc
 `REPUTATION_POOL_MAX_CELLS`(기본 500,000)는 **테넌트별이 아니라 전체 합계** 상한이다(#84 — 공유 JVM
 이므로 혼자면 전부 쓰고 여럿이면 동적으로 나눈다). 둘 다 실측 없는 가설값이다.
 
+### 엔진 정책 — 인스턴스 기본값과 테넌트별 덮어쓰기 (#179)
+
+`reputation-pool.engine.*` 과 `reputation-pool.lease-ttl` 은 이제 **이 인스턴스의 기본값**이다. 테넌트가
+자기 정책을 저장하지 않았으면 그대로 이 값으로 돈다 — **정책 행이 하나도 없으면 #179 이전과 동작이
+완전히 같다.** 노브는 여섯 개이고, 그중 둘(`cooldown-max-exponent`·`exploration-floor`)은 예전에
+upstream 의 no-arg 생성자로 박혀 있어 운영자도 바꿀 수 없던 값이다. 기본값은 upstream 기본값 그대로다.
+
+테넌트별 정책은 컨트롤 플레인에서 넣는다. 토큰이 바인딩된 테넌트만 다룰 수 있다(#82).
+
+```
+GET    /api/tenants/{id}/engine-policy          # 유효 정책 + 이 인스턴스의 상한 (프리필용)
+PUT    /api/tenants/{id}/engine-policy          # 전 필드를 한 번에 (부분 덮어쓰기 없음)
+GET    /api/tenants/{id}/engine-policy/history  # 누가·언제·무엇으로 바꿨는지
+```
+
+**저장은 다음 풀 생성부터 적용된다.** `ResourcePool` 의 엔진과 lease TTL 이 `final` 이라 도는 풀을 다시
+튜닝할 수 없고, 바꿀 때마다 풀을 다시 지으면 그 테넌트의 평판 상태와 진행 중인 리스가 날아간다. 즉시
+반영이 필요하면 운영자가 명시적으로 재시작한다.
+
+`REPUTATION_POOL_POLICY_CEILING_MAX_MULTIPLE`(기본 10)이 테넌트 정책의 상한이다 — **위 기본값의 몇
+배까지 허용하는가.** `window-size` 는 셀 하나가 들고 있는 결과 개수라 셀 단위로 세는 `MAX_CELLS` 가
+보지 못하는 배수이고, 그 구멍을 막는 값이다. 상한은 정책을 저장할 때 걸어 400 으로 거절한다(풀 생성
+시점이면 이미 늦다). 전역 예산을 테넌트 수로 나누지 않는 이유는 `GlobalResourceBudget` 의 무분할 원칙과
+같다 — 혼자인 테넌트를 천장 아래로 묶게 되고, 테넌트가 들락날락할 때마다 재계산해야 한다. 이 배수도
+실측 없는 가설값이다.
+
 ### 백업
 
 | 어디 | 보존 | 정하는 곳 |
