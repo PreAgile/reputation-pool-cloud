@@ -214,6 +214,12 @@ REPUTATION_POOL_ADMIN_ACCOUNT_1_ROLE=read-only   # admin | read-only, 생략 시
 리소스·사용량·**API 키 목록(마스킹된 prefix)** 은 전부 본다. 보여선 안 되는 데이터가 있는 테넌트에는
 붙이지 않는다.
 
+⚠️ **`_TENANT` 에 적은 테넌트가 실제로 있고 `active` 여야 한다.** 없는 테넌트를 가리키면 로그인은 되지만
+그 뒤 모든 `/api/**` 가 403 이다 — `TenantStatusFilter`(#83)가 토큰 테넌트를 확인하고 fail closed 하기
+때문이고, 화면에는 "권한 없음" 으로만 보여 원인이 드러나지 않는다. 아래 데모 테넌트를 쓸 거라면
+`_TENANT` 와 `REPUTATION_POOL_DEMO_TENANT` 를 같은 값으로 맞추고, 데모 시딩을 켜 두면 그 행은 시더가
+`active` 로 만든다.
+
 ### 데모 테넌트 (#31 후속)
 
 ```dotenv
