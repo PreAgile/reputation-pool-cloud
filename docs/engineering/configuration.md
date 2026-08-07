@@ -214,6 +214,24 @@ REPUTATION_POOL_ADMIN_ACCOUNT_1_ROLE=read-only   # admin | read-only, 생략 시
 리소스·사용량·**API 키 목록(마스킹된 prefix)** 은 전부 본다. 보여선 안 되는 데이터가 있는 테넌트에는
 붙이지 않는다.
 
+### 데모 테넌트 (#31 후속)
+
+```dotenv
+REPUTATION_POOL_DEMO_ENABLED=true
+REPUTATION_POOL_DEMO_TENANT=demo
+```
+
+시연용 데이터를 기동 시 만든다. **기본은 꺼져 있고**, 켜도 `DEMO_TENANT` 하나의 범위(`tenant_id`/`pool_id`)
+밖으로는 한 줄도 쓰지 않는다. 그 테넌트가 이미 있는데 시더가 만든 것이 아니면 **아무것도 지우지 않고
+건너뛴다** — 오타난 테넌트 id 가 실 데이터 삭제로 이어지지 않게 하는 장치다.
+
+재기동하면 같은 데이터를 다시 써 넣는다(멱등 — 행이 불어나지 않는다). 이때 이력의 시각이 현재로 다시
+맞춰지므로 데모가 낡아 보이지 않는다. 분량 노브(`_RESOURCES`·`_HISTORY`·`_STEPS`·`_USAGE_DAYS`)는
+`.env.example` 참고.
+
+⚠️ **실 데이터가 있는 테넌트에는 켜지 말 것.** 시딩은 그 테넌트 범위 안에서는 append 가 아니라 replace 다.
+
+### 백업
 
 | 어디 | 보존 | 정하는 곳 |
 |---|---|---|

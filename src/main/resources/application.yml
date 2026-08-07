@@ -190,3 +190,16 @@ reputation-pool:
     enabled: ${REPUTATION_POOL_ALERTS_ENABLED:false}
     webhook-url: ${REPUTATION_POOL_ALERTS_WEBHOOK_URL:}
     timeout: ${REPUTATION_POOL_ALERTS_TIMEOUT:PT2S}
+  # 읽기 전용 시연용 데모 테넌트. 기본 꺼짐 — enabled=true 로 명시적으로 켤 때만 동작하며, 켜져 있어도
+  # `tenant` 하나의 범위(tenant_id / pool_id) 밖으로는 한 줄도 쓰지 않는다. 이미 존재하는데 데모 시더가
+  # 만든 테넌트가 아니면 덮어쓰지 않고 건너뛴다(오타로 실 테넌트를 지우는 사고 방지).
+  #
+  # 재기동하면 같은 시드로 같은 데이터를 다시 써 넣는다(멱등) — 행이 불어나지 않고, 시각만 현재로
+  # 다시 맞춰져 데모가 낡지 않는다. 실제 운영 테넌트에는 켜지 말 것.
+  demo:
+    enabled: ${REPUTATION_POOL_DEMO_ENABLED:false}
+    tenant: ${REPUTATION_POOL_DEMO_TENANT:demo}
+    resources: ${REPUTATION_POOL_DEMO_RESOURCES:36}
+    history: ${REPUTATION_POOL_DEMO_HISTORY:PT48H}
+    steps: ${REPUTATION_POOL_DEMO_STEPS:96}
+    usage-days: ${REPUTATION_POOL_DEMO_USAGE_DAYS:30}

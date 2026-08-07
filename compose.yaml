@@ -85,6 +85,19 @@ services:
       REPUTATION_POOL_ADMIN_ACCOUNT_2_PASSWORD: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_PASSWORD:-}
       REPUTATION_POOL_ADMIN_ACCOUNT_2_TENANT: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_TENANT:-default}
       REPUTATION_POOL_ADMIN_ACCOUNT_2_ROLE: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_ROLE:-read-only}
+      # Read-only demo tenant (issue #31 follow-up). Off by default; when on, startup fabricates one
+      # tenant's worth of state/history/usage so the console can be demonstrated without real customer
+      # data. Confined to DEMO_TENANT and refuses to overwrite a tenant it did not create.
+      #
+      # Every one of these carries an explicit default for the same reason as the rate-limit block below:
+      # ENABLED binds to a primitive boolean and RESOURCES/STEPS/USAGE_DAYS to int, so an empty string
+      # would kill startup rather than fall back to @DefaultValue.
+      REPUTATION_POOL_DEMO_ENABLED: ${REPUTATION_POOL_DEMO_ENABLED:-false}
+      REPUTATION_POOL_DEMO_TENANT: ${REPUTATION_POOL_DEMO_TENANT:-demo}
+      REPUTATION_POOL_DEMO_RESOURCES: ${REPUTATION_POOL_DEMO_RESOURCES:-36}
+      REPUTATION_POOL_DEMO_HISTORY: ${REPUTATION_POOL_DEMO_HISTORY:-PT48H}
+      REPUTATION_POOL_DEMO_STEPS: ${REPUTATION_POOL_DEMO_STEPS:-96}
+      REPUTATION_POOL_DEMO_USAGE_DAYS: ${REPUTATION_POOL_DEMO_USAGE_DAYS:-30}
       # Per-tenant request ceiling on the data plane (issue #132). ENABLED=false is the escape hatch:
       # it makes the limiter a no-op without a rebuild, for when the limiter itself is suspected of
       # blocking healthy traffic.
