@@ -44,6 +44,7 @@ ls -l ~/.rp-mail.env ~/.a1-hunter.env ~/reputation-pool-cloud/.env
 | 대시보드에서 발급한 API 키 | gRPC 데이터플레인 | 콘솔에서 발급 → 클라이언트 교체 → 구 키 폐기 | ✅ |
 | `REPUTATION_POOL_DB_PASSWORD` | app ↔ db | §2-2 | ❌ |
 | `REPUTATION_POOL_ADMIN_PASSWORD` · `_JWT_SECRET` | 관리 콘솔 로그인/토큰 | `.env` 수정 후 재기동 | ❌ (기존 토큰 즉시 무효) |
+| `REPUTATION_POOL_ADMIN_ACCOUNT_n_PASSWORD` | 추가 콘솔 계정(#31) | `.env` 수정 후 재기동 | ❌ (해당 계정 토큰만 무효) |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana | `.env` 수정 후 grafana 재기동 | ❌ |
 | `REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL` | 알림 라우팅 | `.env` 수정 후 alertmanager 재기동 | ❌ |
 | `SMTP_PASS` (`~/.rp-mail.env`) | 메일 알림 | OCI 콘솔에서 새 SMTP 자격증명 발급 → 파일 교체 → 구 자격증명 삭제 | ✅ (다음 발송부터) |
@@ -191,6 +192,50 @@ REPUTATION_POOL_RATE_LIMIT_MAX_CONCURRENT_STREAMS=20 # 테넌트당 동시 Subsc
 같은 파일의 다른 운영 노브도 함께 알아둘 것: `REPUTATION_POOL_MAX_RESOURCES`(기본 100,000) ·
 `REPUTATION_POOL_MAX_CELLS`(기본 500,000)는 **테넌트별이 아니라 전체 합계** 상한이다(#84 — 공유 JVM
 이므로 혼자면 전부 쓰고 여럿이면 동적으로 나눈다). 둘 다 실측 없는 가설값이다.
+
+### 읽기 전용 콘솔 계정 (#31)
+
+```dotenv
+REPUTATION_POOL_ADMIN_ACCOUNT_1_USERNAME=observer
+REPUTATION_POOL_ADMIN_ACCOUNT_1_PASSWORD=<강한 랜덤값>
+REPUTATION_POOL_ADMIN_ACCOUNT_1_TENANT=demo      # 이 계정의 대시보드 읽기 범위
+REPUTATION_POOL_ADMIN_ACCOUNT_1_ROLE=read-only   # admin | read-only, 생략 시 read-only
+```
+
+기존 `REPUTATION_POOL_ADMIN_*` 단일 계정은 **그대로 전권**이다 — 이 슬롯은 그 위에 계정을 더할 뿐이고,
+슬롯을 비워 두면 계정 자체가 없다. `USERNAME` 이나 `PASSWORD` 중 하나라도 비면 그 슬롯은 통째로 버려진다
+(빈 비밀번호로 로그인되는 상태를 만들지 않기 위해서다). 슬롯은 두 개(`_1_`, `_2_`) 준비돼 있고, 더
+필요하면 `application.yml` 의 `admin.accounts` 목록에 항목을 추가한다.
+
+`read-only` 토큰의 쓰기 거부는 **서버가 강제한다**(`AdminWriteAuthorizationFilter`) — 대시보드에서 버튼이
+보이든 말든 `POST`/`PUT`/`DELETE` 는 403 이다. 자세한 근거는 [security.md](security.md) 참고.
+
+⚠️ **역할이 좁히는 것은 "쓰기"이지 "볼 수 있는 범위"가 아니다.** 읽기 전용 계정도 자기 테넌트의 이벤트·
+리소스·사용량·**API 키 목록(마스킹된 prefix)** 은 전부 본다. 보여선 안 되는 데이터가 있는 테넌트에는
+붙이지 않는다.
+
+⚠️ **`_TENANT` 에 적은 테넌트가 실제로 있고 `active` 여야 한다.** 없는 테넌트를 가리키면 로그인은 되지만
+그 뒤 모든 `/api/**` 가 403 이다 — `TenantStatusFilter`(#83)가 토큰 테넌트를 확인하고 fail closed 하기
+때문이고, 화면에는 "권한 없음" 으로만 보여 원인이 드러나지 않는다. 아래 데모 테넌트를 쓸 거라면
+`_TENANT` 와 `REPUTATION_POOL_DEMO_TENANT` 를 같은 값으로 맞추고, 데모 시딩을 켜 두면 그 행은 시더가
+`active` 로 만든다.
+
+### 데모 테넌트 (#31 후속)
+
+```dotenv
+REPUTATION_POOL_DEMO_ENABLED=true
+REPUTATION_POOL_DEMO_TENANT=demo
+```
+
+시연용 데이터를 기동 시 만든다. **기본은 꺼져 있고**, 켜도 `DEMO_TENANT` 하나의 범위(`tenant_id`/`pool_id`)
+밖으로는 한 줄도 쓰지 않는다. 그 테넌트가 이미 있는데 시더가 만든 것이 아니면 **아무것도 지우지 않고
+건너뛴다** — 오타난 테넌트 id 가 실 데이터 삭제로 이어지지 않게 하는 장치다.
+
+재기동하면 같은 데이터를 다시 써 넣는다(멱등 — 행이 불어나지 않는다). 이때 이력의 시각이 현재로 다시
+맞춰지므로 데모가 낡아 보이지 않는다. 분량 노브(`_RESOURCES`·`_HISTORY`·`_STEPS`·`_USAGE_DAYS`)는
+`.env.example` 참고.
+
+⚠️ **실 데이터가 있는 테넌트에는 켜지 말 것.** 시딩은 그 테넌트 범위 안에서는 append 가 아니라 replace 다.
 
 ### 백업
 

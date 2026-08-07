@@ -68,6 +68,36 @@ services:
       # scraper's own tenant so its keys can be issued from the console). Explicit `:-default` rather
       # than `:-` so an unset value never becomes the empty string.
       REPUTATION_POOL_ADMIN_TENANT: ${REPUTATION_POOL_ADMIN_TENANT:-default}
+      # Additional admin logins with roles (issue #31). The account above stays a full-power login; each
+      # slot here adds another one with its own tenant and role (admin | read-only), so an observer
+      # credential can be handed out without weakening the operator's. A slot with an empty USERNAME or
+      # PASSWORD is dropped by the app, so leaving these unset means the account does not exist —
+      # a read-only login is never created by default.
+      #
+      # TENANT/ROLE carry explicit defaults rather than `:-` for the reason spelled out below the rate
+      # limit block: `${VAR:-}` sets the empty string, not "absent", and ROLE binds to an enum which
+      # cannot be converted from "". USERNAME/PASSWORD bind to String, so `:-` is safe for those.
+      REPUTATION_POOL_ADMIN_ACCOUNT_1_USERNAME: ${REPUTATION_POOL_ADMIN_ACCOUNT_1_USERNAME:-}
+      REPUTATION_POOL_ADMIN_ACCOUNT_1_PASSWORD: ${REPUTATION_POOL_ADMIN_ACCOUNT_1_PASSWORD:-}
+      REPUTATION_POOL_ADMIN_ACCOUNT_1_TENANT: ${REPUTATION_POOL_ADMIN_ACCOUNT_1_TENANT:-default}
+      REPUTATION_POOL_ADMIN_ACCOUNT_1_ROLE: ${REPUTATION_POOL_ADMIN_ACCOUNT_1_ROLE:-read-only}
+      REPUTATION_POOL_ADMIN_ACCOUNT_2_USERNAME: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_USERNAME:-}
+      REPUTATION_POOL_ADMIN_ACCOUNT_2_PASSWORD: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_PASSWORD:-}
+      REPUTATION_POOL_ADMIN_ACCOUNT_2_TENANT: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_TENANT:-default}
+      REPUTATION_POOL_ADMIN_ACCOUNT_2_ROLE: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_ROLE:-read-only}
+      # Read-only demo tenant (issue #31 follow-up). Off by default; when on, startup fabricates one
+      # tenant's worth of state/history/usage so the console can be demonstrated without real customer
+      # data. Confined to DEMO_TENANT and refuses to overwrite a tenant it did not create.
+      #
+      # Every one of these carries an explicit default for the same reason as the rate-limit block below:
+      # ENABLED binds to a primitive boolean and RESOURCES/STEPS/USAGE_DAYS to int, so an empty string
+      # would kill startup rather than fall back to @DefaultValue.
+      REPUTATION_POOL_DEMO_ENABLED: ${REPUTATION_POOL_DEMO_ENABLED:-false}
+      REPUTATION_POOL_DEMO_TENANT: ${REPUTATION_POOL_DEMO_TENANT:-demo}
+      REPUTATION_POOL_DEMO_RESOURCES: ${REPUTATION_POOL_DEMO_RESOURCES:-36}
+      REPUTATION_POOL_DEMO_HISTORY: ${REPUTATION_POOL_DEMO_HISTORY:-PT48H}
+      REPUTATION_POOL_DEMO_STEPS: ${REPUTATION_POOL_DEMO_STEPS:-96}
+      REPUTATION_POOL_DEMO_USAGE_DAYS: ${REPUTATION_POOL_DEMO_USAGE_DAYS:-30}
       # Per-tenant request ceiling on the data plane (issue #132). ENABLED=false is the escape hatch:
       # it makes the limiter a no-op without a rebuild, for when the limiter itself is suspected of
       # blocking healthy traffic.
