@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
 
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
+import io.github.preagile.reputationpool.cloud.policy.EnginePolicy;
 import io.github.preagile.reputationpool.cloud.tenant.Tenant;
 import io.github.preagile.reputationpool.cloud.tenant.TenantRepository;
 import io.github.preagile.reputationpool.core.domain.Context;
@@ -76,12 +77,13 @@ class PoolLifecycleTest {
         return new ReputationPoolProperties(
                 Duration.ofSeconds(30),
                 Duration.ofSeconds(30),
-                new ReputationPoolProperties.Engine(10, 2, 2),
+                new ReputationPoolProperties.Engine(10, 2, 2, 6, 1.0),
                 new ReputationPoolProperties.Audit(Duration.ofHours(1), retention),
                 new ReputationPoolProperties.Metering(Duration.ofMinutes(1)),
                 new ReputationPoolProperties.Score(Duration.ofMinutes(1), Duration.ofDays(7), Duration.ofHours(1)),
                 new ReputationPoolProperties.Limits(100_000, 500_000),
-                new ReputationPoolProperties.SurgeThresholds(10, 1));
+                new ReputationPoolProperties.SurgeThresholds(10, 1),
+                new ReputationPoolProperties.PolicyCeiling(10));
     }
 
     private PerTenantPoolRegistry registry(TenantRepository repository) {
@@ -90,7 +92,9 @@ class PoolLifecycleTest {
                 broadcaster,
                 auditTrail,
                 event -> {},
-                propsWithRetention(Duration.ZERO),
+                // Nothing here turns on policy (#179); every tenant gets the instance defaults, which is
+                // what the lifecycle saw before per-tenant policies existed.
+                tenantId -> EnginePolicy.defaultsFrom(propsWithRetention(Duration.ZERO)),
                 repository,
                 storeFactory,
                 new io.github.preagile.reputationpool.cloud.metering.MeterRecorder());

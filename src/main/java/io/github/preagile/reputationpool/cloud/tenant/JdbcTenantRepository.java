@@ -29,8 +29,14 @@ public final class JdbcTenantRepository implements TenantRepository {
     // — the cell -> cell_outcome ON DELETE CASCADE (per pool_id) would remove it either way. The tenant
     // row itself is NOT here: it is tombstoned to 'deleted' rather than deleted, so the deletion is
     // auditable.
+    //
+    // tenant_engine_policy (#179) has to be listed even though it carries a foreign key to tenant(id):
+    // that key's cascade would only fire on a real DELETE of the tenant row, and this delete tombstones
+    // it instead. Left behind, the policy rows outlive the tenant and a later tenant recreated under the
+    // same id would silently resurrect the dead tenant's engine tuning.
     private static final String[] DELETE_SCOPED = {
         "DELETE FROM api_key WHERE tenant_id = ?",
+        "DELETE FROM tenant_engine_policy WHERE tenant_id = ?",
         "DELETE FROM usage_meter WHERE tenant_id = ?",
         "DELETE FROM score_sample WHERE tenant_id = ?",
         "DELETE FROM cell_outcome WHERE pool_id = ?",
