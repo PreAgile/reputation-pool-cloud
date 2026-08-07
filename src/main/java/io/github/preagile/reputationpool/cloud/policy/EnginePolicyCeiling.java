@@ -11,14 +11,45 @@ import java.util.Objects;
  * what the instance can afford to host, and it is checked when a policy is <em>written</em> so a
  * refusal is a 400 on that request rather than a surprise at the tenant's next pool build.
  *
- * <p><b>Why a ceiling is needed at all.</b> {@link ReputationPoolProperties.Limits} bounds the shared
- * JVM in units of <em>cells</em>, and {@link io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget}
- * counts cells. But a cell's memory footprint is not constant: it retains {@code windowSize} recent
- * outcomes. Opening {@code windowSize} to tenants therefore opens the one multiplier the global budget
- * cannot see — a tenant with a handful of cells and a six-figure window stays far under {@code maxCells}
- * while occupying the heap the budget was written to protect. The same shape applies to {@code leaseTtl}
- * (an absurd TTL parks a resource out of rotation long after the caller is gone) and to the two curve
- * knobs, whose cost is behavioural rather than memory.
+ * <p><b>Why a ceiling is needed at all — and why {@code windowSize} is the knob that needs one most.</b>
+ * {@link ReputationPoolProperties.Limits} bounds the shared JVM in units of <em>cells</em>, and
+ * {@link io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget} counts cells. But a cell is
+ * not a fixed-cost thing: it retains {@code windowSize} recent outcomes, so opening that knob to tenants
+ * opens the one multiplier the cell budget cannot see. The heap is the smaller half of that cost. The
+ * larger half is <b>checkpoint write amplification</b>, and it is worth spelling out because it is
+ * measured in rows, not in guesses:
+ *
+ * <ul>
+ *   <li>{@code PostgresResourceStore.insertCells} writes <em>one {@code cell_outcome} row per window
+ *       entry per cell</em> — an ordinal loop over {@code cell.window()}.
+ *   <li>{@code save()} is a whole-state replace, not a delta: it deletes this pool's {@code cell} rows
+ *       (which cascades to their {@code cell_outcome} rows — the store notes that no explicit
+ *       {@code DELETE FROM cell_outcome} is needed) and re-inserts everything in one transaction.
+ *   <li>{@code PoolLifecycle} runs that on a fixed delay, {@code reputation-pool.checkpoint-interval},
+ *       default 30s.
+ * </ul>
+ *
+ * <p>So every 30 seconds each tenant deletes and rewrites {@code cells × windowSize} outcome rows, and
+ * {@code windowSize} scales that <em>linearly</em>. A tenant with a six-figure window and only a handful
+ * of cells stays far under {@code maxCells} while dominating the instance's checkpoint I/O — and because
+ * a checkpoint is one transaction per tenant, it lengthens the write that every <em>other</em> tenant's
+ * checkpoint is queued behind.
+ *
+ * <p><b>What makes that lopsided rather than merely expensive: nothing currently reads the window.</b>
+ * Verified against core 0.5.0 — the only two reads of {@code ReputationCell.window()} anywhere in the
+ * engine are the {@code append(...)} calls that rebuild it. Every state transition is decided by
+ * {@code consecutiveFailures}/{@code consecutiveSuccesses}, which are scalar counters on the cell and
+ * cost the same at any window size. {@code ReputationCell}'s javadoc says the window exists for
+ * "computations that need actual recent history (p95 latency)", but no such computation exists yet. A
+ * larger window today therefore buys <em>retained evidence for a future feature</em> and pays for it in
+ * checkpoint I/O now. That is a real thing to want, and a poor thing to leave unbounded: this ceiling
+ * should be read as "raise it deliberately, not by default", and it is the reason the default multiple is
+ * a modest one rather than generous.
+ *
+ * <p>The other knobs are bounded for weaker reasons, and the javadoc should not pretend otherwise:
+ * {@code leaseTtl} parks a resource out of rotation long after its caller is gone, and the two curve
+ * knobs cost nothing but change behaviour. Only {@code windowSize} has a cost that scales with a number
+ * the instance is already paying every 30 seconds.
  *
  * <p><b>Why the bound is not "the budget divided by the active tenant count".</b> That is the design
  * {@link io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget} deliberately refused, and
@@ -35,20 +66,21 @@ import java.util.Objects;
  * nothing is recomputed when tenants come and go — the inputs are static configuration read once at boot.
  *
  * <p><b>Why {@code maxCells} does not appear in the formula.</b> It was the obvious candidate and it
- * cancels, which is worth stating rather than hiding. The instance implicitly accepted a worst case of
- * {@code maxCells × windowSize} retained outcomes when it accepted its own configuration. Letting
- * tenants raise the window to {@code W} makes that worst case {@code maxCells × W}, so the blow-up
- * factor is {@code W / windowSize} — {@code maxCells} divides out. Bounding the blow-up factor
- * <em>is</em> bounding the ceiling relative to the configured default, and writing it that way keeps the
- * ceiling honest about which number it actually constrains.
+ * cancels, which is worth stating rather than hiding. Per checkpoint the instance already accepted a
+ * worst case of {@code maxCells × windowSize} rewritten {@code cell_outcome} rows when it accepted its
+ * own configuration. Letting tenants raise the window to {@code W} makes that {@code maxCells × W}, so
+ * the blow-up factor is {@code W / windowSize} — {@code maxCells} divides out. Bounding the blow-up
+ * factor <em>is</em> bounding the ceiling relative to the configured default, and writing it that way
+ * keeps the ceiling honest about which number it actually constrains.
  *
  * <p><b>This multiple is an unmeasured hypothesis</b>, in the same sense as
  * {@link ReputationPoolProperties.Limits}' defaults: no production load test says that 10× the instance
- * default is where an instance starts to hurt. It is a bound chosen so the knob is <em>bounded</em>
- * rather than open, and it is configurable precisely so it can be retuned once real per-cell footprint
- * is observed. What is <em>not</em> a hypothesis is {@code maxCooldownMaxExponent}: that one is clamped
- * to {@link AdaptiveCooldownPolicy#MAX_ALLOWED_EXPONENT}, a hard upstream limit above which the computed
- * cooldown overflows {@link Duration}.
+ * default is where an instance's checkpoint starts to hurt. What is <em>not</em> a hypothesis is the
+ * shape of the cost — {@code cells × windowSize} rows rewritten per checkpoint is read off the store's
+ * insert loop, not estimated — nor {@code maxCooldownMaxExponent}, which is clamped to
+ * {@link AdaptiveCooldownPolicy#MAX_ALLOWED_EXPONENT}, a hard upstream limit above which the computed
+ * cooldown overflows {@link Duration}. Only <em>where on that line an instance stops coping</em> is the
+ * guess, which is why the multiple is configuration rather than a constant.
  *
  * <p><b>One place, on purpose (issue #179, decision 5).</b> Plan-based ceilings — a paid tier allowed a
  * larger window than a free one — are not implemented and there is deliberately no {@code plan} column

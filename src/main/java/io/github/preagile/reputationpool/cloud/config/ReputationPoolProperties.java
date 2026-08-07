@@ -240,9 +240,14 @@ public record ReputationPoolProperties(
     /**
      * How far a per-tenant engine policy may depart from this instance's own {@link Engine}/{@link
      * #leaseTtl()} defaults (issue #179). Opening the engine knobs to tenants opens a multiplier
-     * {@link Limits} cannot see — {@code windowSize} is retained outcomes <em>per cell</em>, so a tenant
-     * with few cells and a huge window occupies the heap the cell budget exists to protect — and this is
-     * the bound that closes it, enforced when a policy is written rather than when a pool is built.
+     * {@link Limits} cannot see, because {@link Limits} counts cells and a cell is not a fixed-cost
+     * thing: it retains {@code windowSize} outcomes, and the persistence adapter writes <em>one
+     * {@code cell_outcome} row per window entry per cell</em>, deleting and rewriting all of them on
+     * every checkpoint ({@link #checkpointInterval()}, default 30s). So {@code windowSize} scales an
+     * instance's checkpoint write volume linearly — while, as of core 0.5.0, <em>no state transition
+     * reads the window at all</em> (cooling and recovery are decided by the cell's scalar consecutive
+     * counters). This is the bound that closes that gap, enforced when a policy is written rather than
+     * when a pool is built. See {@code EnginePolicyCeiling} for the full derivation.
      *
      * <p>Deliberately a <em>multiple of the configured default</em> rather than a slice of {@link Limits}.
      * Dividing the global budget by the active tenant count is exactly what
