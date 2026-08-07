@@ -1,9 +1,11 @@
 package io.github.preagile.reputationpool.cloud.security;
 
+import io.github.preagile.reputationpool.cloud.security.AdminAuthProperties.Account;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -17,17 +19,32 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
  * {@code security} package alongside the signing config so the credential and signing secrets stay in
  * one place, never leaking to the web layer.
  *
- * <p>The token carries the admin username as {@code sub} and a {@code tenant} claim — the tenant the
- * dashboard read model is scoped to (v1 single-login, no RBAC). Credential comparison is
- * constant-time ({@link MessageDigest#isEqual}) so a wrong username or password cannot be
- * distinguished by response timing. When the console is unconfigured (see {@link AdminAuthProperties})
- * {@link #issueToken} always returns empty — the console is fail-closed, never mints a token, so no
- * request can authenticate.
+ * <p>The token carries the matched account's username as {@code sub} plus two server-decided claims: the
+ * {@code tenant} the dashboard read model is scoped to, and (issue #31) the {@code role} that decides
+ * whether the token may write. Both come from configuration at login and are never read from the
+ * request, so a caller cannot widen its own tenant scope or its own authority.
+ *
+ * <p><b>Constant-time across every account.</b> Credential comparison uses
+ * {@link MessageDigest#isEqual}, and the loop over the configured accounts deliberately does not
+ * short-circuit: every account is compared on every attempt, and both fields of each are compared with
+ * {@code &} rather than {@code &&}. So response timing reveals neither which field was wrong nor which
+ * account (if any) the username belongs to — the multi-account version of the property the single-login
+ * implementation had.
+ *
+ * <p>When the console is unconfigured (see {@link AdminAuthProperties}) {@link #issueToken} always
+ * returns empty — the console is fail-closed, never mints a token, so no request can authenticate.
  */
 public final class AdminTokenService {
 
     /** The claim carrying the tenant the issued token — and the read model it authorizes — is bound to. */
     public static final String TENANT_CLAIM = "tenant";
+
+    /**
+     * The claim carrying the issued token's {@link AdminRole} (issue #31). Read by
+     * {@link AdminWriteAuthorizationFilter} to admit or refuse mutating requests; a token without it has
+     * no write authority at all.
+     */
+    public static final String ROLE_CLAIM = "role";
 
     private static final String ISSUER = "reputation-pool-cloud";
 
@@ -42,11 +59,15 @@ public final class AdminTokenService {
     }
 
     /**
-     * A signed token for the given credentials, or empty if they are wrong or the console is
-     * unconfigured. The caller turns empty into 401 without revealing which check failed.
+     * A signed token for the given credentials, or empty if they match no configured account or the
+     * console is unconfigured. The caller turns empty into 401 without revealing which check failed.
      */
     public Optional<IssuedToken> issueToken(String username, String password) {
-        if (!properties.configured() || !credentialsMatch(username, password)) {
+        if (!properties.configured()) {
+            return Optional.empty();
+        }
+        Account matched = match(properties.allAccounts(), username, password);
+        if (matched == null) {
             return Optional.empty();
         }
         Instant now = clock.instant();
@@ -55,20 +76,31 @@ public final class AdminTokenService {
                 .issuer(ISSUER)
                 .issuedAt(now)
                 .expiresAt(expiresAt)
-                .subject(properties.username())
-                .claim(TENANT_CLAIM, properties.tenant())
+                .subject(matched.username())
+                .claim(TENANT_CLAIM, matched.tenant())
+                .claim(ROLE_CLAIM, matched.role().claimValue())
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
         return Optional.of(new IssuedToken(token, properties.tokenTtl().toSeconds()));
     }
 
-    private boolean credentialsMatch(String username, String password) {
-        // Compare both fields with constant-time equality; & (not &&) so timing does not leak which
-        // field matched. A null field fails closed.
-        boolean userOk = constantTimeEquals(properties.username(), username);
-        boolean passOk = constantTimeEquals(properties.password(), password);
-        return userOk & passOk;
+    /**
+     * The account these credentials authenticate as, or null. Every account is compared even after a
+     * match so the work done is a function of how many accounts are configured, not of which one (or
+     * none) matched. Duplicate usernames are a misconfiguration; the last match wins, deterministically.
+     */
+    private static Account match(List<Account> accounts, String username, String password) {
+        Account matched = null;
+        for (Account account : accounts) {
+            // & (not &&) so timing does not leak which field matched. A null field fails closed.
+            boolean userOk = constantTimeEquals(account.username(), username);
+            boolean passOk = constantTimeEquals(account.password(), password);
+            if (userOk & passOk) {
+                matched = account;
+            }
+        }
+        return matched;
     }
 
     private static boolean constantTimeEquals(String expected, String actual) {

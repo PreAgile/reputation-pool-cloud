@@ -44,6 +44,7 @@ ls -l ~/.rp-mail.env ~/.a1-hunter.env ~/reputation-pool-cloud/.env
 | 대시보드에서 발급한 API 키 | gRPC 데이터플레인 | 콘솔에서 발급 → 클라이언트 교체 → 구 키 폐기 | ✅ |
 | `REPUTATION_POOL_DB_PASSWORD` | app ↔ db | §2-2 | ❌ |
 | `REPUTATION_POOL_ADMIN_PASSWORD` · `_JWT_SECRET` | 관리 콘솔 로그인/토큰 | `.env` 수정 후 재기동 | ❌ (기존 토큰 즉시 무효) |
+| `REPUTATION_POOL_ADMIN_ACCOUNT_n_PASSWORD` | 추가 콘솔 계정(#31) | `.env` 수정 후 재기동 | ❌ (해당 계정 토큰만 무효) |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana | `.env` 수정 후 grafana 재기동 | ❌ |
 | `REPUTATION_POOL_ALERTMANAGER_WEBHOOK_URL` | 알림 라우팅 | `.env` 수정 후 alertmanager 재기동 | ❌ |
 | `SMTP_PASS` (`~/.rp-mail.env`) | 메일 알림 | OCI 콘솔에서 새 SMTP 자격증명 발급 → 파일 교체 → 구 자격증명 삭제 | ✅ (다음 발송부터) |
@@ -192,7 +193,27 @@ REPUTATION_POOL_RATE_LIMIT_MAX_CONCURRENT_STREAMS=20 # 테넌트당 동시 Subsc
 `REPUTATION_POOL_MAX_CELLS`(기본 500,000)는 **테넌트별이 아니라 전체 합계** 상한이다(#84 — 공유 JVM
 이므로 혼자면 전부 쓰고 여럿이면 동적으로 나눈다). 둘 다 실측 없는 가설값이다.
 
-### 백업
+### 읽기 전용 콘솔 계정 (#31)
+
+```dotenv
+REPUTATION_POOL_ADMIN_ACCOUNT_1_USERNAME=observer
+REPUTATION_POOL_ADMIN_ACCOUNT_1_PASSWORD=<강한 랜덤값>
+REPUTATION_POOL_ADMIN_ACCOUNT_1_TENANT=demo      # 이 계정의 대시보드 읽기 범위
+REPUTATION_POOL_ADMIN_ACCOUNT_1_ROLE=read-only   # admin | read-only, 생략 시 read-only
+```
+
+기존 `REPUTATION_POOL_ADMIN_*` 단일 계정은 **그대로 전권**이다 — 이 슬롯은 그 위에 계정을 더할 뿐이고,
+슬롯을 비워 두면 계정 자체가 없다. `USERNAME` 이나 `PASSWORD` 중 하나라도 비면 그 슬롯은 통째로 버려진다
+(빈 비밀번호로 로그인되는 상태를 만들지 않기 위해서다). 슬롯은 두 개(`_1_`, `_2_`) 준비돼 있고, 더
+필요하면 `application.yml` 의 `admin.accounts` 목록에 항목을 추가한다.
+
+`read-only` 토큰의 쓰기 거부는 **서버가 강제한다**(`AdminWriteAuthorizationFilter`) — 대시보드에서 버튼이
+보이든 말든 `POST`/`PUT`/`DELETE` 는 403 이다. 자세한 근거는 [security.md](security.md) 참고.
+
+⚠️ **역할이 좁히는 것은 "쓰기"이지 "볼 수 있는 범위"가 아니다.** 읽기 전용 계정도 자기 테넌트의 이벤트·
+리소스·사용량·**API 키 목록(마스킹된 prefix)** 은 전부 본다. 보여선 안 되는 데이터가 있는 테넌트에는
+붙이지 않는다.
+
 
 | 어디 | 보존 | 정하는 곳 |
 |---|---|---|

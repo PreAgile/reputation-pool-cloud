@@ -97,17 +97,41 @@ reputation-pool:
     # nothing is seeded, so the api_key table stays empty and the interceptor rejects all gRPC calls
     # (fail closed). Supply via REPUTATION_POOL_API_KEY; #11 replaces this with per-tenant key mgmt.
     api-key: ${REPUTATION_POOL_API_KEY:}
-  # REST control-plane admin login (issue #11). All three secrets come from env / a secret manager;
-  # no baked defaults. When any is unset the admin console is disabled (fail closed): login cannot mint
-  # a token and every /api/** call is rejected — the gRPC data plane is unaffected. The jwt-secret must
-  # be at least 32 bytes (HS256 needs a 256-bit key); a shorter value fails fast at startup. v1 is a
-  # single admin login bound to `tenant`, which scopes the dashboard read model (no RBAC yet).
+  # REST control-plane admin login (issue #11). All secrets come from env / a secret manager; no baked
+  # defaults. When the signing secret is unset — or no account is fully configured — the admin console is
+  # disabled (fail closed): login cannot mint a token and every /api/** call is rejected. The gRPC data
+  # plane is unaffected. The jwt-secret must be at least 32 bytes (HS256 needs a 256-bit key); a shorter
+  # value fails fast at startup.
+  #
+  # 아래 username/password/tenant 는 v1 의 단일 관리자 로그인 그대로이고, 의미도 그대로다 — 전권(admin)
+  # 계정이며 tenant 가 대시보드 읽기 범위를 정한다. 기존 배포는 이 세 키만 두면 이전과 동일하게 동작한다.
   admin:
     username: ${REPUTATION_POOL_ADMIN_USERNAME:}
     password: ${REPUTATION_POOL_ADMIN_PASSWORD:}
     tenant: ${REPUTATION_POOL_ADMIN_TENANT:default}
     jwt-secret: ${REPUTATION_POOL_ADMIN_JWT_SECRET:}
     token-ttl: ${REPUTATION_POOL_ADMIN_TOKEN_TTL:PT1H}
+    # 추가 관리자 계정 + 역할(이슈 #31 1차). 위 단일 계정과 공존한다. username/password 가 비어 있는
+    # 항목은 계정 목록에서 버려지므로, 환경변수를 주지 않으면 그 슬롯은 아예 없는 것과 같다 — 읽기 전용
+    # 계정을 기본값으로 만들어 두지 않는다. 값은 여기 적지 않고 환경변수로만 주입한다(security.md).
+    #
+    # role 은 admin | read-only 이며 생략하면 read-only(최소 권한)다. read-only 토큰의 쓰기 거부는
+    # 대시보드가 아니라 서버가 강제한다 — AdminWriteAuthorizationFilter 참고.
+    #
+    # 왜 슬롯을 여기 펼쳐 두나: 이 스택의 설정 전달 경로는 `.env` → compose → **환경변수**인데, Boot 의
+    # 환경변수 이완 바인딩은 `reputation-pool` 처럼 하이픈이 든 접두사 아래의 **인덱스 목록**(accounts[0])
+    # 까지는 되짚어 주지 않는다(스칼라만 된다 — AdminAuthPropertiesTest 에서 실측). 그래서 슬롯을
+    # 레포의 다른 모든 노브와 같은 `${ENV:기본값}` 표기로 미리 펼쳐, 운영자가 다루는 이름이 평범한
+    # 환경변수 하나가 되게 한다. 슬롯보다 계정이 더 필요하면 여기에 항목을 추가한다(설정 변경).
+    accounts:
+      - username: ${REPUTATION_POOL_ADMIN_ACCOUNT_1_USERNAME:}
+        password: ${REPUTATION_POOL_ADMIN_ACCOUNT_1_PASSWORD:}
+        tenant: ${REPUTATION_POOL_ADMIN_ACCOUNT_1_TENANT:default}
+        role: ${REPUTATION_POOL_ADMIN_ACCOUNT_1_ROLE:read-only}
+      - username: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_USERNAME:}
+        password: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_PASSWORD:}
+        tenant: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_TENANT:default}
+        role: ${REPUTATION_POOL_ADMIN_ACCOUNT_2_ROLE:read-only}
     # 로그인 브루트포스 방어(#28). POST /api/auth/login을 소스 IP 기준으로 스로틀한다. v1은 단일 admin
     # 계정이라 "계정 잠금"은 self-DoS이므로, 계정이 아니라 IP를 일시 차단한다. L1: window 안에서 max-attempts
     # 실패 시 그 IP를 block-duration 동안 차단(429 + Retry-After), 로그인 성공 시 해당 IP 카운터 리셋.

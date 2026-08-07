@@ -43,6 +43,12 @@ import org.springframework.security.web.SecurityFilterChain;
  * Actuator {@code health}/{@code info} stay public for probes; {@code POST /api/auth/login} is public so
  * an admin can obtain a token; every other request requires a valid admin JWT.
  *
+ * <p><b>Authenticated is not the same as authorized (issue #31).</b> {@code authenticated()} above only
+ * says a valid admin token was presented. What that token may <em>do</em> is decided by two filters
+ * placed right after JWT authentication: {@link TenantStatusFilter} (its tenant must still be active) and
+ * {@link AdminWriteAuthorizationFilter} (its role must permit writes). Both sit in the chain rather than
+ * in the controllers so a newly added endpoint inherits them.
+ *
  * <p><b>Stateless.</b> The API is token-only: no session, no CSRF token (there is no cookie/session to
  * protect), no form login or HTTP Basic. A caller either presents a valid {@code Authorization: Bearer}
  * JWT or is rejected with 401.
@@ -65,7 +71,8 @@ public class SecurityConfiguration {
             HttpSecurity http,
             JwtDecoder jwtDecoder,
             LoginThrottleFilter loginThrottleFilter,
-            TenantStatusFilter tenantStatusFilter)
+            TenantStatusFilter tenantStatusFilter,
+            AdminWriteAuthorizationFilter adminWriteAuthorizationFilter)
             throws Exception {
         return http.csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -90,6 +97,11 @@ public class SecurityConfiguration {
                 // token bound to a suspended/deleted tenant is rejected before reaching any controller —
                 // the control-plane half of "suspend blocks access" (JdbcTenantResolver is the gRPC half).
                 .addFilterAfter(tenantStatusFilter, BearerTokenAuthenticationFilter.class)
+                // Read-only role gate (issue #31): also after JWT auth, and after the lifecycle gate so a
+                // suspended tenant is refused for that reason rather than for its role. Ordered relative to
+                // TenantStatusFilter (not to the bearer filter again) so the two are explicitly sequenced
+                // instead of tying for the same slot.
+                .addFilterAfter(adminWriteAuthorizationFilter, TenantStatusFilter.class)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .build();
@@ -111,6 +123,16 @@ public class SecurityConfiguration {
     @Bean
     TenantStatusFilter tenantStatusFilter(TenantRepository tenants, ObjectMapper objectMapper) {
         return new TenantStatusFilter(tenants, objectMapper);
+    }
+
+    /**
+     * The control-plane role gate (issue #31): the single server-side point where a read-only token is
+     * refused a mutating request. See {@link AdminWriteAuthorizationFilter} for why this is decided by
+     * HTTP method in one filter rather than endpoint by endpoint.
+     */
+    @Bean
+    AdminWriteAuthorizationFilter adminWriteAuthorizationFilter(ObjectMapper objectMapper) {
+        return new AdminWriteAuthorizationFilter(objectMapper);
     }
 
     /**
