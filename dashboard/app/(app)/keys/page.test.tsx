@@ -9,9 +9,13 @@ import KeysPage from "./page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-/** tenant 클레임이 든 가짜 JWT(서명 검증 없음 — getTenantId 는 payload 디코드만 한다). */
-function fakeJwt(tenant: string): string {
-  const payload = btoa(JSON.stringify({ sub: "admin", tenant }))
+/**
+ * tenant·scope 클레임이 든 가짜 JWT(서명 검증 없음 — 디코드만 한다).
+ * scope 는 실제 로그인이 항상 실어 보내는 값이며, 이 화면의 발급·폐기 UI 는 admin 스코프에서만 보인다
+ * (열람 전용 세션에서는 감춰진다). 그래서 어드민 세션을 흉내 내는 이 픽스처도 scope=admin 을 갖는다.
+ */
+function fakeJwt(tenant: string, scope = "admin"): string {
+  const payload = btoa(JSON.stringify({ sub: "admin", tenant, scope }))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
@@ -86,6 +90,21 @@ describe("API 키 화면 (integration + MSW)", () => {
     await user.click(await screen.findByRole("menuitem", { name: "키 폐기" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("키를 폐기했습니다");
+  });
+
+  it("열람 전용(viewer) 세션이면 키 목록은 보이되 발급·폐기 UI가 사라진다", async () => {
+    // 공개된 데모 계정으로 로그인한 상태. 백엔드가 GET 외 메서드를 403으로 막으므로, 화면도 눌러야
+    // 실패할 컨트롤을 내놓지 않아야 한다 — 데이터는 그대로 다 보인다.
+    localStorage.setItem("rp_admin_token", fakeJwt("default", "viewer"));
+    render(<KeysPage />, { wrapper: ToastProvider });
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("프로덕션 수집기")).toBeInTheDocument();
+
+    expect(screen.queryByRole("button", { name: "새 키 발급" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "프로덕션 수집기 작업 메뉴 열기" }),
+    ).not.toBeInTheDocument();
   });
 
   it("tenant 클레임이 없으면 폴백 안내를 보여준다", async () => {

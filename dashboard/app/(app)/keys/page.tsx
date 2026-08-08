@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { getTenantId } from "@/lib/auth";
+import { getTenantId, useReadOnly } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import type { ApiKeySummary, IssuedApiKey } from "@/lib/types";
 import { Card } from "@/components/ui/card";
@@ -57,6 +57,7 @@ export default function KeysPage() {
 
   // 발급 폼
   const [formOpen, setFormOpen] = useState(false);
+  const readOnly = useReadOnly();
   const [label, setLabel] = useState("");
   const [issuing, setIssuing] = useState(false);
 
@@ -159,7 +160,8 @@ export default function KeysPage() {
     <div className="mx-auto max-w-5xl">
       <div className="mb-5 flex items-center justify-between">
         <h1 className="text-xl font-extrabold tracking-tight">API 키 관리</h1>
-        {!formOpen && <Button onClick={() => setFormOpen(true)}>새 키 발급</Button>}
+        {/* 열람 전용 세션에는 발급 버튼을 내린다 — API 키 발급은 admin 스코프 전용이다. */}
+        {!readOnly && !formOpen && <Button onClick={() => setFormOpen(true)}>새 키 발급</Button>}
       </div>
 
       {/* 발급 폼(인라인) */}
@@ -269,7 +271,7 @@ export default function KeysPage() {
                         <KeyStatusBadge revoked={revoked} />
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        {revoked ? (
+                        {revoked || readOnly ? (
                           <span className="text-muted">—</span>
                         ) : (
                           // "⋯" 오버플로 메뉴. 폐기는 파괴적 액션이라 상태색 빨강으로 표시.

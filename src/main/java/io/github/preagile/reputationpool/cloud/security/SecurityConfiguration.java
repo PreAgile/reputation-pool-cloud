@@ -20,6 +20,7 @@ import org.springframework.boot.actuate.metrics.export.prometheus.PrometheusScra
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -41,7 +42,15 @@ import org.springframework.security.web.SecurityFilterChain;
  * securityMatcher}, so it governs <em>every</em> servlet path — not just {@code /api/**} — which is why
  * an unmapped path outside any known prefix is denied by default rather than falling through unguarded.
  * Actuator {@code health}/{@code info} stay public for probes; {@code POST /api/auth/login} is public so
- * an admin can obtain a token; every other request requires a valid admin JWT.
+ * an admin can obtain a token; every other request requires a valid JWT.
+ *
+ * <p><b>Read/write split.</b> Two logins exist (see {@link AdminAuthProperties}): the operator's admin
+ * credential and an optional read-only viewer credential intended to be published as a demo account.
+ * Both mint the same kind of token, differing only in the {@code scope} claim. Authorization is stated
+ * by HTTP method — {@code GET}/{@code HEAD} under {@code /api/**} for any authenticated token, anything
+ * else for {@code SCOPE_admin} only — so the read-only account cannot block a resource, mint an API key,
+ * or touch a tenant's lifecycle. Enforcement is here, in the filter chain, and not in the dashboard:
+ * hiding a button does not stop a curl.
  *
  * <p><b>Stateless.</b> The API is token-only: no session, no CSRF token (there is no cookie/session to
  * protect), no form login or HTTP Basic. A caller either presents a valid {@code Authorization: Bearer}
@@ -59,6 +68,13 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(SecurityConfiguration.class);
+
+    /**
+     * The authority a write must carry. Spring's default converter prefixes the {@code scope} claim with
+     * {@code SCOPE_}, so {@code scope=admin} becomes this. A token minted before the scope claim existed
+     * has no authorities and therefore cannot write — fail closed, and self-healing within one token TTL.
+     */
+    private static final String ADMIN_AUTHORITY = "SCOPE_" + AdminTokenService.SCOPE_ADMIN;
 
     @Bean
     SecurityFilterChain controlPlaneSecurity(
@@ -80,6 +96,18 @@ public class SecurityConfiguration {
                                 .permitAll()
                                 .requestMatchers("/api/auth/login")
                                 .permitAll()
+                                // Read/write split (the published viewer login). Reads are open to any
+                                // authenticated token; everything else under /api/** demands SCOPE_admin.
+                                // The rule is stated by METHOD, not by listing write paths, so a write
+                                // endpoint added later is admin-only by default rather than by remembering
+                                // to extend this list — the failure mode of an enumerated allowlist is a
+                                // new endpoint silently reachable by the read-only account.
+                                .requestMatchers(HttpMethod.GET, "/api/**")
+                                .authenticated()
+                                .requestMatchers(HttpMethod.HEAD, "/api/**")
+                                .authenticated()
+                                .requestMatchers("/api/**")
+                                .hasAuthority(ADMIN_AUTHORITY)
                                 .anyRequest()
                                 .authenticated())
                 // Brute-force defence (issue #28): runs after login is admitted by permitAll but before any

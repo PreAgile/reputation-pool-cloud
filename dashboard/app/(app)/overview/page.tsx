@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/cn";
 import { usePoll } from "@/lib/use-poll";
+import { useReadOnly } from "@/lib/auth";
 
 const POLL_MS = 15000;
 /** 한 번에 보여줄 행 수. 넘으면 "더 보기"로 점증 노출(가상화까지는 과함). */
@@ -98,6 +99,7 @@ export default function OverviewPage() {
   const [kindFilter, setKindFilter] = useState<ResourceKind | "ALL">("ALL");
   // 오버플로 메뉴로 차단/해제가 진행 중인 행 키(중복 클릭 방지).
   const [actingKey, setActingKey] = useState<string | null>(null);
+  const readOnly = useReadOnly();
 
   // 라이브 인디케이터 상태.
   const [paused, setPaused] = useState(false);
@@ -377,6 +379,8 @@ export default function OverviewPage() {
                       <td className="tnum px-4 py-2.5 text-right text-muted">{r.contexts}</td>
                       <td className="px-4 py-2.5 text-muted">{formatBlock(r)}</td>
                       <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                        {/* 열람 전용 세션에서는 작업 메뉴 자체를 감춘다 — 서버가 403 으로 막을 항목만 담긴 메뉴다. */}
+                        {readOnly ? null : (
                         <DropdownMenu>
                           <DropdownMenuIconTrigger label={`${r.value} 작업 메뉴 열기`} />
                           <DropdownMenuContent>
@@ -399,6 +403,7 @@ export default function OverviewPage() {
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
+                        )}
                       </td>
                     </tr>
                     );

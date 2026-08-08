@@ -8,6 +8,11 @@ interface AuthContextValue {
   /** 초기 토큰 확인이 끝났는지(하이드레이션 후). */
   ready: boolean;
   authed: boolean;
+  /**
+   * 현재 세션이 열람 전용(scope=viewer)인지. 백엔드가 GET 외 메서드를 403으로 막으므로 이 값은
+   * 권한이 아니라 표시용이다 — 눌러도 실패할 버튼을 미리 잠가 "고장난 화면"으로 보이지 않게 한다.
+   */
+  readOnly: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -17,9 +22,12 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authed, setAuthed] = useState(false);
   const [ready, setReady] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
 
   useEffect(() => {
     setAuthed(Boolean(getToken()));
+    // 새로고침 후에도 유지돼야 하므로 로그인 응답이 아니라 토큰 자체에서 읽는다(테넌트와 같은 방식).
+    setReadOnly(isReadOnlyToken());
     setReady(true);
   }, []);
 
@@ -32,15 +40,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
     setToken(res.token);
     setAuthed(true);
+    setReadOnly(res.scope === "viewer");
   }
 
   function logout() {
     setToken(null);
     setAuthed(false);
+    setReadOnly(false);
     if (typeof window !== "undefined") window.location.href = "/login";
   }
 
-  return <AuthContext.Provider value={{ ready, authed, login, logout }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ ready, authed, readOnly, login, logout }}>{children}</AuthContext.Provider>
+  );
 }
 
 export function useAuth(): AuthContextValue {
@@ -50,11 +62,19 @@ export function useAuth(): AuthContextValue {
 }
 
 /**
- * 현재 토큰(JWT)에서 테넌트 ID를 추출한다.
- * LoginResponse에는 tenant가 없으므로 JWT payload(두 번째 세그먼트)를 base64url 디코드해
- * `tenant` 클레임을 읽는다(`sub`는 admin username). 실패하면 null.
+ * 현재 세션이 열람 전용인지 — 쓰기 UI를 렌더할지 결정하는 용도.
+ *
+ * useAuth()와 달리 AuthProvider 밖에서도 throw 하지 않는다. 페이지 컴포넌트는 프로바이더 없이 단독
+ * 렌더되는 단위 테스트 대상이기도 한데, 그때 화면이 죽는 대신 토큰에서 직접 같은 답을 읽는다.
+ * 이 값은 표시용이고 실제 권한은 서버가 요청마다 판정하므로, 이 폴백이 권한을 넓히지 않는다.
  */
-export function getTenantId(): string | null {
+export function useReadOnly(): boolean {
+  const ctx = useContext(AuthContext);
+  return ctx ? ctx.readOnly : isReadOnlyToken();
+}
+
+/** 현재 토큰(JWT)의 payload 클레임. 토큰이 없거나 형식이 깨졌으면 null. */
+function readClaims(): { tenant?: unknown; scope?: unknown } | null {
   const token = getToken();
   if (!token) return null;
   try {
@@ -68,9 +88,29 @@ export function getTenantId(): string | null {
         .map((c) => "%" + c.charCodeAt(0).toString(16).padStart(2, "0"))
         .join(""),
     );
-    const claims = JSON.parse(json) as { tenant?: unknown };
-    return typeof claims.tenant === "string" ? claims.tenant : null;
+    return JSON.parse(json) as { tenant?: unknown; scope?: unknown };
   } catch {
     return null;
   }
+}
+
+/**
+ * 현재 토큰(JWT)에서 테넌트 ID를 추출한다.
+ * LoginResponse에는 tenant가 없으므로 JWT payload의 `tenant` 클레임을 읽는다(`sub`는 로그인 이름).
+ * 실패하면 null.
+ */
+export function getTenantId(): string | null {
+  const claims = readClaims();
+  return claims && typeof claims.tenant === "string" ? claims.tenant : null;
+}
+
+/**
+ * 현재 토큰이 열람 전용(scope=viewer)인지. scope 클레임이 명시적으로 "admin" 일 때만 쓰기 가능으로 보고,
+ * 없거나 알 수 없는 값이면 열람 전용으로 취급한다 — 표시 계층도 백엔드와 같은 fail-closed 방향이어야
+ * 스코프 클레임이 없던 옛 토큰이 쓰기 UI를 열어 주는 일이 없다.
+ */
+export function isReadOnlyToken(): boolean {
+  const claims = readClaims();
+  if (!claims) return false; // 비로그인 상태는 읽기 전용이 아니라 "세션 없음" — 로그인 화면이 처리한다.
+  return claims.scope !== "admin";
 }

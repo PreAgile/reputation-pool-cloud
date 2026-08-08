@@ -102,9 +102,15 @@ reputation-pool:
   # a token and every /api/** call is rejected — the gRPC data plane is unaffected. The jwt-secret must
   # be at least 32 bytes (HS256 needs a 256-bit key); a shorter value fails fast at startup. v1 is a
   # single admin login bound to `tenant`, which scopes the dashboard read model (no RBAC yet).
+  #
+  # viewer-*: 읽기 전용 데모 로그인(선택). 자격증명을 공개(이력서의 열람용 계정)해도 상태를 못 바꾸게
+  # 하기 위한 두 번째 계정이다. 토큰의 scope 클레임이 viewer 가 되고, 필터 체인이 /api/** 의 GET·HEAD
+  # 만 허용한다(그 외 메서드는 403). 비워 두면 뷰어 토큰은 아예 발급되지 않는다 — fail closed.
   admin:
     username: ${REPUTATION_POOL_ADMIN_USERNAME:}
     password: ${REPUTATION_POOL_ADMIN_PASSWORD:}
+    viewer-username: ${REPUTATION_POOL_ADMIN_VIEWER_USERNAME:}
+    viewer-password: ${REPUTATION_POOL_ADMIN_VIEWER_PASSWORD:}
     tenant: ${REPUTATION_POOL_ADMIN_TENANT:default}
     jwt-secret: ${REPUTATION_POOL_ADMIN_JWT_SECRET:}
     token-ttl: ${REPUTATION_POOL_ADMIN_TOKEN_TTL:PT1H}

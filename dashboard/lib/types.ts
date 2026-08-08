@@ -7,6 +7,8 @@ export interface LoginResponse {
   token: string;
   tokenType: string;
   expiresInSeconds: number;
+  /** 발급된 토큰의 권한: "admin"(전체) 또는 "viewer"(열람 전용). 표시용이며 권한 판정은 서버가 한다. */
+  scope: string;
 }
 
 export interface Tenant {

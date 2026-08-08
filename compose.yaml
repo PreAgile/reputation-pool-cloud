@@ -62,6 +62,13 @@ services:
       REPUTATION_POOL_ADMIN_USERNAME: ${REPUTATION_POOL_ADMIN_USERNAME:-}
       REPUTATION_POOL_ADMIN_PASSWORD: ${REPUTATION_POOL_ADMIN_PASSWORD:-}
       REPUTATION_POOL_ADMIN_JWT_SECRET: ${REPUTATION_POOL_ADMIN_JWT_SECRET:-}
+      # Read-only viewer login — a second credential for showing the console to someone outside the
+      # team (a published demo account). Its token gets scope=viewer, which the filter chain admits for
+      # GET/HEAD under /api/** and rejects for every other method, so publishing it cannot cost more
+      # than disclosure of what the console already displays. Optional and independent of the admin
+      # pair: leave unset and no viewer token is ever minted.
+      REPUTATION_POOL_ADMIN_VIEWER_USERNAME: ${REPUTATION_POOL_ADMIN_VIEWER_USERNAME:-}
+      REPUTATION_POOL_ADMIN_VIEWER_PASSWORD: ${REPUTATION_POOL_ADMIN_VIEWER_PASSWORD:-}
       # Tenant that the admin console is scoped to (issue #11: v1 has no RBAC, so one admin login is
       # bound to one tenant and can only manage that tenant's API keys / read model). Defaults to
       # `default`; set REPUTATION_POOL_ADMIN_TENANT to point the console at another tenant (e.g. the
