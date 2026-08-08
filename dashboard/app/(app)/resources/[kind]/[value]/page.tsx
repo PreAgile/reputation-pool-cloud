@@ -37,6 +37,7 @@ import {
   type RangePreset,
 } from "@/components/ui/date-range-picker";
 import { usePoll } from "@/lib/use-poll";
+import { useReadOnly } from "@/lib/auth";
 
 /** score-history 컨텍스트별 시계열을 recharts LineChart 한 판이 먹는 wide 포맷으로 병합. */
 type ChartRow = { t: number } & Record<string, number>;
@@ -171,6 +172,7 @@ export default function ResourceDetailPage() {
   const [events, setEvents] = useState<AuditEventRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
+  const readOnly = useReadOnly();
   const [actionError, setActionError] = useState<string | null>(null);
   // 평판 곡선 조회 기간(프리셋). 기본 최근 24시간 — 원천이 분당 1점이라 이 범위면 충분.
   const [range, setRange] = useState<RangePreset>(RANGE_PRESETS[0]);
@@ -352,9 +354,10 @@ export default function ResourceDetailPage() {
             </span>
           </div>
         )}
-        {/* 수동 차단/해제 (운영자 개입). 엔진에 자동 차단이 없어 이 버튼이 유일한 격리 경로. */}
+        {/* 수동 차단/해제 (운영자 개입). 엔진에 자동 차단이 없어 이 버튼이 유일한 격리 경로.
+            열람 전용 세션에는 렌더하지 않는다 — 서버가 403 으로 막는 경로라 버튼이 있으면 오작동처럼 보인다. */}
         <div className="ml-auto flex gap-2">
-          {detail.blocked ? (
+          {readOnly ? null : detail.blocked ? (
             <Button variant="ghost" disabled={acting} onClick={() => mutate("unblock")}>
               {acting ? "처리 중…" : "차단 해제"}
             </Button>

@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { Tenant } from "@/lib/types";
 import { Card } from "@/components/ui/card";
+import { useReadOnly } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
@@ -56,6 +57,7 @@ export default function AdminPage() {
 
   // 생성 폼
   const [formOpen, setFormOpen] = useState(false);
+  const readOnly = useReadOnly();
   const [id, setId] = useState("");
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -124,7 +126,8 @@ export default function AdminPage() {
     <div className="mx-auto max-w-5xl">
       <div className="mb-5 flex items-center justify-between">
         <h1 className="text-xl font-extrabold tracking-tight">관리자</h1>
-        {!formOpen && <Button onClick={() => setFormOpen(true)}>새 테넌트</Button>}
+        {/* 열람 전용 세션에는 생성 버튼을 내린다 — 테넌트 생성은 admin 스코프 전용이다. */}
+        {!readOnly && !formOpen && <Button onClick={() => setFormOpen(true)}>새 테넌트</Button>}
       </div>
 
       {/* 시스템 헬스: actuator health(public)를 same-origin으로 조회. dev는 next의 /actuator rewrite,
@@ -234,7 +237,7 @@ export default function AdminPage() {
                       <EmptyState
                         title="등록된 테넌트가 없습니다"
                         description="첫 테넌트를 만들면 여기에 표시됩니다."
-                        action={{ label: "새 테넌트", onClick: () => setFormOpen(true) }}
+                        action={readOnly ? undefined : { label: "새 테넌트", onClick: () => setFormOpen(true) }}
                       />
                     </td>
                   </tr>

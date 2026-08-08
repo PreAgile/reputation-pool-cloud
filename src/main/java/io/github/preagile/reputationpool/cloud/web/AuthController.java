@@ -31,7 +31,7 @@ public class AuthController {
     public LoginResponse login(@RequestBody LoginRequest request) {
         return tokenService
                 .issueToken(request.username(), request.password())
-                .map(token -> new LoginResponse(token.token(), "Bearer", token.expiresInSeconds()))
+                .map(token -> new LoginResponse(token.token(), "Bearer", token.expiresInSeconds(), token.scope()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid credentials"));
     }
 }
