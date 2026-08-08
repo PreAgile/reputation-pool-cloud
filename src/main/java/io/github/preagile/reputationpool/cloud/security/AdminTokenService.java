@@ -72,6 +72,7 @@ public final class AdminTokenService {
         }
         String scope = adminOk ? SCOPE_ADMIN : SCOPE_VIEWER;
         String subject = adminOk ? properties.username() : properties.viewerUsername();
+        String tenant = adminOk ? properties.tenant() : properties.effectiveViewerTenant();
         Instant now = clock.instant();
         Instant expiresAt = now.plus(properties.tokenTtl());
         JwtClaimsSet claims = JwtClaimsSet.builder()
@@ -79,7 +80,7 @@ public final class AdminTokenService {
                 .issuedAt(now)
                 .expiresAt(expiresAt)
                 .subject(subject)
-                .claim(TENANT_CLAIM, properties.tenant())
+                .claim(TENANT_CLAIM, tenant)
                 .claim(SCOPE_CLAIM, scope)
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();

@@ -69,6 +69,11 @@ services:
       # pair: leave unset and no viewer token is ever minted.
       REPUTATION_POOL_ADMIN_VIEWER_USERNAME: ${REPUTATION_POOL_ADMIN_VIEWER_USERNAME:-}
       REPUTATION_POOL_ADMIN_VIEWER_PASSWORD: ${REPUTATION_POOL_ADMIN_VIEWER_PASSWORD:-}
+      # Tenant the viewer token is bound to. Unset means "same as REPUTATION_POOL_ADMIN_TENANT". Split
+      # from it because the operator console usually points at the tenant actually being run, whose read
+      # model holds real resource identifiers, while a demo shown outside the team should land on a
+      # tenant holding demonstration data.
+      REPUTATION_POOL_ADMIN_VIEWER_TENANT: ${REPUTATION_POOL_ADMIN_VIEWER_TENANT:-}
       # Tenant that the admin console is scoped to (issue #11: v1 has no RBAC, so one admin login is
       # bound to one tenant and can only manage that tenant's API keys / read model). Defaults to
       # `default`; set REPUTATION_POOL_ADMIN_TENANT to point the console at another tenant (e.g. the
