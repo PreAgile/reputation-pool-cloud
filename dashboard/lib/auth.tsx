@@ -40,7 +40,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
     setToken(res.token);
     setAuthed(true);
-    setReadOnly(res.scope === "viewer");
+    // "admin 이 아니면 읽기 전용" — viewer 를 골라내는 게 아니라 admin 만 통과시킨다. scope 가 비었거나
+    // 앞으로 생길 제3의 값이어도 쓰기 UI 가 열리지 않게, 서버의 판정 방향과 같은 쪽으로 실패시킨다.
+    setReadOnly(res.scope !== "admin");
   }
 
   function logout() {
@@ -70,7 +72,10 @@ export function useAuth(): AuthContextValue {
  */
 export function useReadOnly(): boolean {
   const ctx = useContext(AuthContext);
-  return ctx ? ctx.readOnly : isReadOnlyToken();
+  if (!ctx) return isReadOnlyToken();
+  // 하이드레이션 직후 한 틱 동안 ready 는 false 이고 readOnly 는 아직 초기값(false)이다. 그 틈에 쓰기 UI를
+  // 그리면 저장된 viewer 토큰으로 새로고침한 화면이 잠깐 어드민처럼 보인다 — 확정 전까지는 잠가 둔다.
+  return ctx.ready ? ctx.readOnly : true;
 }
 
 /** 현재 토큰(JWT)의 payload 클레임. 토큰이 없거나 형식이 깨졌으면 null. */

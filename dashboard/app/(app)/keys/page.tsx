@@ -300,7 +300,7 @@ export default function KeysPage() {
                       <EmptyState
                         title="발급된 API 키가 없습니다"
                         description="수집기가 풀 API 를 호출하려면 API 키가 필요합니다. 첫 키를 발급해 보세요."
-                        action={{ label: "새 키 발급", onClick: () => setFormOpen(true) }}
+                        action={readOnly ? undefined : { label: "새 키 발급", onClick: () => setFormOpen(true) }}
                       />
                     </td>
                   </tr>

@@ -237,7 +237,7 @@ export default function AdminPage() {
                       <EmptyState
                         title="등록된 테넌트가 없습니다"
                         description="첫 테넌트를 만들면 여기에 표시됩니다."
-                        action={{ label: "새 테넌트", onClick: () => setFormOpen(true) }}
+                        action={readOnly ? undefined : { label: "새 테넌트", onClick: () => setFormOpen(true) }}
                       />
                     </td>
                   </tr>

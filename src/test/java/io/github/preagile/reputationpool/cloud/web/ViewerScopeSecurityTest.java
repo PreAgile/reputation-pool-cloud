@@ -3,6 +3,7 @@ package io.github.preagile.reputationpool.cloud.web;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -149,6 +150,13 @@ class ViewerScopeSecurityTest {
     @DisplayName("뷰어 토큰으로 목록 조회(GET /api/tenants)는 → 200 으로 허용한다")
     void viewerToken_canRead() throws Exception {
         mvc.perform(get("/api/tenants").header("Authorization", "Bearer " + viewerToken()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("뷰어 토큰의 HEAD /api/tenants 도 → 200 으로 허용한다(읽기 메서드는 GET 만이 아니다)")
+    void viewerToken_canHead() throws Exception {
+        mvc.perform(head("/api/tenants").header("Authorization", "Bearer " + viewerToken()))
                 .andExpect(status().isOk());
     }
 

@@ -107,6 +107,16 @@ describe("API 키 화면 (integration + MSW)", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("열람 전용 세션에서 키가 하나도 없으면 빈 목록 CTA도 나오지 않는다", async () => {
+    // 빈 목록의 EmptyState 는 헤더 CTA 와 별개 경로라, 헤더만 막으면 여기로 폼이 열린다.
+    server.use(http.get("*/api/tenants/default/api-keys", () => HttpResponse.json([])));
+    localStorage.setItem("rp_admin_token", fakeJwt("default", "viewer"));
+    render(<KeysPage />, { wrapper: ToastProvider });
+
+    expect(await screen.findByText("발급된 API 키가 없습니다")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "새 키 발급" })).not.toBeInTheDocument();
+  });
+
   it("tenant 클레임이 없으면 폴백 안내를 보여준다", async () => {
     localStorage.setItem("rp_admin_token", "header.payload.sig"); // 디코드 실패 → null
     render(<KeysPage />, { wrapper: ToastProvider });
