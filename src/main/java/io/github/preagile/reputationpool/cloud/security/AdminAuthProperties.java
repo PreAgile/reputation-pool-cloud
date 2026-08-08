@@ -37,6 +37,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param password the admin password; blank (the default) disables the console
  * @param viewerUsername the read-only login name; blank (the default) disables the viewer
  * @param viewerPassword the read-only password; blank (the default) disables the viewer
+ * @param viewerTenant the tenant viewer tokens are bound to; blank (the default) means "same as
+ *     {@link #tenant()}"
  * @param tenant the tenant the issued token — and thus the dashboard read model — is bound to
  * @param jwtSecret the HS256 signing secret (min 32 bytes when set); blank disables the console
  * @param tokenTtl how long an issued token stays valid
@@ -47,6 +49,7 @@ public record AdminAuthProperties(
         @DefaultValue("") String password,
         @DefaultValue("") String viewerUsername,
         @DefaultValue("") String viewerPassword,
+        @DefaultValue("") String viewerTenant,
         @DefaultValue("default") String tenant,
         @DefaultValue("") String jwtSecret,
         @DefaultValue("PT1H") Duration tokenTtl) {
@@ -65,5 +68,18 @@ public record AdminAuthProperties(
      */
     public boolean viewerConfigured() {
         return !viewerUsername.isBlank() && !viewerPassword.isBlank() && !jwtSecret.isBlank();
+    }
+
+    /**
+     * The tenant a viewer token is bound to: {@link #viewerTenant()} when set, otherwise {@link #tenant()}.
+     *
+     * <p>These are separate because the operator's console and the demo view usually want different data.
+     * The admin login is typically pointed at the tenant actually being run, whose read model contains
+     * real resource identifiers; a demo shown outside the team should land on a tenant holding
+     * demonstration data instead. Defaulting to {@code tenant} keeps the single-tenant setup unchanged
+     * for anyone who does not set this.
+     */
+    public String effectiveViewerTenant() {
+        return viewerTenant.isBlank() ? tenant : viewerTenant;
     }
 }

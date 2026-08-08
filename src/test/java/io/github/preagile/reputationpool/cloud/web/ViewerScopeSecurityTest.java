@@ -31,6 +31,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -53,6 +54,7 @@ import org.springframework.test.web.servlet.MockMvc;
             "reputation-pool.admin.password=s3cret-password",
             "reputation-pool.admin.viewer-username=viewer",
             "reputation-pool.admin.viewer-password=viewer-password",
+            "reputation-pool.admin.viewer-tenant=demo",
             "reputation-pool.admin.tenant=default",
             // 32-byte secret: HS256 needs a 256-bit key.
             "reputation-pool.admin.jwt-secret=0123456789abcdef0123456789abcdef"
@@ -81,6 +83,9 @@ class ViewerScopeSecurityTest {
     @Autowired
     private AdminTokenService tokenService;
 
+    @Autowired
+    private org.springframework.security.oauth2.jwt.JwtDecoder decoder;
+
     @MockitoBean
     private TenantRepository tenants;
 
@@ -102,6 +107,9 @@ class ViewerScopeSecurityTest {
         // this stub every case would 403 at the filter and prove nothing about scope.
         Mockito.when(tenants.findById("default"))
                 .thenReturn(Optional.of(new Tenant("default", "default", TenantStatus.ACTIVE, Instant.now())));
+        // 뷰어 토큰은 viewer-tenant(demo)에 묶이므로 그쪽도 active 여야 필터를 지난다.
+        Mockito.when(tenants.findById("demo"))
+                .thenReturn(Optional.of(new Tenant("demo", "demo", TenantStatus.ACTIVE, Instant.now())));
         Mockito.when(tenants.findAll()).thenReturn(List.of());
     }
 
@@ -200,6 +208,17 @@ class ViewerScopeSecurityTest {
         mvc.perform(delete("/api/tenants/default").header("Authorization", "Bearer " + adminToken()))
                 .andExpect(status().isNoContent());
         Mockito.verify(lifecycle).delete("default");
+    }
+
+    @Test
+    @DisplayName("뷰어 토큰은 viewer-tenant(demo)에, 어드민 토큰은 tenant(default)에 묶인다")
+    void viewerAndAdminTokensBindDifferentTenants() {
+        // 데모를 운영 테넌트가 아닌 시연용 테넌트로 보내는 설정. 둘이 갈라지지 않으면 공개 계정이
+        // 운영 읽기 모델(실제 리소스 식별자)을 그대로 보게 된다.
+        Jwt viewer = decoder.decode(viewerToken());
+        Jwt admin = decoder.decode(adminToken());
+        assertThat(viewer.getClaimAsString(AdminTokenService.TENANT_CLAIM)).isEqualTo("demo");
+        assertThat(admin.getClaimAsString(AdminTokenService.TENANT_CLAIM)).isEqualTo("default");
     }
 
     @Test
