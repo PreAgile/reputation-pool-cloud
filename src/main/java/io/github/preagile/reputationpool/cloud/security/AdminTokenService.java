@@ -63,16 +63,26 @@ public final class AdminTokenService {
      * unconfigured. The caller turns empty into 401 without revealing which check failed.
      */
     public Optional<IssuedToken> issueToken(String username, String password) {
-        // Evaluate both credential sets unconditionally — & and no early return — so response timing does
-        // not reveal which account was attempted. Admin wins if somehow both are configured identically.
+        // Every configured credential is compared, always, with no early exit — & rather than &&, and the
+        // viewer loop runs to the end even after a hit. Stopping early would make response time depend on
+        // which account was attempted and how far down the list it sits, turning the login into an oracle
+        // for enumerating the demo accounts.
         boolean adminOk = properties.configured() & matchesAdmin(username, password);
-        boolean viewerOk = properties.viewerConfigured() & matchesViewer(username, password);
-        if (!adminOk && !viewerOk) {
+        AdminAuthProperties.Viewer matchedViewer = null;
+        for (AdminAuthProperties.Viewer viewer : properties.usableViewers()) {
+            if (matches(viewer.username(), viewer.password(), username, password) && matchedViewer == null) {
+                matchedViewer = viewer;
+            }
+        }
+        if (!adminOk && matchedViewer == null) {
             return Optional.empty();
         }
+        // Admin wins if a viewer were ever configured with the same credentials — the more capable
+        // identity is the safer answer to give its own owner, and it keeps the operator from being
+        // silently downgraded to read-only by a config mistake.
         String scope = adminOk ? SCOPE_ADMIN : SCOPE_VIEWER;
-        String subject = adminOk ? properties.username() : properties.viewerUsername();
-        String tenant = adminOk ? properties.tenant() : properties.effectiveViewerTenant();
+        String subject = adminOk ? properties.username() : matchedViewer.username();
+        String tenant = adminOk ? properties.tenant() : properties.tenantFor(matchedViewer);
         Instant now = clock.instant();
         Instant expiresAt = now.plus(properties.tokenTtl());
         JwtClaimsSet claims = JwtClaimsSet.builder()
@@ -89,16 +99,17 @@ public final class AdminTokenService {
     }
 
     private boolean matchesAdmin(String username, String password) {
-        // Compare both fields with constant-time equality; & (not &&) so timing does not leak which
-        // field matched. A null field fails closed.
-        boolean userOk = constantTimeEquals(properties.username(), username);
-        boolean passOk = constantTimeEquals(properties.password(), password);
-        return userOk & passOk;
+        return matches(properties.username(), properties.password(), username, password);
     }
 
-    private boolean matchesViewer(String username, String password) {
-        boolean userOk = constantTimeEquals(properties.viewerUsername(), username);
-        boolean passOk = constantTimeEquals(properties.viewerPassword(), password);
+    /**
+     * Whether the presented pair equals the expected pair. Both fields are compared with constant-time
+     * equality and combined with {@code &} (not {@code &&}) so timing does not leak which field matched.
+     * A null field fails closed.
+     */
+    private static boolean matches(String expectedUsername, String expectedPassword, String username, String password) {
+        boolean userOk = constantTimeEquals(expectedUsername, username);
+        boolean passOk = constantTimeEquals(expectedPassword, password);
         return userOk & passOk;
     }
 
