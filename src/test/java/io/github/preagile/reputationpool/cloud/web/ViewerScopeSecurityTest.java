@@ -52,9 +52,12 @@ import org.springframework.test.web.servlet.MockMvc;
         properties = {
             "reputation-pool.admin.username=admin",
             "reputation-pool.admin.password=s3cret-password",
-            "reputation-pool.admin.viewer-username=viewer",
-            "reputation-pool.admin.viewer-password=viewer-password",
-            "reputation-pool.admin.viewer-tenant=demo",
+            "reputation-pool.admin.viewers[0].username=viewer",
+            "reputation-pool.admin.viewers[0].password=viewer-password",
+            "reputation-pool.admin.viewers[0].tenant=demo",
+            // 두 번째 열람 계정: 이름·비밀번호가 다르고 tenant 를 비워 어드민 tenant 를 따른다.
+            "reputation-pool.admin.viewers[1].username=viewer-two",
+            "reputation-pool.admin.viewers[1].password=viewer-two-password",
             "reputation-pool.admin.tenant=default",
             // 32-byte secret: HS256 needs a 256-bit key.
             "reputation-pool.admin.jwt-secret=0123456789abcdef0123456789abcdef"
@@ -219,6 +222,41 @@ class ViewerScopeSecurityTest {
         Jwt admin = decoder.decode(adminToken());
         assertThat(viewer.getClaimAsString(AdminTokenService.TENANT_CLAIM)).isEqualTo("demo");
         assertThat(admin.getClaimAsString(AdminTokenService.TENANT_CLAIM)).isEqualTo("default");
+    }
+
+    @Test
+    @DisplayName("두 번째 열람 계정도 독립적으로 로그인되고 → 똑같이 읽기만 된다")
+    void secondViewer_isIndependentAndAlsoReadOnly() throws Exception {
+        String token = tokenService
+                .issueToken("viewer-two", "viewer-two-password")
+                .orElseThrow()
+                .token();
+
+        mvc.perform(get("/api/tenants").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+        mvc.perform(delete("/api/tenants/default").header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        Mockito.verify(lifecycle, Mockito.never()).delete(Mockito.anyString());
+    }
+
+    @Test
+    @DisplayName("열람 계정끼리 자격증명이 섞이지 않는다 — 1번 이름 + 2번 비밀번호는 401")
+    void viewerCredentialsDoNotCrossMatch() throws Exception {
+        mvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"viewer\",\"password\":\"viewer-two-password\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("tenant 를 비운 열람 계정은 → 어드민 tenant(default)를 따른다")
+    void viewerWithoutTenant_fallsBackToAdminTenant() {
+        Jwt token = decoder.decode(tokenService
+                .issueToken("viewer-two", "viewer-two-password")
+                .orElseThrow()
+                .token());
+        assertThat(token.getClaimAsString(AdminTokenService.TENANT_CLAIM)).isEqualTo("default");
+        assertThat(token.getClaimAsString(AdminTokenService.SCOPE_CLAIM)).isEqualTo(AdminTokenService.SCOPE_VIEWER);
     }
 
     @Test

@@ -67,13 +67,26 @@ services:
       # GET/HEAD under /api/** and rejects for every other method, so publishing it cannot cost more
       # than disclosure of what the console already displays. Optional and independent of the admin
       # pair: leave unset and no viewer token is ever minted.
-      REPUTATION_POOL_ADMIN_VIEWER_USERNAME: ${REPUTATION_POOL_ADMIN_VIEWER_USERNAME:-}
-      REPUTATION_POOL_ADMIN_VIEWER_PASSWORD: ${REPUTATION_POOL_ADMIN_VIEWER_PASSWORD:-}
-      # Tenant the viewer token is bound to. Unset means "same as REPUTATION_POOL_ADMIN_TENANT". Split
-      # from it because the operator console usually points at the tenant actually being run, whose read
-      # model holds real resource identifiers, while a demo shown outside the team should land on a
-      # tenant holding demonstration data.
-      REPUTATION_POOL_ADMIN_VIEWER_TENANT: ${REPUTATION_POOL_ADMIN_VIEWER_TENANT:-}
+      # Read-only demo logins, one per audience the console is shown to. Each token gets
+      # scope=viewer, which the filter chain admits for GET/HEAD under /api/** and rejects for
+      # every other method, so publishing one cannot cost more than disclosure of what the console
+      # already displays. Per-viewer TENANT is optional and falls back to REPUTATION_POOL_ADMIN_TENANT;
+      # point it at a tenant holding demonstration data so a demo never lands on the operational one.
+      #
+      # Four fixed slots because compose enumerates variables explicitly — it cannot forward an
+      # open-ended list. Unset slots bind as blanks and are dropped; add more slots here if needed.
+      REPUTATION_POOL_ADMIN_VIEWERS_0_USERNAME: ${REPUTATION_POOL_ADMIN_VIEWERS_0_USERNAME:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_0_PASSWORD: ${REPUTATION_POOL_ADMIN_VIEWERS_0_PASSWORD:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_0_TENANT: ${REPUTATION_POOL_ADMIN_VIEWERS_0_TENANT:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_1_USERNAME: ${REPUTATION_POOL_ADMIN_VIEWERS_1_USERNAME:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_1_PASSWORD: ${REPUTATION_POOL_ADMIN_VIEWERS_1_PASSWORD:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_1_TENANT: ${REPUTATION_POOL_ADMIN_VIEWERS_1_TENANT:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_2_USERNAME: ${REPUTATION_POOL_ADMIN_VIEWERS_2_USERNAME:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_2_PASSWORD: ${REPUTATION_POOL_ADMIN_VIEWERS_2_PASSWORD:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_2_TENANT: ${REPUTATION_POOL_ADMIN_VIEWERS_2_TENANT:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_3_USERNAME: ${REPUTATION_POOL_ADMIN_VIEWERS_3_USERNAME:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_3_PASSWORD: ${REPUTATION_POOL_ADMIN_VIEWERS_3_PASSWORD:-}
+      REPUTATION_POOL_ADMIN_VIEWERS_3_TENANT: ${REPUTATION_POOL_ADMIN_VIEWERS_3_TENANT:-}
       # Tenant that the admin console is scoped to (issue #11: v1 has no RBAC, so one admin login is
       # bound to one tenant and can only manage that tenant's API keys / read model). Defaults to
       # `default`; set REPUTATION_POOL_ADMIN_TENANT to point the console at another tenant (e.g. the
