@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import type { AuditEventPage, AuditEventRecord, ResourceKind } from "@/lib/types";
+import type { AuditEventPage, AuditEventRecord, ContextOverview, ResourceKind } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import {
+  DateRangePicker,
+  EVENT_RANGE_PRESETS,
+  type RangePreset,
+} from "@/components/ui/date-range-picker";
 import { usePoll } from "@/lib/use-poll";
 
 /** 첫 페이지(최근 50건)를 다시 불러오는 폴링 주기. */
@@ -126,10 +131,24 @@ export default function EventsPage() {
   const [viewingHistory, setViewingHistory] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // 필터(전부 클라이언트측 — 서버는 cursor/limit만 지원).
+  // 유형·종류·검색은 클라이언트측(로드된 페이지 안에서 좁힌다).
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [kindFilter, setKindFilter] = useState<ResourceKind | "ALL">("ALL");
   const [query, setQuery] = useState("");
+  // 컨텍스트·기간은 **서버측** — 이 둘은 페이지를 고르는 조건이라, 클라이언트에서 걸면 "이번 페이지에
+  // 우연히 들어온 것"만 걸러져 조건에 맞는 과거 이벤트가 통째로 사라진다.
+  const [contextFilter, setContextFilter] = useState<string>("ALL");
+  const [range, setRange] = useState<RangePreset>(EVENT_RANGE_PRESETS[3]); // 기본 90일
+  // 드롭다운을 채울 컨텍스트 목록(컨텍스트 축 읽기 모델에서 그대로 가져온다).
+  const [knownContexts, setKnownContexts] = useState<string[]>([]);
+
+  // 서버 필터를 쿼리스트링으로. hours=0("전체 기간")이면 창 자체를 보내지 않는다.
+  const serverQuery = useMemo(() => {
+    const parts: string[] = [];
+    if (contextFilter !== "ALL") parts.push(`context=${encodeURIComponent(contextFilter)}`);
+    if (range.hours > 0) parts.push(`hours=${range.hours}`);
+    return parts.length > 0 ? `&${parts.join("&")}` : "";
+  }, [contextFilter, range.hours]);
 
   // 최초 성공 로드 여부: 폴링 실패를 조용히 넘길지(직전 데이터 유지) 판단.
   const loadedRef = useRef(false);
@@ -141,7 +160,7 @@ export default function EventsPage() {
   const loadLatest = useCallback(async () => {
     const my = ++reqSeq.current;
     try {
-      const res = await api<AuditEventPage>(`/events?limit=${PAGE_SIZE}`);
+      const res = await api<AuditEventPage>(`/events?limit=${PAGE_SIZE}${serverQuery}`);
       if (my !== reqSeq.current) return; // 더 보기/라이브로 전환 등으로 뒤처진 응답 → 폐기
       loadedRef.current = true;
       setEvents(res.events);
@@ -156,7 +175,7 @@ export default function EventsPage() {
       if (loadedRef.current) setPollWarning(msg);
       else setFirstError(msg);
     }
-  }, []);
+  }, [serverQuery]);
 
   // "더 보기": nextCursor 로 과거 페이지를 이어받아 seq 로 dedup 후 append. 과거를 보는 순간 폴링 정지.
   const loadMore = useCallback(async () => {
@@ -166,7 +185,7 @@ export default function EventsPage() {
     setLoadingMore(true);
     try {
       const res = await api<AuditEventPage>(
-        `/events?cursor=${encodeURIComponent(nextCursor)}&limit=${PAGE_SIZE}`,
+        `/events?cursor=${encodeURIComponent(nextCursor)}&limit=${PAGE_SIZE}${serverQuery}`,
       );
       if (my === reqSeq.current) {
         setEvents((prev) => {
@@ -185,7 +204,7 @@ export default function EventsPage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, loadingMore]);
+  }, [nextCursor, loadingMore, serverQuery]);
 
   // "라이브로": 목록을 최신으로 초기화하고 폴링을 재개한다.
   const backToLive = useCallback(() => {
@@ -193,10 +212,30 @@ export default function EventsPage() {
     void loadLatest();
   }, [loadLatest]);
 
-  // 최초 1회 즉시 로드.
+  // 최초 1회, 그리고 서버 필터가 바뀔 때마다(loadLatest 가 그때 새로 만들어진다) 즉시 로드.
   useEffect(() => {
     void loadLatest();
   }, [loadLatest]);
+
+  // 서버 필터를 바꾸면 목록이 통째로 새로 그려지므로, 붙잡고 있던 "과거 보기" 상태는 의미가 없다.
+  useEffect(() => {
+    setViewingHistory(false);
+  }, [serverQuery]);
+
+  // 필터 드롭다운을 채울 컨텍스트 목록. 실패하면 그냥 비워 둔다(이벤트 화면 자체는 영향 없음).
+  useEffect(() => {
+    let live = true;
+    void api<ContextOverview>("/contexts")
+      .then((o) => {
+        if (live) setKnownContexts(o.contexts.map((c) => c.context));
+      })
+      .catch(() => {
+        if (live) setKnownContexts([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // 폴링: 일시정지/과거보기가 아니고 탭이 보일 때만 최신 페이지를 주기 갱신(usePoll이 백그라운드 탭을 건너뛴다).
   usePoll(() => void loadLatest(), POLL_MS, !paused && !viewingHistory);
@@ -217,7 +256,12 @@ export default function EventsPage() {
       .sort((a, b) => b.seq - a.seq); // seq 단조증가 → 시간 내림차순
   }, [events, typeFilter, kindFilter, query]);
 
-  const filtering = typeFilter !== "ALL" || kindFilter !== "ALL" || query.trim() !== "";
+  const filtering =
+    typeFilter !== "ALL" ||
+    kindFilter !== "ALL" ||
+    query.trim() !== "" ||
+    contextFilter !== "ALL" ||
+    range.hours > 0;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -226,7 +270,8 @@ export default function EventsPage() {
         <div>
           <h1 className="text-xl font-extrabold tracking-tight">라이브 이벤트</h1>
           <p className="mt-1 text-sm text-muted">
-            풀에서 발생한 최근 감사 이벤트를 시간 내림차순으로 봅니다. (최근 {PAGE_SIZE}건)
+            풀에서 발생한 감사 이벤트를 시간 내림차순으로 봅니다 (한 번에 {PAGE_SIZE}건). 이벤트는 상태가
+            바뀔 때만 남으므로, 조용한 풀에서는 기간을 넓혀야 보입니다.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -304,6 +349,26 @@ export default function EventsPage() {
               ))}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              {/* 컨텍스트·기간은 서버로 나간다 — 아래 유형/검색과 달리 페이지 자체를 다시 고른다. */}
+              <select
+                value={contextFilter}
+                onChange={(e) => setContextFilter(e.target.value)}
+                aria-label="컨텍스트 필터"
+                className="rounded-[10px] border border-line bg-surface px-3 py-1.5 text-sm font-semibold text-ink focus:border-accent focus:outline-none"
+              >
+                <option value="ALL">모든 컨텍스트</option>
+                {knownContexts.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <DateRangePicker
+                value={range}
+                onChange={setRange}
+                label="이벤트 기간 선택"
+                presets={EVENT_RANGE_PRESETS}
+              />
               <select
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
@@ -387,8 +452,16 @@ export default function EventsPage() {
                       <td colSpan={7} className="p-0">
                         {events.length === 0 ? (
                           <EmptyState
-                            title="아직 기록된 이벤트가 없습니다"
-                            description="풀에서 임대·냉각·차단 등이 발생하면 여기에 실시간으로 쌓입니다."
+                            title={
+                              contextFilter === "ALL" && range.hours === 0
+                                ? "아직 기록된 이벤트가 없습니다"
+                                : "이 조건에 맞는 이벤트가 없습니다"
+                            }
+                            description={
+                              contextFilter === "ALL" && range.hours === 0
+                                ? "감사 이벤트는 상태가 바뀔 때만 남습니다 — 임대·반납, 그리고 냉각·회복·차단 같은 전이입니다. 모든 리소스가 계속 HEALTHY 라면 보고가 정상적으로 들어와도 이 목록은 비어 있습니다."
+                                : "기간을 넓히거나(전체 기간) 컨텍스트 필터를 풀면 더 과거의 이벤트까지 찾습니다."
+                            }
                           />
                         ) : (
                           <EmptyState

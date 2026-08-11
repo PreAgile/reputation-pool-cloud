@@ -74,18 +74,34 @@ public record ReputationPoolProperties(
      * useful for a recent window, and the table would otherwise grow without limit); a zero or negative
      * {@code retention} disables it for callers who want to keep everything.
      *
+     * <p>The same tick also folds a per-context aggregate into {@code score_rollup_hourly}, which is what
+     * lets the dashboard's context view offer 30d/90d windows: the rollup's cardinality is
+     * (tenant × context × hour) rather than per cell per tick, so it is kept far longer than the raw
+     * samples — hence its own {@code rollupRetention}, defaulted to a quarter.
+     *
      * @param sampleInterval how often every cell's score is sampled into {@code score_sample}
-     * @param retention how much score history to keep; {@code <= 0} disables purging
+     * @param retention how much raw score history to keep; {@code <= 0} disables purging
+     * @param rollupRetention how much hourly context rollup to keep; {@code <= 0} disables purging
      * @param purgeInterval how often the retention purge runs
      */
     public record Score(
             @DefaultValue("PT1M") Duration sampleInterval,
             @DefaultValue("P7D") Duration retention,
+            @DefaultValue("P90D") Duration rollupRetention,
             @DefaultValue("PT1H") Duration purgeInterval) {
 
-        /** Whether age-based purging is turned on (a positive retention was configured). */
+        /** Whether age-based purging of the raw samples is turned on (a positive retention was configured). */
         public boolean purgeEnabled() {
-            return retention != null && !retention.isZero() && !retention.isNegative();
+            return positive(retention);
+        }
+
+        /** Whether age-based purging of the hourly rollup is turned on. */
+        public boolean rollupPurgeEnabled() {
+            return positive(rollupRetention);
+        }
+
+        private static boolean positive(Duration duration) {
+            return duration != null && !duration.isZero() && !duration.isNegative();
         }
     }
 

@@ -32,13 +32,22 @@ public final class UsageMeterReader {
     }
 
     /**
-     * The tenant's usage as of {@code today} (UTC): the last 30 days of daily lease counts, the
+     * The tenant's usage as of {@code today} (UTC): the last {@code days} days of daily lease counts, the
      * current calendar month's lease total, and the most recently sampled pool size.
+     *
+     * <p>{@code days} is the caller's window, not a fixed 30: the dashboard's range picker drives it, so a
+     * 90-day view is one query rather than a client-side slice of whatever the server felt like sending.
+     * The meter table is one row per (tenant × metric × day), so a long window is still a small scan.
+     *
+     * @param days how many days of daily counts to return, counting back from {@code today} inclusive
      */
-    public UsageSummary read(String tenantId, LocalDate today) {
+    public UsageSummary read(String tenantId, LocalDate today, int days) {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
+        if (days < 1) {
+            throw new IllegalArgumentException("days must be at least 1");
+        }
         try (Connection connection = dataSource.getConnection()) {
-            List<DailyLease> daily = dailyLeases(connection, tenantId, today.minusDays(29));
+            List<DailyLease> daily = dailyLeases(connection, tenantId, today.minusDays(days - 1L));
             long monthTotal = monthLeaseTotal(connection, tenantId, today.withDayOfMonth(1));
             long poolSize = latestPoolSize(connection, tenantId);
             return new UsageSummary(monthTotal, poolSize, daily);

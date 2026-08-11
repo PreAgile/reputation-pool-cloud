@@ -28,6 +28,17 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    href: "/contexts",
+    label: "컨텍스트",
+    icon: (
+      // 겹친 레이어 — 하나의 풀이 여러 컨텍스트로 갈라져 관측된다는 뜻.
+      <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+        <path d="M8 1.5l6 3-6 3-6-3 6-3z" />
+        <path d="M2 8l6 3 6-3M2 11.5l6 3 6-3" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     href: "/events",
     label: "라이브 이벤트",
     icon: (

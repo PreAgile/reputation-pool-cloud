@@ -80,7 +80,7 @@ class MeteringIT {
         rollup.flush();
 
         LocalDate today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
-        UsageSummary summary = usage.read("metering-it", today);
+        UsageSummary summary = usage.read("metering-it", today, 30);
         assertThat(summary.monthLeaseTotal()).isEqualTo(3L);
         assertThat(summary.poolSize()).isEqualTo(1L);
         assertThat(summary.dailyLeases()).anySatisfy(day -> {
