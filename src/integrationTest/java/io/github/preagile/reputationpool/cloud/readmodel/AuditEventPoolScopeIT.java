@@ -64,8 +64,8 @@ class AuditEventPoolScopeIT {
         List<Long> bSeqs = seed("scope-b", 2);
         AuditEventReader reader = new AuditEventReader(dataSource);
 
-        AuditEventPage aPage = reader.page("scope-a", null, 50);
-        AuditEventPage bPage = reader.page("scope-b", null, 50);
+        AuditEventPage aPage = reader.page("scope-a", null, 50, null, null);
+        AuditEventPage bPage = reader.page("scope-b", null, 50, null, null);
 
         // Each tenant sees exactly its own rows, newest-first, and nothing more.
         assertThat(seqsOf(aPage)).containsExactlyElementsOf(descending(aSeqs));
@@ -89,7 +89,7 @@ class AuditEventPoolScopeIT {
         Long cursor = null;
         int pages = 0;
         do {
-            AuditEventPage page = reader.page("keyset-a", cursor, 2);
+            AuditEventPage page = reader.page("keyset-a", cursor, 2, null, null);
             for (AuditEventRecord e : page.events()) {
                 walked.add(e.seq());
             }

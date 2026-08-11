@@ -38,10 +38,10 @@ function renderShell() {
 }
 
 describe("AppShell — 사이드바 접힘", () => {
-  it("기본은 펼침이고 5개 내비 링크와 라벨을 보인다", () => {
+  it("기본은 펼침이고 6개 내비 링크와 라벨을 보인다", () => {
     renderShell();
     const nav = screen.getByRole("navigation");
-    expect(within(nav).getAllByRole("link")).toHaveLength(5);
+    expect(within(nav).getAllByRole("link")).toHaveLength(6);
     expect(within(nav).getByRole("link", { name: "풀 오버뷰" })).toBeInTheDocument();
     // 접기 토글은 펼침(aria-expanded=true) 상태.
     expect(screen.getByRole("button", { name: "사이드바 접기" })).toHaveAttribute(

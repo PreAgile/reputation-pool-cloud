@@ -10,6 +10,9 @@ import type {
   UsageSummary,
   Tenant,
   ApiKeySummary,
+  ContextOverview,
+  ContextDetail,
+  ContextHistory,
 } from "../lib/types";
 
 export const overviewFixture: PoolOverview = {
@@ -132,6 +135,96 @@ export const usageFixture: UsageSummary = {
     { date: "2026-07-16", count: 400 },
     { date: "2026-07-17", count: 520 },
     { date: "2026-07-18", count: 360 },
+  ],
+};
+
+/**
+ * 컨텍스트 화면 — 서버가 이름 오름차순으로 준 컨텍스트 요약.
+ * BAEMIN 은 방금 갱신됐고 CPEATS 는 나흘째 조용하다(정체 표시 검증용).
+ */
+export const contextsFixture: ContextOverview = {
+  contexts: [
+    {
+      context: "BAEMIN",
+      cells: 587,
+      blocked: 2,
+      cellsByState: { HEALTHY: 580, COOLING: 4, RECOVERING: 1, BLOCKLISTED: 2 },
+      state: "BLOCKLISTED",
+      averageScore: 0.82,
+      worstScore: 0.11,
+      bestScore: 0.99,
+      lastUpdatedAt: "2026-08-11T04:20:00Z",
+    },
+    {
+      context: "CPEATS",
+      cells: 5,
+      blocked: 0,
+      cellsByState: { HEALTHY: 5, COOLING: 0, RECOVERING: 0, BLOCKLISTED: 0 },
+      state: "HEALTHY",
+      averageScore: 0.74,
+      worstScore: 0.6,
+      bestScore: 0.9,
+      lastUpdatedAt: "2026-08-07T07:50:00Z",
+    },
+  ],
+};
+
+/** 컨텍스트 하나를 펼친 리소스 목록(서버가 심각도 → 낮은 점수 순으로 정렬해 준다). */
+export const contextDetailFixture: ContextDetail = {
+  context: "BAEMIN",
+  resources: [
+    {
+      kind: "PROXY",
+      value: "203.0.113.7:8080",
+      registered: true,
+      blocked: false,
+      blockedUntil: null,
+      blockPermanent: false,
+      state: "COOLING",
+      score: 0.11,
+      consecutiveFailures: 3,
+      consecutiveSuccesses: 0,
+      windowSize: 3,
+      recentWindow: [false, false, false],
+      cooldownUntil: "2026-08-11T05:00:00Z",
+      updatedAt: "2026-08-11T04:20:00Z",
+    },
+    {
+      kind: "PROXY",
+      value: "decodo:isp:10001",
+      registered: true,
+      blocked: false,
+      blockedUntil: null,
+      blockPermanent: false,
+      state: "HEALTHY",
+      score: 0.95,
+      consecutiveFailures: 0,
+      consecutiveSuccesses: 12,
+      windowSize: 3,
+      recentWindow: [true, true, true],
+      cooldownUntil: null,
+      updatedAt: "2026-08-11T04:19:00Z",
+    },
+  ],
+};
+
+/** 컨텍스트별 시간 롤업 추이 — 두 시리즈가 겹쳐 그려지는지 검증용. */
+export const contextHistoryFixture: ContextHistory = {
+  contexts: [
+    {
+      context: "BAEMIN",
+      points: [
+        { at: "2026-08-11T02:00:00Z", averageScore: 0.8, minScore: 0.1, maxScore: 1, cells: 587 },
+        { at: "2026-08-11T03:00:00Z", averageScore: 0.82, minScore: 0.11, maxScore: 1, cells: 587 },
+      ],
+    },
+    {
+      context: "CPEATS",
+      points: [
+        { at: "2026-08-11T02:00:00Z", averageScore: 0.75, minScore: 0.6, maxScore: 0.9, cells: 5 },
+        { at: "2026-08-11T03:00:00Z", averageScore: 0.74, minScore: 0.6, maxScore: 0.9, cells: 5 },
+      ],
+    },
   ],
 };
 

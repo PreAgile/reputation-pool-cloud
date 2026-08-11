@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -59,35 +59,40 @@ function ChartTooltip({ active, payload, label }: TooltipProps<number, string>) 
 export default function UsagePage() {
   const [data, setData] = useState<UsageSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 일별 리스 창(프리셋). 백엔드가 최근 30일을 주므로 기본 30일, 24h/7d 는 클라이언트에서 좁힌다.
+  // 일별 리스 창(프리셋). 서버가 이 창만큼만 돌려주므로(usage?days=) 클라이언트가 다시 자르지 않는다.
   const [range, setRange] = useState<RangePreset>(RANGE_PRESETS[2]);
 
+  // 요청 세대: 기간을 바꾸면 이전 요청이 늦게 도착해 새 기간의 화면을 덮어쓸 수 있다. dispatch 때 자기
+  // 세대를 잡고, 반영 직전 여전히 최신일 때만 상태를 바꾼다(라이브 이벤트 화면과 같은 방식).
+  const reqSeq = useRef(0);
+
   const load = useCallback(() => {
+    const my = ++reqSeq.current;
     setError(null);
-    api<UsageSummary>("/usage")
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : "불러오지 못했습니다"));
-  }, []);
+    // 새 기간의 응답이 오기 전까지 옛 기간 수치를 새 라벨과 함께 보여주지 않는다.
+    setData(null);
+    api<UsageSummary>(`/usage?days=${range.days}`)
+      .then((res) => {
+        if (my === reqSeq.current) setData(res);
+      })
+      .catch((e) => {
+        if (my === reqSeq.current) setError(e instanceof Error ? e.message : "불러오지 못했습니다");
+      });
+  }, [range.days]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // dailyLeases → 시각 오름차순 바 차트 행 + 선택 창 합계. 창은 최신 날짜 기준 최근 range.days 일.
+  // dailyLeases → 시각 오름차순 바 차트 행 + 창 합계. 창 자르기는 서버가 이미 했다.
   const { chartRows, windowTotal } = useMemo(() => {
     if (!data) return { chartRows: [] as ChartRow[], windowTotal: 0 };
     const rows = data.dailyLeases
       .map((d) => ({ t: new Date(`${d.date}T00:00:00`).getTime(), count: d.count }))
       .filter((r) => !Number.isNaN(r.t))
       .sort((a, b) => a.t - b.t);
-    if (rows.length === 0) return { chartRows: rows, windowTotal: 0 };
-    // 최신 날짜에서 (days-1)일 이전까지만 남긴다(24h→최신 1일, 7d→7일).
-    const maxT = rows[rows.length - 1].t;
-    const cutoff = maxT - (range.days - 1) * 86_400_000;
-    const windowed = rows.filter((r) => r.t >= cutoff);
-    const total = windowed.reduce((sum, r) => sum + r.count, 0);
-    return { chartRows: windowed, windowTotal: total };
-  }, [data, range.days]);
+    return { chartRows: rows, windowTotal: rows.reduce((sum, r) => sum + r.count, 0) };
+  }, [data]);
 
   if (error) {
     return (
@@ -169,7 +174,11 @@ export default function UsagePage() {
           ) : (
             <EmptyState
               title="아직 임대 기록이 없습니다"
-              description="선택한 기간에 리소스 임대가 없었습니다. 기간을 넓히거나 트래픽이 쌓이면 여기에 일별 추이가 그려집니다."
+              description={
+                data.poolSize > 0
+                  ? "리소스는 등록돼 있지만 임대 기록이 없습니다. 임대 건수는 Acquire 로 리소스를 받아갈 때만 쌓입니다 — 클라이언트가 Register·Report 만 쓰고 리소스를 직접 고르고 있다면 이 값은 계속 0 입니다."
+                  : "선택한 기간에 리소스 임대가 없었습니다. 기간을 넓히거나 트래픽이 쌓이면 여기에 일별 추이가 그려집니다."
+              }
             />
           )}
         </Card>

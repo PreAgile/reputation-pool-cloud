@@ -66,10 +66,10 @@ describe("커맨드 팔레트 (⌘K)", () => {
     render(<Harness initialOpen />);
     await screen.findByRole("option", { name: /풀 오버뷰/ });
 
-    // 기본 선택은 첫 항목(풀 오버뷰). ↓ 한 번이면 라이브 이벤트가 선택된다.
+    // 기본 선택은 첫 항목(풀 오버뷰). ↓ 한 번이면 두 번째 항목(컨텍스트)이 선택된다.
     await user.keyboard("{ArrowDown}");
     await user.keyboard("{Enter}");
-    expect(push).toHaveBeenCalledWith("/events");
+    expect(push).toHaveBeenCalledWith("/contexts");
   });
 
   it("입력 후 ↵ 로 필터된 화면으로 이동한다", async () => {

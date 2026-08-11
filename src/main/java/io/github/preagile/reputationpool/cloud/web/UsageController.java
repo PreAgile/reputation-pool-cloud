@@ -10,6 +10,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -22,6 +23,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/usage")
 public class UsageController {
 
+    /** Upper bound on the daily-lease window, so an abusive {@code days} cannot widen the scan without limit. */
+    private static final int MAX_DAYS = 365;
+
     private final UsageMeterReader reader;
     private final Clock clock;
 
@@ -30,8 +34,14 @@ public class UsageController {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
+    /**
+     * The bound tenant's usage over the last {@code days} days (default 30), clamped to {@code [1, 365]}
+     * so a caller cannot ask for an unbounded window. The month total is always the current calendar
+     * month regardless of {@code days} — it is the billing period, not the chart window.
+     */
     @GetMapping
-    public UsageSummary usage(@AuthenticationPrincipal Jwt jwt) {
-        return reader.read(AdminTenant.of(jwt), LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC));
+    public UsageSummary usage(@AuthenticationPrincipal Jwt jwt, @RequestParam(defaultValue = "30") int days) {
+        int safeDays = Math.max(1, Math.min(days, MAX_DAYS));
+        return reader.read(AdminTenant.of(jwt), LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC), safeDays);
     }
 }

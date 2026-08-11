@@ -33,7 +33,7 @@ import { useToast } from "@/components/ui/toast";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   DateRangePicker,
-  RANGE_PRESETS,
+  RESOURCE_RANGE_PRESETS,
   type RangePreset,
 } from "@/components/ui/date-range-picker";
 import { usePoll } from "@/lib/use-poll";
@@ -175,7 +175,7 @@ export default function ResourceDetailPage() {
   const readOnly = useReadOnly();
   const [actionError, setActionError] = useState<string | null>(null);
   // 평판 곡선 조회 기간(프리셋). 기본 최근 24시간 — 원천이 분당 1점이라 이 범위면 충분.
-  const [range, setRange] = useState<RangePreset>(RANGE_PRESETS[0]);
+  const [range, setRange] = useState<RangePreset>(RESOURCE_RANGE_PRESETS[0]);
 
   const base = `/pools/resources/${encodeURIComponent(kind)}/${encodeURIComponent(value)}`;
 
@@ -447,7 +447,12 @@ export default function ResourceDetailPage() {
         <TabsContent value="curve">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-bold text-ink">평판 곡선 · {range.label}</h2>
-            <DateRangePicker value={range} onChange={setRange} label="곡선 기간 선택" />
+            <DateRangePicker
+              value={range}
+              onChange={setRange}
+              label="곡선 기간 선택"
+              presets={RESOURCE_RANGE_PRESETS}
+            />
           </div>
           <Card className="p-4">
             {hasCurve ? (

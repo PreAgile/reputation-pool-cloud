@@ -1,6 +1,7 @@
 package io.github.preagile.reputationpool.cloud.web;
 
 import io.github.preagile.reputationpool.cloud.readmodel.AuditEventReader;
+import io.github.preagile.reputationpool.cloud.readmodel.ContextRollupReader;
 import io.github.preagile.reputationpool.cloud.readmodel.ScoreHistoryReader;
 import io.github.preagile.reputationpool.cloud.readmodel.UsageMeterReader;
 import javax.sql.DataSource;
@@ -30,5 +31,10 @@ public class ControlPlaneConfiguration {
     @Bean
     ScoreHistoryReader scoreHistoryReader(DataSource dataSource) {
         return new ScoreHistoryReader(dataSource);
+    }
+
+    @Bean
+    ContextRollupReader contextRollupReader(DataSource dataSource) {
+        return new ContextRollupReader(dataSource);
     }
 }

@@ -71,6 +71,65 @@ export interface ScoreHistory {
   contexts: { context: string; points: { at: string; score: number }[] }[];
 }
 
+/**
+ * 컨텍스트 축 읽기 모델(백엔드 ContextViewAssembler / ContextRollupReader 와 1:1).
+ *
+ * 리소스 축(PoolOverview)이 "이 리소스가 어떤가"를 답한다면 이쪽은 "어떤 컨텍스트를 돌리고 있고,
+ * 그중 무너지거나 조용해진 게 있나"를 답한다. `lastUpdatedAt` 이 그 핵심 신호 — 보고가 끊긴
+ * 컨텍스트는 리소스 축에서는 건강한 것과 구분되지 않는다.
+ */
+export interface ContextSummary {
+  context: string;
+  cells: number; // 이 컨텍스트의 셀 수(= 리소스 수)
+  blocked: number; // 그중 차단된 리소스에 얹힌 셀 수
+  /** 셀 자신의 상태 분포(차단 반영 안 함) — 구성비 막대용. */
+  cellsByState: Record<ResourceState, number>;
+  /** 대표 상태: 가장 심각한 것. 리소스 차단은 셀이 healthy 여도 BLOCKLISTED 로 센다. */
+  state: ResourceState;
+  averageScore: number;
+  worstScore: number;
+  bestScore: number;
+  lastUpdatedAt: string | null; // ISO-8601. 이 컨텍스트에서 가장 최근 셀 갱신 시각
+}
+
+export interface ContextOverview {
+  contexts: ContextSummary[];
+}
+
+/** 컨텍스트 하나 안의 리소스 행(심각도 → 낮은 점수 순으로 서버가 정렬해 준다). */
+export interface ContextResourceRow {
+  kind: ResourceKind;
+  value: string;
+  registered: boolean;
+  blocked: boolean;
+  blockedUntil: string | null;
+  blockPermanent: boolean;
+  state: ResourceState;
+  score: number;
+  consecutiveFailures: number;
+  consecutiveSuccesses: number;
+  windowSize: number;
+  recentWindow: boolean[];
+  cooldownUntil: string | null;
+  updatedAt: string;
+}
+
+export interface ContextDetail {
+  context: string;
+  resources: ContextResourceRow[];
+}
+
+/**
+ * 컨텍스트별 시간 단위 평판 추이. raw score_sample(7일 보존)이 아니라 시간 롤업에서 읽으므로
+ * 30일·90일 창을 줘도 가볍다.
+ */
+export interface ContextHistory {
+  contexts: {
+    context: string;
+    points: { at: string; averageScore: number; minScore: number; maxScore: number; cells: number }[];
+  }[];
+}
+
 export interface AuditEventRecord {
   seq: number;
   eventType: string;

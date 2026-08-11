@@ -12,6 +12,8 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import javax.sql.DataSource;
@@ -46,6 +48,22 @@ public final class ScoreSampler {
                     + " ON CONFLICT (tenant_id, resource_kind, resource_value, context, sampled_at)"
                     + " DO UPDATE SET score = EXCLUDED.score";
     private static final String DELETE_OLDER_THAN = "DELETE FROM score_sample WHERE sampled_at < ?";
+    private static final String DELETE_ROLLUP_OLDER_THAN = "DELETE FROM score_rollup_hourly WHERE bucket_hour < ?";
+
+    /**
+     * Folds one tick's per-context aggregate into that hour's bucket. Sums accumulate (so the reader can
+     * divide for a weighted average), min/max widen, and {@code cells} is a gauge overwritten with this
+     * tick's count — the same counter-vs-gauge split {@code MeteringRollup} uses.
+     */
+    private static final String UPSERT_ROLLUP =
+            "INSERT INTO score_rollup_hourly (tenant_id, context, bucket_hour, score_sum, sample_count,"
+                    + " min_score, max_score, cells) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                    + " ON CONFLICT (tenant_id, context, bucket_hour) DO UPDATE SET"
+                    + " score_sum = score_rollup_hourly.score_sum + EXCLUDED.score_sum,"
+                    + " sample_count = score_rollup_hourly.sample_count + EXCLUDED.sample_count,"
+                    + " min_score = LEAST(score_rollup_hourly.min_score, EXCLUDED.min_score),"
+                    + " max_score = GREATEST(score_rollup_hourly.max_score, EXCLUDED.max_score),"
+                    + " cells = EXCLUDED.cells";
 
     private final DataSource dataSource;
     private final Clock clock;
@@ -79,21 +97,99 @@ public final class ScoreSampler {
         if (cells.isEmpty()) {
             return; // nothing to sample; skip the connection entirely
         }
-        try (Connection connection = dataSource.getConnection();
-                PreparedStatement statement = connection.prepareStatement(INSERT_SAMPLE)) {
-            for (Map.Entry<CellKey, ReputationCell> entry : cells.entrySet()) {
-                CellKey key = entry.getKey();
-                statement.setString(1, managed.tenantId());
-                statement.setString(2, key.resource().kind().name());
-                statement.setString(3, key.resource().value());
-                statement.setString(4, key.context().value());
-                statement.setTimestamp(5, now);
-                statement.setDouble(6, entry.getValue().score());
+        // One pass builds both writes: the raw per-cell rows and this tick's per-context aggregate. The
+        // aggregate is computed here rather than by re-reading score_sample because the rows are already
+        // in hand — the rollup never has to scan the big table.
+        //
+        // Both writes are one transaction. The rollup accumulates (score_sum += …), so a tick that lands
+        // its raw rows but loses its rollup is not self-healing: the next tick carries a different
+        // sampled_at and never replays the missing observation, leaving the bucket permanently short. The
+        // raw insert alone is idempotent on its key, so replaying the whole tick after a rollback is safe.
+        Map<String, ContextAggregate> perContext = new LinkedHashMap<>();
+        try (Connection connection = dataSource.getConnection()) {
+            boolean autoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement(INSERT_SAMPLE)) {
+                for (Map.Entry<CellKey, ReputationCell> entry : cells.entrySet()) {
+                    CellKey key = entry.getKey();
+                    double score = entry.getValue().score();
+                    statement.setString(1, managed.tenantId());
+                    statement.setString(2, key.resource().kind().name());
+                    statement.setString(3, key.resource().value());
+                    statement.setString(4, key.context().value());
+                    statement.setTimestamp(5, now);
+                    statement.setDouble(6, score);
+                    statement.addBatch();
+                    perContext
+                            .computeIfAbsent(key.context().value(), context -> new ContextAggregate())
+                            .add(score);
+                }
+                statement.executeBatch();
+                rollUp(connection, managed.tenantId(), now, perContext);
+                connection.commit();
+            } catch (SQLException | RuntimeException e) {
+                rollback(connection);
+                throw e;
+            } finally {
+                restoreAutoCommit(connection, autoCommit);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("score_sample batch insert failed", e);
+        }
+    }
+
+    /** Best-effort rollback: the original failure is what the caller must see, so this never throws. */
+    private static void rollback(Connection connection) {
+        try {
+            connection.rollback();
+        } catch (SQLException e) {
+            log.warn("score sample rollback failed", e);
+        }
+    }
+
+    /** Puts the pooled connection back the way it was found before it returns to the pool. */
+    private static void restoreAutoCommit(Connection connection, boolean autoCommit) {
+        try {
+            connection.setAutoCommit(autoCommit);
+        } catch (SQLException e) {
+            log.warn("restoring auto-commit failed", e);
+        }
+    }
+
+    /** Folds this tick's per-context aggregate into the hourly buckets, one batch on the same connection. */
+    private void rollUp(Connection connection, String tenantId, Timestamp now, Map<String, ContextAggregate> perContext)
+            throws SQLException {
+        Timestamp bucket = Timestamp.from(now.toInstant().truncatedTo(ChronoUnit.HOURS));
+        try (PreparedStatement statement = connection.prepareStatement(UPSERT_ROLLUP)) {
+            for (Map.Entry<String, ContextAggregate> entry : perContext.entrySet()) {
+                ContextAggregate aggregate = entry.getValue();
+                statement.setString(1, tenantId);
+                statement.setString(2, entry.getKey());
+                statement.setTimestamp(3, bucket);
+                statement.setDouble(4, aggregate.sum);
+                statement.setLong(5, aggregate.count);
+                statement.setDouble(6, aggregate.min);
+                statement.setDouble(7, aggregate.max);
+                statement.setInt(8, aggregate.count);
                 statement.addBatch();
             }
             statement.executeBatch();
-        } catch (SQLException e) {
-            throw new IllegalStateException("score_sample batch insert failed", e);
+        }
+    }
+
+    /** One context's scores within a single tick, reduced to what the hourly bucket needs. */
+    private static final class ContextAggregate {
+
+        private double sum;
+        private int count;
+        private double min = Double.POSITIVE_INFINITY;
+        private double max = Double.NEGATIVE_INFINITY;
+
+        void add(double score) {
+            sum += score;
+            count++;
+            min = Math.min(min, score);
+            max = Math.max(max, score);
         }
     }
 
@@ -107,20 +203,27 @@ public final class ScoreSampler {
             fixedDelayString = "${reputation-pool.score.purge-interval:PT1H}")
     public void purgeExpired() {
         ReputationPoolProperties.Score score = properties.score();
-        if (!score.purgeEnabled()) {
-            return;
+        if (score.purgeEnabled()) {
+            purge(DELETE_OLDER_THAN, score.retention(), "score_sample");
         }
-        Duration retention = score.retention();
+        // The rollup is purged on its own (much longer) retention — it is the only thing left once the raw
+        // samples age out, so trimming it on the raw window would silently cap the context view at 7 days.
+        if (score.rollupPurgeEnabled()) {
+            purge(DELETE_ROLLUP_OLDER_THAN, score.rollupRetention(), "score_rollup_hourly");
+        }
+    }
+
+    private void purge(String sql, Duration retention, String table) {
         Instant cutoff = clock.instant().minus(retention);
         try (Connection connection = dataSource.getConnection();
-                PreparedStatement statement = connection.prepareStatement(DELETE_OLDER_THAN)) {
+                PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setTimestamp(1, Timestamp.from(cutoff));
             int purged = statement.executeUpdate();
             if (purged > 0) {
-                log.info("score retention purged {} samples older than {}", purged, retention);
+                log.info("score retention purged {} {} rows older than {}", purged, table, retention);
             }
         } catch (SQLException e) {
-            log.warn("score_sample purge failed; will retry on the next interval", e);
+            log.warn("{} purge failed; will retry on the next interval", table, e);
         }
     }
 }

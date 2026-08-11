@@ -152,8 +152,11 @@ public final class PoolViewAssembler {
         return new Representative(state, worstScored.score(), successFlags(worstScored.window()));
     }
 
-    /** Ranks the states so the overview can pick the worst one; higher means more severe. */
-    private static int severity(ResourceState state) {
+    /**
+     * Ranks the states so the overview can pick the worst one; higher means more severe. Shared with
+     * {@link ContextViewAssembler}, which applies the same ordering along the context axis.
+     */
+    static int severity(ResourceState state) {
         return switch (state) {
             case BLOCKLISTED -> 3;
             case COOLING -> 2;
@@ -163,7 +166,7 @@ public final class PoolViewAssembler {
     }
 
     /** A window's outcomes as success flags (oldest→newest): {@code true} for a {@link Outcome.Success}. */
-    private static boolean[] successFlags(List<Outcome> window) {
+    static boolean[] successFlags(List<Outcome> window) {
         boolean[] flags = new boolean[window.size()];
         for (int i = 0; i < window.size(); i++) {
             flags[i] = window.get(i) instanceof Outcome.Success;
@@ -173,7 +176,8 @@ public final class PoolViewAssembler {
 
     private record Representative(String state, Double score, boolean[] recentWindow) {}
 
-    private static BlockView blockOf(PoolSnapshot snapshot, ResourceId resource, Instant now) {
+    /** Whether the resource is blocked right now, and until when. Shared with {@link ContextViewAssembler}. */
+    static BlockView blockOf(PoolSnapshot snapshot, ResourceId resource, Instant now) {
         Instant until = snapshot.blocklist().entries().get(resource);
         if (until == null || !now.isBefore(until)) {
             return new BlockView(false, null, false);
@@ -184,7 +188,7 @@ public final class PoolViewAssembler {
         return new BlockView(true, until, false);
     }
 
-    private record BlockView(boolean blocked, Instant until, boolean permanent) {}
+    record BlockView(boolean blocked, Instant until, boolean permanent) {}
 
     /** KPI summary plus per-resource rows. */
     public record PoolOverview(PoolSummary summary, List<ResourceOverview> resources) {}
