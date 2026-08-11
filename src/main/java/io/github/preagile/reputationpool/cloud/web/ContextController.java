@@ -68,8 +68,7 @@ public class ContextController {
      * to {@code [1, 2160]} so a caller cannot request an unbounded scan.
      */
     @GetMapping("/score-history")
-    public ContextHistory scoreHistory(
-            @AuthenticationPrincipal Jwt jwt, @RequestParam(defaultValue = "24") int hours) {
+    public ContextHistory scoreHistory(@AuthenticationPrincipal Jwt jwt, @RequestParam(defaultValue = "24") int hours) {
         int safeHours = Math.max(1, Math.min(hours, MAX_HISTORY_HOURS));
         Instant since = clock.instant().minus(Duration.ofHours(safeHours));
         return rollup.read(AdminTenant.of(jwt), since);

@@ -15,7 +15,11 @@ const server = setupServer(
   http.get("*/api/contexts", () => HttpResponse.json(contextsFixture)),
 );
 beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  // 테스트가 실패해도 모킹된 Date 가 다음 테스트로 새지 않도록 여기서 되돌린다.
+  vi.useRealTimers();
+});
 afterAll(() => server.close());
 
 /** 컨텍스트 요약 표(첫 번째 table) — 곡선 범례에 같은 이름이 있어 조회를 여기로 좁힌다. */
@@ -53,7 +57,6 @@ describe("컨텍스트 화면 (integration + MSW)", () => {
     expect(screen.getByText(/조용함/)).toBeInTheDocument();
     // 24시간 넘게 조용한 컨텍스트 타일도 1을 가리킨다(BAEMIN 은 40분 전이라 제외).
     expect(screen.getByText("24시간 넘게 조용한 컨텍스트")).toBeInTheDocument();
-    vi.useRealTimers();
   });
 
   it("컨텍스트 행을 누르면 → 그 컨텍스트 안의 리소스 목록을 펼친다", async () => {
@@ -65,6 +68,37 @@ describe("컨텍스트 화면 (integration + MSW)", () => {
     // 서버가 심각도 → 낮은 점수 순으로 정렬해 주므로 COOLING 리소스가 먼저 온다.
     expect(await screen.findByRole("link", { name: "203.0.113.7:8080" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "decodo:isp:10001" })).toBeInTheDocument();
+  });
+
+  it("컨텍스트 이름은 버튼이라 → 키보드로 펼칠 수 있고 aria-expanded 가 상태를 알린다", async () => {
+    // <tr> 은 포커스 대상이 아니다. 행 클릭에만 의존하면 키보드 사용자는 상세를 열 수 없다.
+    const user = userEvent.setup();
+    render(<ContextsPage />);
+
+    const toggle = await screen.findByRole("button", { name: /BAEMIN/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    toggle.focus();
+    expect(toggle).toHaveFocus(); // <tr> 이었다면 여기서 실패한다
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("link", { name: "203.0.113.7:8080" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /BAEMIN/ })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("리소스 목록 조회가 실패하면 → 로딩이 아니라 에러와 재시도를 보인다", async () => {
+    // 실패를 detail=null 로만 표현하면 "불러오는 중…" 이 영구히 남는다.
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/api/contexts/:context/resources", () => HttpResponse.error()),
+    );
+    render(<ContextsPage />);
+
+    await user.click(within(await contextTable()).getByText("BAEMIN"));
+
+    expect(await screen.findByText("리소스 목록을 불러오지 못했습니다")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+    expect(screen.queryByText("불러오는 중…")).not.toBeInTheDocument();
   });
 
   it("컨텍스트가 하나도 없으면 → 왜 비어 있는지 설명하는 빈 상태를 보인다", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -62,11 +62,22 @@ export default function UsagePage() {
   // 일별 리스 창(프리셋). 서버가 이 창만큼만 돌려주므로(usage?days=) 클라이언트가 다시 자르지 않는다.
   const [range, setRange] = useState<RangePreset>(RANGE_PRESETS[2]);
 
+  // 요청 세대: 기간을 바꾸면 이전 요청이 늦게 도착해 새 기간의 화면을 덮어쓸 수 있다. dispatch 때 자기
+  // 세대를 잡고, 반영 직전 여전히 최신일 때만 상태를 바꾼다(라이브 이벤트 화면과 같은 방식).
+  const reqSeq = useRef(0);
+
   const load = useCallback(() => {
+    const my = ++reqSeq.current;
     setError(null);
+    // 새 기간의 응답이 오기 전까지 옛 기간 수치를 새 라벨과 함께 보여주지 않는다.
+    setData(null);
     api<UsageSummary>(`/usage?days=${range.days}`)
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : "불러오지 못했습니다"));
+      .then((res) => {
+        if (my === reqSeq.current) setData(res);
+      })
+      .catch((e) => {
+        if (my === reqSeq.current) setError(e instanceof Error ? e.message : "불러오지 못했습니다");
+      });
   }, [range.days]);
 
   useEffect(() => {

@@ -82,7 +82,10 @@ export interface ContextSummary {
   context: string;
   cells: number; // 이 컨텍스트의 셀 수(= 리소스 수)
   blocked: number; // 그중 차단된 리소스에 얹힌 셀 수
+  /** 셀 자신의 상태 분포(차단 반영 안 함) — 구성비 막대용. */
   cellsByState: Record<ResourceState, number>;
+  /** 대표 상태: 가장 심각한 것. 리소스 차단은 셀이 healthy 여도 BLOCKLISTED 로 센다. */
+  state: ResourceState;
   averageScore: number;
   worstScore: number;
   bestScore: number;

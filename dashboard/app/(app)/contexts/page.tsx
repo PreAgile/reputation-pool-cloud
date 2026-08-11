@@ -92,16 +92,6 @@ function isQuiet(iso: string | null, now: number): boolean {
   return Number.isNaN(t) || now - t > QUIET_AFTER_MS;
 }
 
-/**
- * 컨텍스트의 대표 상태: 셀 상태 분포에서 가장 심각한 것. 컨텍스트 하나에 셀이 수백 개일 수 있으므로
- * 표의 한 칸에는 "가장 나쁜 게 무엇인가"만 싣고, 정확한 분포는 옆 칸의 막대가 보여준다.
- */
-const SEVERITY: ResourceState[] = ["BLOCKLISTED", "COOLING", "RECOVERING", "HEALTHY"];
-
-function worstState(byState: Record<ResourceState, number>): ResourceState {
-  return SEVERITY.find((s) => (byState[s] ?? 0) > 0) ?? "HEALTHY";
-}
-
 /** 상태 분포 막대 — 100% 스택 하나. 셀 수가 큰 컨텍스트도 구성비가 바로 읽힌다. */
 function StateBar({ byState, total }: { byState: Record<ResourceState, number>; total: number }) {
   const all: { state: ResourceState; count: number; color: string }[] = [
@@ -153,6 +143,7 @@ export default function ContextsPage() {
   const [overview, setOverview] = useState<ContextOverview | null>(null);
   const [history, setHistory] = useState<ContextHistory | null>(null);
   const [detail, setDetail] = useState<ContextDetail | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<RangePreset>(RANGE_PRESETS[1]);
@@ -189,23 +180,33 @@ export default function ContextsPage() {
   usePoll(() => void loadOverview(), POLL_MS, true);
 
   // 선택된 컨텍스트의 리소스 목록. 선택이 바뀔 때만 부른다(표 전체를 매번 끌어오지 않기 위해).
+  // detailError 를 따로 두는 이유: 실패를 detail=null 로만 표현하면 로딩과 구분되지 않아 "불러오는 중…"
+  // 이 영구히 남는다.
+  const loadDetail = useCallback(async (context: string) => {
+    setDetailError(null);
+    try {
+      return await api<ContextDetail>(`/contexts/${encodeURIComponent(context)}/resources`);
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : "불러오지 못했습니다");
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     if (!selected) {
       setDetail(null);
+      setDetailError(null);
       return;
     }
     let live = true;
-    void api<ContextDetail>(`/contexts/${encodeURIComponent(selected)}/resources`)
-      .then((d) => {
-        if (live) setDetail(d);
-      })
-      .catch(() => {
-        if (live) setDetail(null);
-      });
+    setDetail(null);
+    void loadDetail(selected).then((d) => {
+      if (live) setDetail(d);
+    });
     return () => {
       live = false;
     };
-  }, [selected]);
+  }, [selected, loadDetail]);
 
   const contexts = useMemo(() => overview?.contexts ?? [], [overview]);
 
@@ -465,6 +466,16 @@ export default function ContextsPage() {
                   </p>
                 )}
               </div>
+            ) : detailError ? (
+              <EmptyState
+                tone="error"
+                title="리소스 목록을 불러오지 못했습니다"
+                description={detailError}
+                action={{
+                  label: "다시 시도",
+                  onClick: () => void loadDetail(selected).then(setDetail),
+                }}
+              />
             ) : (
               <div className="p-4 text-sm text-muted">불러오는 중…</div>
             )}
@@ -490,19 +501,22 @@ function ContextRow({
 }) {
   const quiet = isQuiet(summary.lastUpdatedAt, now);
   return (
-    <tr
-      onClick={onSelect}
-      className={cn("cursor-pointer border-t border-line hover:bg-surface-2", selected && "bg-accent-soft/50")}
-    >
+    <tr className={cn("border-t border-line hover:bg-surface-2", selected && "bg-accent-soft/50")}>
       <td className="px-4 py-2.5">
-        <span className="flex items-center gap-2">
+        {/* 행 전체가 아니라 버튼이 펼치기를 맡는다 — <tr> 은 포커스 대상이 아니어서 키보드로는 열 수 없다. */}
+        <button
+          type="button"
+          onClick={onSelect}
+          aria-expanded={selected}
+          className="flex items-center gap-2 rounded-[6px] text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
           <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
           <span className="font-mono font-bold text-ink">{summary.context}</span>
-        </span>
+        </button>
       </td>
       <td className="tnum px-4 py-2.5 text-right text-ink">{fmtNum(summary.cells)}</td>
       <td className="px-4 py-2.5">
-        <StatusBadge state={worstState(summary.cellsByState)} />
+        <StatusBadge state={summary.state} />
       </td>
       <td className="px-4 py-2.5">
         <StateBar byState={summary.cellsByState} total={summary.cells} />

@@ -47,7 +47,8 @@ public final class ContextViewAssembler {
         Map<String, Accumulator> byContext = new TreeMap<>();
         for (Map.Entry<CellKey, ReputationCell> entry : snapshot.cells().entrySet()) {
             CellKey key = entry.getKey();
-            boolean blocked = PoolViewAssembler.blockOf(snapshot, key.resource(), now).blocked();
+            boolean blocked =
+                    PoolViewAssembler.blockOf(snapshot, key.resource(), now).blocked();
             byContext
                     .computeIfAbsent(key.context().value(), context -> new Accumulator())
                     .add(entry.getValue(), blocked);
@@ -74,7 +75,9 @@ public final class ContextViewAssembler {
             BlockView block = PoolViewAssembler.blockOf(snapshot, resource, now);
             // A blocked resource reads BLOCKLISTED in this context too: the block is resource-wide, so the
             // cell's own state understates it (the same rule PoolViewAssembler's representative applies).
-            String state = block.blocked() ? ResourceState.BLOCKLISTED.name() : cell.state().name();
+            String state = block.blocked()
+                    ? ResourceState.BLOCKLISTED.name()
+                    : cell.state().name();
             rows.add(new ContextResourceRow(
                     resource.kind().name(),
                     resource.value(),
@@ -116,11 +119,21 @@ public final class ContextViewAssembler {
         private double worstScore = Double.POSITIVE_INFINITY;
         private double bestScore = Double.NEGATIVE_INFINITY;
         private Instant lastUpdatedAt = Instant.EPOCH;
+        private ResourceState worstState = ResourceState.HEALTHY;
 
         void add(ReputationCell cell, boolean resourceBlocked) {
             cells++;
             if (resourceBlocked) {
                 blocked++;
+            }
+            // cellsByState keeps the cells' own states (the same raw breakdown PoolViewAssembler's summary
+            // reports), while worstState folds the resource-wide block in — the rule
+            // PoolViewAssembler's per-resource representative already follows. Keeping them separate is
+            // what makes both truthful: the breakdown stays a census of cell states, and the headline
+            // state cannot read HEALTHY for a context whose only cells sit on blocked resources.
+            ResourceState effective = resourceBlocked ? ResourceState.BLOCKLISTED : cell.state();
+            if (PoolViewAssembler.severity(effective) > PoolViewAssembler.severity(worstState)) {
+                worstState = effective;
             }
             byState.merge(cell.state(), 1, Integer::sum);
             scoreSum += cell.score();
@@ -141,6 +154,7 @@ public final class ContextViewAssembler {
                     cells,
                     blocked,
                     cellsByState,
+                    worstState.name(),
                     scoreSum / cells,
                     worstScore,
                     bestScore,
@@ -155,12 +169,19 @@ public final class ContextViewAssembler {
      * One context aggregated over its cells. {@code cells} doubles as the resource count — a context holds
      * at most one cell per resource. {@code lastUpdatedAt} is the newest cell update in this context and is
      * null only if no cell has ever been updated (an unreachable state in practice, kept total for safety).
+     *
+     * <p>{@code cellsByState} and {@code state} answer different questions and are both needed.
+     * {@code cellsByState} is a census of the cells' own states; {@code state} is the headline — the worst
+     * severity present, with a resource-wide block counted as {@code BLOCKLISTED} even where the cell
+     * itself reads healthy. Deriving the headline from the census instead would let a context whose only
+     * cells sit on blocked resources display as {@code HEALTHY}.
      */
     public record ContextSummary(
             String context,
             int cells,
             int blocked,
             Map<String, Integer> cellsByState,
+            String state,
             double averageScore,
             double worstScore,
             double bestScore,

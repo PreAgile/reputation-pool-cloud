@@ -100,27 +100,59 @@ public final class ScoreSampler {
         // One pass builds both writes: the raw per-cell rows and this tick's per-context aggregate. The
         // aggregate is computed here rather than by re-reading score_sample because the rows are already
         // in hand — the rollup never has to scan the big table.
+        //
+        // Both writes are one transaction. The rollup accumulates (score_sum += …), so a tick that lands
+        // its raw rows but loses its rollup is not self-healing: the next tick carries a different
+        // sampled_at and never replays the missing observation, leaving the bucket permanently short. The
+        // raw insert alone is idempotent on its key, so replaying the whole tick after a rollback is safe.
         Map<String, ContextAggregate> perContext = new LinkedHashMap<>();
-        try (Connection connection = dataSource.getConnection();
-                PreparedStatement statement = connection.prepareStatement(INSERT_SAMPLE)) {
-            for (Map.Entry<CellKey, ReputationCell> entry : cells.entrySet()) {
-                CellKey key = entry.getKey();
-                double score = entry.getValue().score();
-                statement.setString(1, managed.tenantId());
-                statement.setString(2, key.resource().kind().name());
-                statement.setString(3, key.resource().value());
-                statement.setString(4, key.context().value());
-                statement.setTimestamp(5, now);
-                statement.setDouble(6, score);
-                statement.addBatch();
-                perContext
-                        .computeIfAbsent(key.context().value(), context -> new ContextAggregate())
-                        .add(score);
+        try (Connection connection = dataSource.getConnection()) {
+            boolean autoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement(INSERT_SAMPLE)) {
+                for (Map.Entry<CellKey, ReputationCell> entry : cells.entrySet()) {
+                    CellKey key = entry.getKey();
+                    double score = entry.getValue().score();
+                    statement.setString(1, managed.tenantId());
+                    statement.setString(2, key.resource().kind().name());
+                    statement.setString(3, key.resource().value());
+                    statement.setString(4, key.context().value());
+                    statement.setTimestamp(5, now);
+                    statement.setDouble(6, score);
+                    statement.addBatch();
+                    perContext
+                            .computeIfAbsent(key.context().value(), context -> new ContextAggregate())
+                            .add(score);
+                }
+                statement.executeBatch();
+                rollUp(connection, managed.tenantId(), now, perContext);
+                connection.commit();
+            } catch (SQLException | RuntimeException e) {
+                rollback(connection);
+                throw e;
+            } finally {
+                restoreAutoCommit(connection, autoCommit);
             }
-            statement.executeBatch();
-            rollUp(connection, managed.tenantId(), now, perContext);
         } catch (SQLException e) {
             throw new IllegalStateException("score_sample batch insert failed", e);
+        }
+    }
+
+    /** Best-effort rollback: the original failure is what the caller must see, so this never throws. */
+    private static void rollback(Connection connection) {
+        try {
+            connection.rollback();
+        } catch (SQLException e) {
+            log.warn("score sample rollback failed", e);
+        }
+    }
+
+    /** Puts the pooled connection back the way it was found before it returns to the pool. */
+    private static void restoreAutoCommit(Connection connection, boolean autoCommit) {
+        try {
+            connection.setAutoCommit(autoCommit);
+        } catch (SQLException e) {
+            log.warn("restoring auto-commit failed", e);
         }
     }
 

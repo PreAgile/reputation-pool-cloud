@@ -98,6 +98,36 @@ class ContextViewAssemblerTest {
         }
 
         @Test
+        @DisplayName("셀은 HEALTHY 인데 리소스가 차단돼 있으면 → 분포는 HEALTHY 로 세면서 대표 상태는 BLOCKLISTED 로 준다")
+        void overview_headlineStateFoldsResourceBlockButBreakdownKeepsCellStates() {
+            // 두 값이 답하는 질문이 다르다. cellsByState 는 셀 상태의 인구조사(리소스 축 요약과 같은 규칙)이고,
+            // state 는 머리기사다. 머리기사를 분포에서 유도하면 차단된 리소스에만 얹힌 컨텍스트가 HEALTHY 로
+            // 표시된다 — 화면에서 가장 오해를 부르는 조합이다.
+            Map<CellKey, ReputationCell> cells = new HashMap<>();
+            cells.put(key(p2, "BAEMIN"), cell(p2, "BAEMIN", 0.9, ResourceState.HEALTHY, NOW));
+            PoolSnapshot snapshot = new PoolSnapshot(cells, Blocklist.empty().blockPermanently(p2), Set.of());
+
+            ContextSummary summary = summaryOf(ContextViewAssembler.overview(snapshot, NOW), "BAEMIN");
+
+            assertThat(summary.state()).isEqualTo("BLOCKLISTED");
+            assertThat(summary.cellsByState()).containsEntry("HEALTHY", 1).containsEntry("BLOCKLISTED", 0);
+            assertThat(summary.blocked()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("여러 상태가 섞여 있으면 → 대표 상태는 그중 가장 심각한 것이다")
+        void overview_headlineStateIsTheWorstSeverityPresent() {
+            Map<CellKey, ReputationCell> cells = new HashMap<>();
+            cells.put(key(p1, "C"), cell(p1, "C", 0.9, ResourceState.HEALTHY, NOW));
+            cells.put(key(p2, "C"), cell(p2, "C", 0.4, ResourceState.COOLING, NOW));
+            PoolSnapshot snapshot = new PoolSnapshot(cells, Blocklist.empty(), Set.of(p1, p2));
+
+            assertThat(summaryOf(ContextViewAssembler.overview(snapshot, NOW), "C")
+                            .state())
+                    .isEqualTo("COOLING");
+        }
+
+        @Test
         @DisplayName("컨텍스트 목록을 요청하면 → 폴링마다 흔들리지 않도록 이름 오름차순으로 정렬해 준다")
         void overview_ordersContextsByName() {
             Map<CellKey, ReputationCell> cells = new HashMap<>();
@@ -108,7 +138,9 @@ class ContextViewAssemblerTest {
 
             ContextOverview overview = ContextViewAssembler.overview(snapshot, NOW);
 
-            assertThat(overview.contexts()).extracting(ContextSummary::context).containsExactly("BAEMIN", "MUKKEBI", "YOGIYO");
+            assertThat(overview.contexts())
+                    .extracting(ContextSummary::context)
+                    .containsExactly("BAEMIN", "MUKKEBI", "YOGIYO");
         }
 
         @Test
@@ -133,10 +165,12 @@ class ContextViewAssemblerTest {
             cells.put(key(p2, "MUKKEBI"), cell(p2, "MUKKEBI", 0.7, ResourceState.HEALTHY, NOW));
             PoolSnapshot snapshot = new PoolSnapshot(cells, Blocklist.empty(), Set.of(p1, p2));
 
-            ContextDetail detail = ContextViewAssembler.detail(snapshot, "MUKKEBI", NOW).orElseThrow();
+            ContextDetail detail =
+                    ContextViewAssembler.detail(snapshot, "MUKKEBI", NOW).orElseThrow();
 
             assertThat(detail.context()).isEqualTo("MUKKEBI");
-            assertThat(detail.resources()).extracting(ContextViewAssembler.ContextResourceRow::value)
+            assertThat(detail.resources())
+                    .extracting(ContextViewAssembler.ContextResourceRow::value)
                     .containsExactlyInAnyOrder("p1", "p2");
         }
 
@@ -150,10 +184,12 @@ class ContextViewAssemblerTest {
             cells.put(key(p3, "C"), cell(p3, "C", 0.1, ResourceState.HEALTHY, NOW));
             PoolSnapshot snapshot = new PoolSnapshot(cells, Blocklist.empty(), Set.of(p1, p2, p3));
 
-            ContextDetail detail = ContextViewAssembler.detail(snapshot, "C", NOW).orElseThrow();
+            ContextDetail detail =
+                    ContextViewAssembler.detail(snapshot, "C", NOW).orElseThrow();
 
             // COOLING(p2) 이 먼저, 그다음 HEALTHY 끼리는 점수 낮은 p3 → p1.
-            assertThat(detail.resources()).extracting(ContextViewAssembler.ContextResourceRow::value)
+            assertThat(detail.resources())
+                    .extracting(ContextViewAssembler.ContextResourceRow::value)
                     .containsExactly("p2", "p3", "p1");
         }
 
@@ -164,7 +200,8 @@ class ContextViewAssemblerTest {
             cells.put(key(p2, "C"), cell(p2, "C", 0.9, ResourceState.HEALTHY, NOW));
             PoolSnapshot snapshot = new PoolSnapshot(cells, Blocklist.empty().blockPermanently(p2), Set.of());
 
-            ContextDetail detail = ContextViewAssembler.detail(snapshot, "C", NOW).orElseThrow();
+            ContextDetail detail =
+                    ContextViewAssembler.detail(snapshot, "C", NOW).orElseThrow();
 
             assertThat(detail.resources()).singleElement().satisfies(row -> {
                 assertThat(row.state()).isEqualTo("BLOCKLISTED");
@@ -188,7 +225,8 @@ class ContextViewAssemblerTest {
                             .build());
             PoolSnapshot snapshot = new PoolSnapshot(cells, Blocklist.empty(), Set.of(p1));
 
-            ContextDetail detail = ContextViewAssembler.detail(snapshot, "C", NOW).orElseThrow();
+            ContextDetail detail =
+                    ContextViewAssembler.detail(snapshot, "C", NOW).orElseThrow();
 
             assertThat(detail.resources()).singleElement().satisfies(row -> {
                 assertThat(row.recentWindow()).containsExactly(false, true);

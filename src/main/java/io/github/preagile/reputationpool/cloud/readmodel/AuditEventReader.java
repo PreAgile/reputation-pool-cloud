@@ -174,8 +174,7 @@ public final class AuditEventReader {
      */
     private static long instantToEpochNanos(Instant instant) {
         try {
-            return Math.addExact(
-                    Math.multiplyExact(instant.getEpochSecond(), NANOS_PER_SECOND), instant.getNano());
+            return Math.addExact(Math.multiplyExact(instant.getEpochSecond(), NANOS_PER_SECOND), instant.getNano());
         } catch (ArithmeticException overflow) {
             return instant.getEpochSecond() > 0 ? Long.MAX_VALUE : Long.MIN_VALUE;
         }
