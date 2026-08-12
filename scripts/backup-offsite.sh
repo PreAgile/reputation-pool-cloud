@@ -448,11 +448,63 @@ fi
 # 없다. 그 공백을 메우는 것이 이 게이지다 — 여기까지 도달했다는 것이 "원격 업로드가 끝났다"이고, 도달하지
 # 못하면 게이지가 낡아 `OffsiteBackupStale` 이 울린다. 위의 `die` 들이 전부 이 줄 앞에 있는 것이 설계다.
 #
+# 게이지는 **둘**이고 서로 다른 것을 본다(#131 후속):
+#   rp_backup_remote_last_success_timestamp_seconds  — 마지막으로 업로드가 성공한 시각
+#   rp_backup_remote_newest_dump_timestamp_seconds   — 버킷에 있는 가장 최신 덤프가 **만들어진** 시각
+#
+# 앞의 것만으로는 못 잡는 실패가 있다. 사이드카는 크론이 아니라 `while true; do backup.sh && sleep 86400`
+# 루프라 **컨테이너 재시작 시각이 그대로 덤프 시각이 된다.** 배포가 08:04 UTC(오프사이트 타이머) 이후에
+# 일어나면 그날부터 덤프는 매일 타이머보다 늦게 생기고, 이 스크립트는 **매일 "어제 덤프"를 성공적으로
+# 올린다.** 그러면 두 게이지 중 앞의 것과 로컬 게이지가 **둘 다 매일 갱신되는데 버킷의 덤프만 하루씩
+# 낡는다** — 복원해야 하는 날에만 드러나는 실패다. 뒤의 게이지가 그 구멍을 덮는다.
+#
 # **쓰기 실패로 백업을 실패시키지 않는다.** 오브젝트는 이미 버킷에 있다. 관측을 못 해서 백업을 실패로
 # 기록하면 이 변경이 백업을 더 약하게 만든다 — 대신 경고를 남겨 그 사실이 조용히 묻히지 않게 한다.
 if [ "$DRY_RUN" = true ]; then
 	log "[dry-run] 신선도 게이지를 갱신했을 것"
 else
+	# 최신 덤프 시각은 **파일명에서 뽑는다.** `time-created`(업로드 시각)를 쓰지 않는다 — 그 값은 "언제
+	# 올렸나" 이고 우리가 알아야 하는 것은 "그 덤프가 언제 만들어진 데이터인가" 다. 어제 덤프를 오늘 올리면
+	# time-created 는 오늘이 되어 **정확히 이 게이지가 잡으려는 버그를 숨긴다.** 파일명은 `backup.sh` 가
+	# `date -u +%Y%m%dT%H%M%SZ` 로 박으므로(`<db>_20260806T083130Z.dump`) 덤프가 만들어진 시각 그 자체이고,
+	# 재업로드·복사로도 바뀌지 않는다. `Z` 이므로 UTC 로 해석한다.
+	#
+	# 이름 목록은 `remote_list`(업로드 **전** 조회)와 `local_list` 를 **합쳐서** 본다. remote_list 만 쓰면
+	# 이 실행이 방금 올린 오늘 덤프가 빠져 게이지가 늘 한 주기 낡게 보이고, 그러면 진짜 드리프트와 구분되지
+	# 않는다. 위 업로드 루프를 통과했다는 것은 **로컬 덤프가 전부 원격에 있다**는 뜻이므로(크기가 같아
+	# 건너뛰었거나, 올린 뒤 `object head` 로 확인했거나, 아니면 `die` 했다) 합집합이 버킷의 현재 상태다.
+	# 목록을 다시 조회하지 않는 이유이기도 하다 — API 호출을 늘리지 않고 같은 답을 얻는다.
+	#
+	# stderr 는 버리지 않는다(파싱이 깨졌다면 그 이유가 거기 있다). 값을 못 구하면 빈 문자열이 되고, 아래에서
+	# **그 게이지 줄만 빼고** 쓴다 — 0 을 쓰면 나이가 수십 년으로 계산돼 "덤프가 낡았다" 는 **틀린 진단**으로
+	# 알림이 울린다. 부재는 `BackupFreshnessMetricMissing` 이 맡는 편이 진단이 정확하다.
+	newest_dump_ts="$(printf '%s' "$remote_list" | python3 -c '
+import datetime, json, re, sys
+
+def stamp(name):
+    m = re.search(r"(\d{8}T\d{6}Z)\.dump$", name or "")
+    if not m:
+        return None
+    try:
+        t = datetime.datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ")
+    except ValueError:
+        return None
+    return int(t.replace(tzinfo=datetime.timezone.utc).timestamp())
+
+try:
+    items = json.load(sys.stdin) or []
+except Exception:
+    items = []
+names = [i.get("name") for i in items if isinstance(i, dict)]
+names += [line.split(" ")[0] for line in sys.argv[1].splitlines()]
+stamps = [s for s in (stamp(n) for n in names) if s is not None]
+if stamps:
+    print(max(stamps))
+' "$local_list" || true)"
+	if [ -z "$newest_dump_ts" ]; then
+		log "warn: 덤프 파일명에서 시각을 뽑지 못했다 — rp_backup_remote_newest_dump_timestamp_seconds 를 쓰지 않는다 (BackupFreshnessMetricMissing 이 알린다)"
+	fi
+
 	# 볼륨 이름은 compose 프로젝트 접두어가 붙는다 — 덤프 볼륨과 같은 이유로 접미로 찾는다.
 	METRICS_VOLUME="${OFFSITE_METRICS_VOLUME:-}"
 	if [ -z "$METRICS_VOLUME" ]; then
@@ -465,16 +517,25 @@ else
 	else
 		# 원자적 쓰기: node-exporter 는 `*.prom` 만 읽으므로 `.tmp` 에 쓴 뒤 rename 한다. 쓰는 중간을
 		# 스크레이프하면 잘린 파일을 파싱하게 된다(textfile collector 의 알려진 함정).
+		#
+		# 두 게이지를 **한 파일에** 담는다. 파일을 나누면 rename 이 두 번이 되어 그 사이에 스크레이프가
+		# 끼면 "업로드는 방금 성공했는데 덤프 시각은 어제 값" 같은 **서로 어긋난 한 쌍**이 관측된다.
+		# 한 파일이면 원자적 rename 한 번으로 두 값이 동시에 바뀐다.
 		if {
 			printf '# HELP rp_backup_remote_last_success_timestamp_seconds Unix time of the last successful offsite upload.\n'
 			printf '# TYPE rp_backup_remote_last_success_timestamp_seconds gauge\n'
 			printf 'rp_backup_remote_last_success_timestamp_seconds %s\n' "$(date -u +%s)"
+			if [ -n "$newest_dump_ts" ]; then
+				printf '# HELP rp_backup_remote_newest_dump_timestamp_seconds Creation time of the newest dump in the offsite bucket, parsed from its filename.\n'
+				printf '# TYPE rp_backup_remote_newest_dump_timestamp_seconds gauge\n'
+				printf 'rp_backup_remote_newest_dump_timestamp_seconds %s\n' "$newest_dump_ts"
+			fi
 		} | "${DOCKER[@]}" run --rm -i -v "$METRICS_VOLUME":/m alpine:3 \
 			sh -c 'cat > /m/rp-backup-remote.prom.tmp && mv /m/rp-backup-remote.prom.tmp /m/rp-backup-remote.prom' \
 			> /dev/null; then
 			# stdout 만 버린다(docker 의 진행 출력). stderr 는 journal 로 흘려보낸다 — 실패 이유가
 			# 대개 거기 있고, 그것까지 지우면 아래 warn 만 남아 원인을 다시 찾아야 한다.
-			log "신선도 게이지 갱신: rp_backup_remote_last_success_timestamp_seconds"
+			log "신선도 게이지 갱신: rp_backup_remote_last_success_timestamp_seconds, 최신 덤프 ${newest_dump_ts:-없음}"
 		else
 			log "warn: 신선도 게이지 갱신 실패 (업로드 자체는 성공했다)"
 		fi
