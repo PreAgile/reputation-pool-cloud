@@ -30,7 +30,8 @@ import org.springframework.scheduling.annotation.Scheduled;
  * replayed flush can only ever over-count what a crash already lost — never corrupt an existing bucket.
  * That is also why the whole flush shares one connection and one prepared statement but <em>not</em> one
  * transaction: each bucket's upsert stands alone, so a single failing row is retried on its own rather
- * than dragging the other buckets' counts back into memory with it.
+ * than dragging the other buckets' counts back into memory with it. {@link #openConnection()} states that
+ * commit boundary rather than inheriting it from the pool's configuration.
  *
  * <p>Retention is its own schedule and its own (much longer) window than the audit trail's. This table's
  * grain is (tenant × context × kind × hour), so a tenant running 20 contexts across all three resource
@@ -87,7 +88,7 @@ public final class OutcomeRollup {
             return; // nothing reported since the last cycle; skip the connection entirely
         }
         Map<Key, Counts> pending = new HashMap<>(drained);
-        try (Connection connection = dataSource.getConnection();
+        try (Connection connection = openConnection();
                 PreparedStatement statement = connection.prepareStatement(UPSERT)) {
             for (Map.Entry<Key, Counts> entry : drained.entrySet()) {
                 Key key = entry.getKey();
@@ -114,6 +115,26 @@ public final class OutcomeRollup {
         } finally {
             pending.forEach(recorder::restore);
         }
+    }
+
+    /**
+     * A connection whose commit boundary is one statement.
+     *
+     * <p>Both schedules here isolate at the statement: {@link #flush()} claims that one bucket's failed
+     * upsert costs only that bucket, and {@link #purgeExpired()} is a single {@code DELETE} that must
+     * survive the connection being returned to the pool. Both hold only while the connection auto-commits
+     * — which is HikariCP's default, so it is what the code does today, but nothing in this class said so
+     * and nothing stopped the pool from being configured the other way. Under {@code auto-commit=false}
+     * every bucket would instead share one uncommitted transaction that {@code close()} discards: the
+     * per-bucket isolation would be a comment rather than a behavior, and the purge would silently never
+     * delete anything. Stating it on the connections this class opens costs one call and removes the
+     * dependency on a pool default. Hikari restores its own setting when the connection is returned, so
+     * this never leaks to another caller.
+     */
+    private Connection openConnection() throws SQLException {
+        Connection connection = dataSource.getConnection();
+        connection.setAutoCommit(true);
+        return connection;
     }
 
     /** One bucket's upsert. Every SQL failure is wrapped so the caller only has to catch one type. */
@@ -150,7 +171,7 @@ public final class OutcomeRollup {
         }
         Duration retention = outcome.retention();
         Instant cutoff = clock.instant().minus(retention);
-        try (Connection connection = dataSource.getConnection();
+        try (Connection connection = openConnection();
                 PreparedStatement statement = connection.prepareStatement(DELETE_OLDER_THAN)) {
             statement.setTimestamp(1, Timestamp.from(cutoff));
             int purged = statement.executeUpdate();

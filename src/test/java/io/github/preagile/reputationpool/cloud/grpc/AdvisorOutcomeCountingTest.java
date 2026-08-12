@@ -168,6 +168,22 @@ class AdvisorOutcomeCountingTest {
                 .build();
     }
 
+    private static Outcome successWithLatency(long seconds) {
+        return Outcome.newBuilder()
+                .setSuccess(Outcome.Success.newBuilder().setLatency(protoSeconds(seconds)))
+                .build();
+    }
+
+    private static Outcome failureWithLatency(AdvisorProto.FailureType type, long seconds) {
+        return Outcome.newBuilder()
+                .setFailure(Outcome.Failure.newBuilder().setType(type).setLatency(protoSeconds(seconds)))
+                .build();
+    }
+
+    private static com.google.protobuf.Duration protoSeconds(long seconds) {
+        return com.google.protobuf.Duration.newBuilder().setSeconds(seconds).build();
+    }
+
     private Counts countsFor(String tenantId, String context, ResourceKind kind) {
         return recorder.drain(BUCKET).get(new Key(tenantId, context, kind, BUCKET));
     }
@@ -273,6 +289,40 @@ class AdvisorOutcomeCountingTest {
                 .isInstanceOf(StatusRuntimeException.class);
 
         assertThat(recorder.drain(BUCKET)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("latency 가 음수인 성공 보고는 → core 의 Outcome 생성자가 거절하므로 성공으로 세지 않는다")
+    void aNegativeLatencySuccessIsNotCounted() {
+        // 이 거절은 와이어에 보이지 않는다 — kind 도 실패 종류도 멀쩡하고, Outcome.Success 생성자만 안다.
+        // 카운트 게이트가 규칙을 따로 적어 두면 여기서 core 와 어긋나 엔진에 닿지 않은 보고가 분모에 들어간다.
+        assertThatThrownBy(() -> asTenant("tenant-a")
+                        .report(report(AdvisorProto.ResourceKind.PROXY, "scrape", successWithLatency(-1))))
+                .isInstanceOf(StatusRuntimeException.class);
+
+        assertThat(recorder.drain(BUCKET)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("latency 가 음수인 실패 보고는 → 같은 이유로 실패 분자에도 들어가지 않는다")
+    void aNegativeLatencyFailureIsNotCounted() {
+        assertThatThrownBy(() -> asTenant("tenant-a")
+                        .report(report(
+                                AdvisorProto.ResourceKind.PROXY,
+                                "scrape",
+                                failureWithLatency(AdvisorProto.FailureType.BLOCKED, -1))))
+                .isInstanceOf(StatusRuntimeException.class);
+
+        assertThat(recorder.drain(BUCKET)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("latency 가 0 이상인 성공 보고는 → 정상적으로 엔진에 닿고 성공으로 세진다(경계값 0)")
+    void aZeroLatencySuccessIsCounted() {
+        asTenant("tenant-a").report(report(AdvisorProto.ResourceKind.PROXY, "scrape", successWithLatency(0)));
+
+        assertThat(countsFor("tenant-a", "scrape", ResourceKind.PROXY).success())
+                .isEqualTo(1);
     }
 
     @Test

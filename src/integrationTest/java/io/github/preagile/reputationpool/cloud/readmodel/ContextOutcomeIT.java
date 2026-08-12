@@ -3,15 +3,23 @@ package io.github.preagile.reputationpool.cloud.readmodel;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.metering.OutcomeRecorder;
 import io.github.preagile.reputationpool.cloud.metering.OutcomeRollup;
 import io.github.preagile.reputationpool.core.domain.FailureType;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +35,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.datasource.DelegatingDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 /**
@@ -84,6 +93,12 @@ class ContextOutcomeIT {
 
     @Autowired
     private Clock clock;
+
+    @Autowired
+    private DataSource dataSource;
+
+    @Autowired
+    private ReputationPoolProperties properties;
 
     private Instant currentHour() {
         return clock.instant().truncatedTo(ChronoUnit.HOURS);
@@ -195,6 +210,76 @@ class ContextOutcomeIT {
 
         List<?> remaining = (List<?>) seriesFor(context, 24 * 365).get("points");
         assertThat(remaining).as("5일 전 버킷만 지워지고 현재 시간 버킷은 남는다").hasSize(1);
+    }
+
+    /**
+     * The per-bucket isolation {@link OutcomeRollup} documents is a statement about commit boundaries, and
+     * a commit boundary is not something a class gets to assume — it is whatever the pool was configured
+     * with. Under {@code auto-commit=false} the whole flush would instead be one transaction that
+     * {@code close()} throws away, so every count would vanish without a single error being logged: the
+     * quietest possible failure. Simulated with a pool that hands out non-auto-commit connections.
+     */
+    @Test
+    @DisplayName("커넥션 풀이 auto-commit=false 로 커넥션을 내줘도 → 플러시한 버킷이 커밋되어 조회에 잡힌다")
+    void theFlushCommitsEvenWhenThePoolDisablesAutoCommit() {
+        String context = "rate-autocommit";
+        OutcomeRecorder isolated = new OutcomeRecorder();
+        isolated.recordSuccess("default", context, ResourceKind.PROXY, currentHour());
+
+        new OutcomeRollup(nonAutoCommitPool(), clock, isolated, properties).flush();
+
+        Map<String, Object> totals =
+                (Map<String, Object>) seriesFor(context, 24).get("totals");
+        assertThat(((Number) totals.get("success")).longValue()).isEqualTo(1);
+    }
+
+    /** The same database behind a pool configured the way {@code OutcomeRollup} must not depend on. */
+    private DataSource nonAutoCommitPool() {
+        return new DelegatingDataSource(dataSource) {
+            @Override
+            public Connection getConnection() throws SQLException {
+                Connection connection = super.getConnection();
+                connection.setAutoCommit(false);
+                return connection;
+            }
+        };
+    }
+
+    /**
+     * The bucket key is a point in time, and it is written by one component and read back by another. If
+     * those two ever disagree about what the stored value means, nothing fails loudly — the counts simply
+     * land in, or are read out of, the wrong hour, and every rate on the screen is wrong by a whole
+     * timezone offset while looking perfectly plausible. That is why this asserts the stored value
+     * directly (in UTC wall-clock, without going back through JDBC's conversion) as well as the instant
+     * the read model returns, rather than trusting a round trip through one library to be self-consistent.
+     */
+    @Test
+    @DisplayName("버킷 시각은 → DB 에 기록한 UTC 순간 그대로 저장되고, 읽기 모델도 같은 순간으로 되읽는다")
+    void theBucketHourIsStoredAndReadBackAsTheSameInstant() throws Exception {
+        String context = "rate-instant";
+        Instant hour = currentHour().minus(3, ChronoUnit.HOURS);
+        recorder.recordSuccess("default", context, ResourceKind.PROXY, hour);
+
+        rollup.flush();
+
+        try (Connection connection = dataSource.getConnection();
+                PreparedStatement statement = connection.prepareStatement("SELECT bucket_hour AT TIME ZONE 'UTC'"
+                        + " FROM report_outcome_hourly WHERE tenant_id = 'default' AND context = ?")) {
+            statement.setString(1, context);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertThat(rows.next()).as("플러시가 그 버킷을 실제로 한 행으로 썼다").isTrue();
+                assertThat(rows.getObject(1, LocalDateTime.class))
+                        .as("timestamptz 에 저장된 값을 UTC 벽시계로 보면 기록한 시각 그대로다")
+                        .isEqualTo(LocalDateTime.ofInstant(hour, ZoneOffset.UTC));
+            }
+        }
+
+        List<Map<String, Object>> points =
+                (List<Map<String, Object>>) seriesFor(context, 24).get("points");
+        assertThat(points).hasSize(1);
+        assertThat(Instant.parse((String) points.get(0).get("at")))
+                .as("읽기 모델이 돌려주는 시각도 같은 순간이다")
+                .isEqualTo(hour);
     }
 
     /** The one context's series out of the whole-tenant response, so each test reads only what it wrote. */

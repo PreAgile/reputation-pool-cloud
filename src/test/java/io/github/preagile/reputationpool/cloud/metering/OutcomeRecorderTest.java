@@ -13,6 +13,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -107,8 +109,11 @@ class OutcomeRecorderTest {
     }
 
     @Nested
-    @DisplayName("WhenTheHourRolls")
+    @DisplayName("시간이 넘어갈 때: 지난 시간 버킷을 카운트째 넘겨 보내고, 경계에서 도착한 보고도 잃지 않는다")
     class WhenTheHourRolls {
+
+        private static final int BOUNDARY_THREADS = 4;
+        private static final int BOUNDARY_PER_THREAD = 20_000;
 
         /**
          * The reclamation itself (dropping the past hour's map entry) is not observable through the public
@@ -135,10 +140,79 @@ class OutcomeRecorderTest {
             assertThat(second.get(key("scrape", ResourceKind.PROXY, NEXT_HOUR)).success())
                     .isEqualTo(1);
         }
+
+        /**
+         * The hand-off reclamation must not break. A report stamps its hour, takes its bucket's
+         * {@code Tally} out of the map, and only then increments — and the increment happens
+         * <em>outside</em> the map, so nothing serializes it against a drain that is removing that same
+         * entry. Remove the entry in between and the resumed report increments an adder no longer
+         * reachable from the map: no later drain can see it, and nothing else stores the report, so that
+         * count is gone for good. This is why {@code drain} reclaims a bucket only a full hour after it
+         * stopped receiving increments, rather than the moment the hour rolls.
+         *
+         * <p>Reproduced here by running a flusher <em>past the boundary</em> ({@code drain(NEXT_HOUR)},
+         * which is what a flush a second after the hour rolls does) while reporters are still landing on
+         * {@code HOUR}. The invariant is an <b>equality</b> — every report either comes out of some drain
+         * or is still in the map at the end — because a bound would let exactly this loss pass.
+         *
+         * <p>Measured both ways (testing-and-review.md 11항): with the one-hour grace removed, 30/30 runs
+         * lost counts (~29% of 80,000 per run); with it in place, 30/30 runs lost none.
+         */
+        @Test
+        @DisplayName("정각 직후의 플러시가 도는 동안 지난 시간 버킷에 계속 보고해도 → 한 건도 잃지 않고 전부 드레인된다")
+        void noReportIsLostWhenAFlushCrossesTheHourBoundary() throws Exception {
+            CountDownLatch ready = new CountDownLatch(BOUNDARY_THREADS);
+            CountDownLatch start = new CountDownLatch(1);
+            CountDownLatch reported = new CountDownLatch(BOUNDARY_THREADS);
+            AtomicBoolean reportingDone = new AtomicBoolean(false);
+            AtomicLong handedOver = new AtomicLong();
+            ExecutorService pool = Executors.newFixedThreadPool(BOUNDARY_THREADS + 1);
+            try {
+                pool.execute(() -> {
+                    while (!reportingDone.get()) {
+                        recorder.drain(NEXT_HOUR).values().forEach(c -> handedOver.addAndGet(c.total()));
+                    }
+                });
+                for (int t = 0; t < BOUNDARY_THREADS; t++) {
+                    pool.execute(() -> {
+                        ready.countDown();
+                        try {
+                            start.await();
+                            for (int i = 0; i < BOUNDARY_PER_THREAD; i++) {
+                                recorder.recordSuccess("tenant-a", "scrape", ResourceKind.PROXY, HOUR);
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        } finally {
+                            reported.countDown();
+                        }
+                    });
+                }
+                assertThat(ready.await(10, TimeUnit.SECONDS))
+                        .as("every reporter reached the start line")
+                        .isTrue();
+                start.countDown();
+                assertThat(reported.await(30, TimeUnit.SECONDS))
+                        .as("every reporter finished reporting")
+                        .isTrue();
+            } finally {
+                reportingDone.set(true);
+                pool.shutdown();
+                assertThat(pool.awaitTermination(30, TimeUnit.SECONDS))
+                        .as("the flusher stopped")
+                        .isTrue();
+            }
+            // 마지막 플러시 — 남아 있는 버킷까지 걷어야 등식이 성립한다.
+            recorder.drain(NEXT_HOUR).values().forEach(c -> handedOver.addAndGet(c.total()));
+
+            assertThat(handedOver.get())
+                    .as("드레인이 넘겨준 총합은 보고한 총합과 정확히 같다")
+                    .isEqualTo((long) BOUNDARY_THREADS * BOUNDARY_PER_THREAD);
+        }
     }
 
     @Nested
-    @DisplayName("WhenReportedConcurrently")
+    @DisplayName("동시에 보고할 때: 여러 스레드의 증분을 하나도 잃지 않는다")
     class WhenReportedConcurrently {
 
         private static final int THREADS = 16;

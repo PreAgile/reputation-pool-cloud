@@ -3,6 +3,7 @@ package io.github.preagile.reputationpool.cloud.metering;
 import io.github.preagile.reputationpool.core.domain.FailureType;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
@@ -23,10 +24,11 @@ import java.util.concurrent.atomic.LongAdder;
  *
  * <p><b>The hour is part of the key, not decided at flush time.</b> A report at 10:59:59 flushed at
  * 11:00:05 belongs to the 10:00 bucket; deriving the bucket from the flush clock instead would smear it
- * into 11:00 and dent both hours' rates. {@link #drain(Instant)} therefore reclaims every bucket older
- * than the current hour once drained (a past hour receives no further increments), and keeps the current
- * one so a concurrent increment is never dropped — {@link MeterRecorder#drainLeaseDeltas} 's day rule at
- * hour resolution.
+ * into 11:00 and dent both hours' rates. {@link #drain(Instant)} therefore keeps the current hour so a
+ * concurrent increment is never dropped — {@link MeterRecorder#drainLeaseDeltas} 's day rule at hour
+ * resolution — and reclaims older buckets only once a full hour has passed since they stopped receiving
+ * increments, because the increment happens outside the map and a bucket removed mid-hand-off would lose
+ * that report for good (see {@link #drain(Instant)}).
  *
  * <p>Thread safety: the map is a {@link ConcurrentHashMap} and every counter inside a {@link Tally} is a
  * {@link LongAdder} allocated once at construction, so concurrent reports on any number of gRPC threads
@@ -90,11 +92,19 @@ public final class OutcomeRecorder {
      * adds these to {@code report_outcome_hourly}; a bucket whose DB write fails is handed back via
      * {@link #restore} so it is retried next cycle rather than lost.
      *
-     * @param currentHour the hour bucket that is still receiving increments; strictly older buckets are
-     *     reclaimed after being drained, so an idle process does not leak an entry per elapsed hour
+     * @param currentHour the hour bucket that is still receiving increments; buckets older than the
+     *     <em>previous</em> hour are reclaimed after being drained, so an idle process does not leak an
+     *     entry per elapsed hour
      */
     public Map<Key, Counts> drain(Instant currentHour) {
         Objects.requireNonNull(currentHour, "currentHour must not be null");
+        // 회수 기준을 한 시간 늦춘다. 증가는 맵 밖에서 일어나므로(computeIfAbsent 가 Tally 를 돌려준 뒤
+        // LongAdder 를 올린다) 그 사이에 그 엔트리를 제거하면 재개된 보고는 맵에서 분리된 어댑터를
+        // 올리게 되고, 그 한 건은 어느 drain 에도 실리지 않는다 — 원본 보고는 어디에도 저장되지 않으므로
+        // 영구 유실이다. 정각 직후 플러시는 흔하므로(경계 ±수십 ms) 이 창은 실제로 열린다. 한 시간을
+        // 유예하면 같은 사고가 나려면 한 스레드가 인접한 두 문장 사이에서 한 시간 넘게 멈춰 있어야 한다.
+        // 비용은 버킷당 엔트리 하나를 한 시간 더 들고 있는 것뿐이다(입도상 테넌트당 시간 60행 규모).
+        Instant reclaimBefore = currentHour.minus(1, ChronoUnit.HOURS);
         Map<Key, Counts> drained = new HashMap<>();
         var it = tallies.entrySet().iterator();
         while (it.hasNext()) {
@@ -103,8 +113,8 @@ public final class OutcomeRecorder {
             if (counts.total() != 0) {
                 drained.put(entry.getKey(), counts);
             }
-            if (entry.getKey().bucketHour().isBefore(currentHour)) {
-                it.remove(); // 지난 시간 버킷: 이후 증분이 없으므로 소진 후 회수
+            if (entry.getKey().bucketHour().isBefore(reclaimBefore)) {
+                it.remove(); // 두 시간 넘게 지난 버킷: 더 들어올 증분이 없으므로 소진 후 회수
             }
         }
         return drained;

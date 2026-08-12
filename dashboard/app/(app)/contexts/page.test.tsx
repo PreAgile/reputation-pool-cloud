@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { setupServer } from "msw/node";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import {
   contextDetailFixture,
   contextHistoryFixture,
@@ -132,14 +132,41 @@ describe("컨텍스트 화면 (integration + MSW)", () => {
   });
 });
 
+/** 7일 픽스처(전체 63.5%)와 확실히 구분되는 90일 응답 — 전체 성공률 타일이 54.5% 가 된다. */
+const ninetyDayOutcomes = {
+  contexts: [
+    {
+      context: "BAEMIN",
+      totals: {
+        success: 500,
+        failure: 500,
+        successRate: 0.5,
+        failures: { BLOCKED: 500, TIMEOUT: 0, SLOW: 0, CONNECTION_RESET: 0, TLS_HANDSHAKE: 0 },
+      },
+      points: [],
+    },
+    {
+      context: "CPEATS",
+      totals: {
+        success: 100,
+        failure: 0,
+        successRate: 1,
+        failures: { BLOCKED: 0, TIMEOUT: 0, SLOW: 0, CONNECTION_RESET: 0, TLS_HANDSHAKE: 0 },
+      },
+      points: [],
+    },
+  ],
+};
+
 describe("컨텍스트 화면 — 성공률 (#189)", () => {
   it("성공률이 들어오면 → 표에 비율과 지배적인 실패 종류가 함께 실린다", async () => {
     // 점수로는 답할 수 없는 질문이 이것이다. 그리고 "62%" 만으로는 대응이 안 나온다 —
     // 막힌 것(BLOCKED)인지 느린 것(SLOW)인지에 따라 할 일이 다르다.
     render(<ContextsPage />);
 
+    // 성공률은 개요와 다른 effect 로 온다 — 표가 그려졌다고 성공률이 반영된 것은 아니라 기다려서 본다.
     const table = within(await contextTable());
-    expect(table.getByText("62.0%")).toBeInTheDocument();
+    expect(await table.findByText("62.0%")).toBeInTheDocument();
     expect(table.getByText(/실패 80% BLOCKED/)).toBeInTheDocument();
   });
 
@@ -149,7 +176,7 @@ describe("컨텍스트 화면 — 성공률 (#189)", () => {
     render(<ContextsPage />);
 
     expect(await screen.findByText(/^성공률 ·/)).toBeInTheDocument();
-    expect(screen.getByText("63.5%")).toBeInTheDocument();
+    expect(await screen.findByText("63.5%")).toBeInTheDocument();
   });
 
   it("지표를 성공률로 바꾸면 → 차트를 새로 늘리지 않고 같은 곡선이 성공률로 전환된다", async () => {
@@ -165,10 +192,18 @@ describe("컨텍스트 화면 — 성공률 (#189)", () => {
 
   it("성공률 조회가 실패하면 → 표의 성공률 열만 '—' 가 되고 나머지 열은 그대로 읽힌다", async () => {
     // 성공률은 보조 정보다. 실패가 화면 전체를 무너뜨리면 안 된다.
-    server.use(http.get("*/api/contexts/success-rate", () => HttpResponse.error()));
+    // 응답이 적용되기 **전에** 단언하면 아무것도 검증하지 못하므로, 요청이 실제로 실패해 돌아온 뒤에 본다.
+    let failed = 0;
+    server.use(
+      http.get("*/api/contexts/success-rate", () => {
+        failed += 1;
+        return HttpResponse.error();
+      }),
+    );
     render(<ContextsPage />);
 
     const table = within(await contextTable());
+    await waitFor(() => expect(failed).toBe(1));
     expect(table.getByText("BAEMIN")).toBeInTheDocument();
     expect(table.getByText("0.82")).toBeInTheDocument();
     expect(table.queryByText("62.0%")).not.toBeInTheDocument();
@@ -176,6 +211,7 @@ describe("컨텍스트 화면 — 성공률 (#189)", () => {
 
   it("보고가 한 건도 없던 컨텍스트는 → 0% 가 아니라 '—' 로 그린다", async () => {
     // null 을 0 으로 접으면 "아직 안 돌았다" 가 "전부 실패했다" 로 읽힌다 — 정반대 상황이다.
+    // CPEATS 는 비율이 있으므로, 그 값이 그려진 시점이 곧 응답이 반영된 시점이다 — BAEMIN 은 그 뒤에 본다.
     server.use(
       http.get("*/api/contexts/success-rate", () =>
         HttpResponse.json({
@@ -190,6 +226,16 @@ describe("컨텍스트 화면 — 성공률 (#189)", () => {
               },
               points: [],
             },
+            {
+              context: "CPEATS",
+              totals: {
+                success: 3,
+                failure: 1,
+                successRate: 0.75,
+                failures: { BLOCKED: 1, TIMEOUT: 0, SLOW: 0, CONNECTION_RESET: 0, TLS_HANDSHAKE: 0 },
+              },
+              points: [],
+            },
           ],
         }),
       ),
@@ -197,6 +243,7 @@ describe("컨텍스트 화면 — 성공률 (#189)", () => {
     render(<ContextsPage />);
 
     const table = within(await contextTable());
+    expect(await table.findByText("75.0%")).toBeInTheDocument();
     expect(table.getByText("BAEMIN")).toBeInTheDocument();
     expect(table.queryByText("0.0%")).not.toBeInTheDocument();
   });
@@ -216,7 +263,53 @@ describe("컨텍스트 화면 — 성공률 (#189)", () => {
     await user.click(screen.getByRole("button", { name: /추이 기간 선택/ }));
     await user.click(await screen.findByRole("button", { name: /최근 90일/ }));
 
-    expect(asked).toContain("2160");
+    await waitFor(() => expect(asked).toContain("2160"));
+  });
+
+  it("기간을 바꾸면 → 이전 기간의 성공률을 새 기간 라벨 옆에 남기지 않는다", async () => {
+    // 라벨("성공률 · 최근 90일")은 즉시 바뀌는데 숫자가 7일 것이면, 로딩이 아니라 오독이다.
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/api/contexts/success-rate", async ({ request }) => {
+        // 새 기간 응답은 붙잡아 둔다 — 전환 직후의 화면이 무엇을 보이는지가 이 테스트의 대상이다.
+        if (new URL(request.url).searchParams.get("hours") === "2160") await delay("infinite");
+        return HttpResponse.json(contextOutcomeFixture);
+      }),
+    );
+    render(<ContextsPage />);
+
+    expect(await screen.findByText("63.5%")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /추이 기간 선택/ }));
+    await user.click(await screen.findByRole("button", { name: /최근 90일/ }));
+
+    await waitFor(() => expect(screen.queryByText("63.5%")).not.toBeInTheDocument());
+    expect(screen.getByText(/^성공률 · 최근 90일$/)).toBeInTheDocument();
+  });
+
+  it("느린 이전 기간 응답이 뒤늦게 도착해도 → 최신 기간의 성공률을 덮어쓰지 않는다", async () => {
+    // 창이 넓을수록 응답이 느리다고 볼 이유는 없다 — 순서는 보장되지 않는다. 순번을 걸지 않으면
+    // 먼저 떠난 요청이 나중에 도착해 최신 화면을 옛 기간 값으로 되돌린다.
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/api/contexts/success-rate", async ({ request }) => {
+        if (new URL(request.url).searchParams.get("hours") === "2160") {
+          return HttpResponse.json(ninetyDayOutcomes);
+        }
+        await delay(200); // 기본 7일 요청이 전환 뒤에 도착한다
+        return HttpResponse.json(contextOutcomeFixture);
+      }),
+    );
+    render(<ContextsPage />);
+
+    await screen.findByRole("heading", { name: /컨텍스트별 평균 평판/ });
+    await user.click(screen.getByRole("button", { name: /추이 기간 선택/ }));
+    await user.click(await screen.findByRole("button", { name: /최근 90일/ }));
+    expect(await screen.findByText("54.5%")).toBeInTheDocument();
+
+    // 늦게 도착한 7일 응답(63.5%)이 지나가도 화면은 90일 값을 유지한다.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(screen.queryByText("63.5%")).not.toBeInTheDocument();
+    expect(screen.getByText("54.5%")).toBeInTheDocument();
   });
 });
 

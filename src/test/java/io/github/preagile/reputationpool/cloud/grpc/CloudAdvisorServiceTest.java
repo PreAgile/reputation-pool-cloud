@@ -108,8 +108,9 @@ class CloudAdvisorServiceTest {
 
     @BeforeEach
     void startServer() throws Exception {
-        ReputationAdvisorService service = new ReputationAdvisorService(
-                registry, new EventBroadcaster(), budget, new OutcomeRecorder(), Clock.systemUTC());
+        // 풀과 같은 고정 시계를 쓴다 — 한 테스트 안에 시간원이 둘이면 버킷 경계가 결정적이지 않다.
+        ReputationAdvisorService service =
+                new ReputationAdvisorService(registry, new EventBroadcaster(), budget, new OutcomeRecorder(), clock);
         String name = InProcessServerBuilder.generateName();
         server = InProcessServerBuilder.forName(name)
                 .directExecutor()

@@ -236,15 +236,6 @@ export default function ContextsPage() {
     }
   }, [range.hours]);
 
-  const loadOutcomes = useCallback(async () => {
-    try {
-      setOutcomes(await api<ContextOutcomeHistory>(`/contexts/success-rate?hours=${range.hours}`));
-    } catch {
-      // 성공률도 보조 정보다 — 없으면 표의 성공률 열이 "—" 가 되고 나머지는 그대로 읽힌다.
-      setOutcomes(null);
-    }
-  }, [range.hours]);
-
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
@@ -253,9 +244,25 @@ export default function ContextsPage() {
     void loadHistory();
   }, [loadHistory]);
 
+  // 성공률 응답을 그것을 요청한 창(hours)에 묶는다. 기간을 바꾸면 이전 창의 값을 먼저 버리는데, 화면의
+  // 라벨("성공률 · 최근 90일")은 즉시 새 기간으로 바뀌기 때문이다 — 옛 숫자를 새 라벨 옆에 남기면 그건
+  // 로딩이 아니라 오독이다. 그리고 앞선 요청이 뒤늦게 도착해 최신 결과를 덮어쓰지 못하게 무시한다(창이
+  // 넓을수록 응답이 느리므로 90일 → 7일 전환에서 실제로 역전된다). 선택 컨텍스트 상세와 같은 방식.
   useEffect(() => {
-    void loadOutcomes();
-  }, [loadOutcomes]);
+    let live = true;
+    setOutcomes(null);
+    api<ContextOutcomeHistory>(`/contexts/success-rate?hours=${range.hours}`)
+      .then((data) => {
+        if (live) setOutcomes(data);
+      })
+      .catch(() => {
+        // 성공률은 보조 정보다 — 없으면 표의 성공률 열이 "—" 가 되고 나머지는 그대로 읽힌다.
+        if (live) setOutcomes(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [range.hours]);
 
   usePoll(() => void loadOverview(), POLL_MS, true);
 
