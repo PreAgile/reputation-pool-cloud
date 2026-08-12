@@ -133,8 +133,19 @@ public final class OutcomeRollup {
      */
     private Connection openConnection() throws SQLException {
         Connection connection = dataSource.getConnection();
-        connection.setAutoCommit(true);
-        return connection;
+        try {
+            connection.setAutoCommit(true);
+            return connection;
+        } catch (SQLException | RuntimeException e) {
+            // 아직 호출부의 try-with-resources 가 이 커넥션을 자원으로 잡기 전이다. 여기서 닫지 않으면
+            // 풀로 돌아가지 않고, 두 스케줄이 주기마다 하나씩 새어 결국 풀이 마른다.
+            try {
+                connection.close();
+            } catch (SQLException closeFailure) {
+                e.addSuppressed(closeFailure);
+            }
+            throw e;
+        }
     }
 
     /** One bucket's upsert. Every SQL failure is wrapped so the caller only has to catch one type. */
