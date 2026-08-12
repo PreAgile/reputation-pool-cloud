@@ -1,5 +1,6 @@
 package io.github.preagile.reputationpool.cloud.config;
 
+import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -17,6 +18,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param score reputation-score time-series sampling configuration
  * @param limits the shared-JVM global resource budget (issue #84)
  * @param surgeThresholds the domain-surge alert thresholds published as gauges (issue #77)
+ * @param policyCeiling how far a per-tenant engine policy may depart from these defaults (issue #179)
  */
 @ConfigurationProperties("reputation-pool")
 public record ReputationPoolProperties(
@@ -27,16 +29,62 @@ public record ReputationPoolProperties(
         @DefaultValue Metering metering,
         @DefaultValue Score score,
         @DefaultValue Limits limits,
-        @DefaultValue SurgeThresholds surgeThresholds) {
+        @DefaultValue SurgeThresholds surgeThresholds,
+        @DefaultValue PolicyCeiling policyCeiling) {
 
     /**
      * Reputation-engine tuning. Defaults mirror the L1 adapter demos and the reference server: window
-     * 10, cool after 2 consecutive failures, recover after 2 consecutive successes.
+     * 10, cool after 2 consecutive failures, recover after 2 consecutive successes, plus the two knobs
+     * upstream's no-arg constructors pick for themselves — {@code AdaptiveCooldownPolicy}'s
+     * {@code DEFAULT_MAX_EXPONENT} (6) and {@code WeightedRandomSelectionStrategy}'s
+     * {@code DEFAULT_EXPLORATION_FLOOR} (1.0).
+     *
+     * <p>Since issue #179 these are the instance-wide <em>defaults</em>, not the only possible values:
+     * a tenant may store its own complete {@code EnginePolicy}, and a tenant without one runs exactly
+     * these numbers. They are also what {@code EnginePolicyCeiling} derives each tenant's upper bound
+     * from, which is why an out-of-range default has to fail at boot rather than at the first pool build.
+     *
+     * @param windowSize how many recent outcomes each reputation cell retains
+     * @param coolAfter consecutive failures before a resource is cooled
+     * @param recoverAfter consecutive successes required to leave {@code RECOVERING}
+     * @param cooldownMaxExponent the exponent at which the adaptive cooldown's backoff tops out
+     * @param explorationFloor the minimum selection weight every eligible candidate receives
      */
     public record Engine(
             @DefaultValue("10") int windowSize,
             @DefaultValue("2") int coolAfter,
-            @DefaultValue("2") int recoverAfter) {}
+            @DefaultValue("2") int recoverAfter,
+            @DefaultValue("6") int cooldownMaxExponent,
+            @DefaultValue("1.0") double explorationFloor) {
+
+        /**
+         * Fail fast on misconfiguration, the same posture as {@link Limits}. These are the ranges the
+         * upstream {@code ReputationEngine}/{@code AdaptiveCooldownPolicy}/{@code WeightedRandomSelectionStrategy}
+         * constructors enforce; without this check an out-of-range default is accepted at boot and only
+         * surfaces when the first tenant's pool is lazily built, as a 500 on that tenant's first call.
+         *
+         * @throws IllegalArgumentException if any knob is outside the range upstream accepts
+         */
+        public Engine {
+            requireAtLeastOne(windowSize, "engine.window-size");
+            requireAtLeastOne(coolAfter, "engine.cool-after");
+            requireAtLeastOne(recoverAfter, "engine.recover-after");
+            if (cooldownMaxExponent < 0 || cooldownMaxExponent > AdaptiveCooldownPolicy.MAX_ALLOWED_EXPONENT) {
+                throw new IllegalArgumentException("engine.cooldown-max-exponent must be in [0, "
+                        + AdaptiveCooldownPolicy.MAX_ALLOWED_EXPONENT + "], but was " + cooldownMaxExponent);
+            }
+            if (!Double.isFinite(explorationFloor) || explorationFloor <= 0) {
+                throw new IllegalArgumentException(
+                        "engine.exploration-floor must be a finite number > 0, but was " + explorationFloor);
+            }
+        }
+
+        private static void requireAtLeastOne(int value, String name) {
+            if (value < 1) {
+                throw new IllegalArgumentException(name + " must be >= 1, but was " + value);
+            }
+        }
+    }
 
     /**
      * Audit-trail retention. {@code retention} is opt-in: a zero (the {@code P0D} default) or negative
@@ -201,6 +249,56 @@ public record ReputationPoolProperties(
         private static void requirePositiveFinite(double value, String name) {
             if (!Double.isFinite(value) || value <= 0) {
                 throw new IllegalArgumentException(name + " must be a finite number > 0, but was " + value);
+            }
+        }
+    }
+
+    /**
+     * How far a per-tenant engine policy may depart from this instance's own {@link Engine}/{@link
+     * #leaseTtl()} defaults (issue #179). Opening the engine knobs to tenants opens a multiplier
+     * {@link Limits} cannot see, because {@link Limits} counts cells and a cell is not a fixed-cost
+     * thing: it retains {@code windowSize} outcomes, and the persistence adapter writes <em>one
+     * {@code cell_outcome} row per window entry per cell</em>, deleting and rewriting all of them on
+     * every checkpoint ({@link #checkpointInterval()}, default 30s). So {@code windowSize} scales an
+     * instance's checkpoint write volume linearly — while, as of core 0.5.0, <em>no state transition
+     * reads the window at all</em> (cooling and recovery are decided by the cell's scalar consecutive
+     * counters). This is the bound that closes that gap, enforced when a policy is written rather than
+     * when a pool is built. See {@code EnginePolicyCeiling} for the full derivation.
+     *
+     * <p>Deliberately a <em>multiple of the configured default</em> rather than a slice of {@link Limits}.
+     * Dividing the global budget by the active tenant count is exactly what
+     * {@link io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget} refused to do: it would
+     * cap a lone tenant below the capacity it may use, and would make every stored policy's validity a
+     * function of how many tenants happen to exist right now. A multiple of static configuration still
+     * varies per instance — a smaller instance tuned down to {@code window-size: 5} caps its tenants at
+     * 50 where a larger one at {@code 20} caps them at 200 — with nothing to recompute when tenants come
+     * and go. The full derivation, including why {@code max-cells} cancels out of it, is on
+     * {@code EnginePolicyCeiling}.
+     *
+     * <p><b>The default is an unmeasured hypothesis</b>, like {@link Limits}': no load test says 10× the
+     * instance default is where an instance starts to hurt. It exists so the knobs are bounded rather
+     * than open, and is configurable so it can be retuned once real per-cell footprint is observed.
+     *
+     * @param maxMultipleOfDefault the multiple of each configured default a tenant policy may reach
+     *     (inclusive); the cooldown exponent is additionally clamped to upstream's hard maximum
+     */
+    public record PolicyCeiling(@DefaultValue("10") int maxMultipleOfDefault) {
+
+        /** The largest multiple accepted, so scaling a default can never overflow into a nonsense bound. */
+        public static final int MAX_MULTIPLE = 1_000;
+
+        /**
+         * Fail fast on misconfiguration, the same posture as {@link Limits}. A multiple below 1 would put
+         * the ceiling under this instance's own default and refuse a policy identical to what every
+         * tenant already runs; an unbounded one would overflow the scaled {@link Duration} bound. Turning
+         * the ceiling off is not a supported configuration — that is what the bound exists to prevent.
+         *
+         * @throws IllegalArgumentException if the multiple is outside {@code [1, MAX_MULTIPLE]}
+         */
+        public PolicyCeiling {
+            if (maxMultipleOfDefault < 1 || maxMultipleOfDefault > MAX_MULTIPLE) {
+                throw new IllegalArgumentException("policy-ceiling.max-multiple-of-default must be in [1, "
+                        + MAX_MULTIPLE + "], but was " + maxMultipleOfDefault);
             }
         }
     }

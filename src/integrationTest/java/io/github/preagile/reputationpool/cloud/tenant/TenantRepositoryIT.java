@@ -73,12 +73,15 @@ class TenantRepositoryIT {
         seedApiKey("delco");
         seedUsageMeter("delco");
         seedScoreSample("delco");
+        seedEnginePolicy("delco");
         // Sanity: the scoped rows exist before delete.
         assertThat(rowCount("SELECT count(*) FROM api_key WHERE tenant_id = 'delco'"))
                 .isEqualTo(1);
         assertThat(rowCount("SELECT count(*) FROM usage_meter WHERE tenant_id = 'delco'"))
                 .isEqualTo(1);
         assertThat(rowCount("SELECT count(*) FROM score_sample WHERE tenant_id = 'delco'"))
+                .isEqualTo(1);
+        assertThat(rowCount("SELECT count(*) FROM tenant_engine_policy WHERE tenant_id = 'delco'"))
                 .isEqualTo(1);
 
         // deleteTenantData executes all ten scoped DELETEs against the real schema in one transaction —
@@ -92,6 +95,11 @@ class TenantRepositoryIT {
         assertThat(rowCount("SELECT count(*) FROM usage_meter WHERE tenant_id = 'delco'"))
                 .isZero();
         assertThat(rowCount("SELECT count(*) FROM score_sample WHERE tenant_id = 'delco'"))
+                .isZero();
+        // The tenant row is tombstoned rather than deleted, so tenant_engine_policy's foreign key never
+        // cascades (#179). Left in the table, a policy row would outlive its tenant and be resurrected by
+        // a later tenant created under the same id — which is why the cascade lists it explicitly.
+        assertThat(rowCount("SELECT count(*) FROM tenant_engine_policy WHERE tenant_id = 'delco'"))
                 .isZero();
         // The tenant row survives as a DELETED tombstone (soft), so the deletion stays auditable.
         assertThat(repository.findById("delco"))
@@ -131,6 +139,18 @@ class TenantRepositoryIT {
                 PreparedStatement s = c.prepareStatement(
                         "INSERT INTO score_sample (tenant_id, resource_kind, resource_value, context, sampled_at, score)"
                                 + " VALUES (?, 'PROXY', 'p1', 'GLOBAL', ?, 0.5)")) {
+            s.setString(1, tenantId);
+            s.setTimestamp(2, Timestamp.from(Instant.parse("2026-07-17T00:00:00Z")));
+            s.executeUpdate();
+        }
+    }
+
+    private void seedEnginePolicy(String tenantId) throws Exception {
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement s = c.prepareStatement(
+                        "INSERT INTO tenant_engine_policy (tenant_id, revision, window_size, cool_after,"
+                                + " recover_after, lease_ttl_millis, cooldown_max_exponent, exploration_floor,"
+                                + " changed_by, changed_at) VALUES (?, 1, 10, 2, 2, 30000, 6, 1.0, 'admin', ?)")) {
             s.setString(1, tenantId);
             s.setTimestamp(2, Timestamp.from(Instant.parse("2026-07-17T00:00:00Z")));
             s.executeUpdate();

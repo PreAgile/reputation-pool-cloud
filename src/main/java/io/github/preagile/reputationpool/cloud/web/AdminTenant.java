@@ -25,6 +25,21 @@ final class AdminTenant {
     }
 
     /**
+     * The admin the token was issued to, for attributing a change to a person (issue #179's policy
+     * history). Taken from the validated token's subject, never from the request — the same rule the
+     * {@code tenant} claim follows, and for the same reason: an audit line a caller can write is not one.
+     * This <em>records</em> who acted; it never decides what they may do — that stays
+     * {@link #requireScope(Jwt, String)}'s job.
+     */
+    static String subjectOf(Jwt jwt) {
+        String subject = jwt.getSubject();
+        if (subject == null || subject.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "token is not bound to a subject");
+        }
+        return subject;
+    }
+
+    /**
      * Guards a write against the token's tenant scope: if {@code targetTenant} is outside the tenant the
      * token is bound to, reject with 403. Reuses {@link #of(Jwt)} so a token missing the {@code tenant}
      * claim also fails closed. The reason is a generic {@code "forbidden"} on purpose — a scoped 403 must
