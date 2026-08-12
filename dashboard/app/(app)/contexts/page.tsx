@@ -16,8 +16,12 @@ import { cn } from "@/lib/cn";
 import type {
   ContextDetail,
   ContextHistory,
+  ContextOutcomeHistory,
   ContextOverview,
   ContextSummary,
+  FailureBreakdown,
+  FailureType,
+  OutcomeTotals,
   ResourceState,
 } from "@/lib/types";
 import { Card } from "@/components/ui/card";
@@ -26,6 +30,7 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/status-badge";
 import { Sparkline } from "@/components/sparkline";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DateRangePicker, RANGE_PRESETS, type RangePreset } from "@/components/ui/date-range-picker";
 import { usePoll } from "@/lib/use-poll";
 
@@ -53,11 +58,34 @@ const MAX_SERIES = SERIES_TOKENS.length;
 /** 이 시간 넘게 갱신이 없으면 "조용함"으로 표시한다. 고장 판정이 아니라 눈에 띄게 하는 장치. */
 const QUIET_AFTER_MS = 24 * 3600 * 1000;
 
-/** 차트가 먹는 wide 행: ms 타임스탬프 + 컨텍스트별 평균 점수. */
+/** 차트가 먹는 wide 행: ms 타임스탬프 + 컨텍스트별 값. */
 type ChartRow = { t: number } & Record<string, number>;
+
+/**
+ * 곡선이 그리는 지표. 차트를 하나 더 붙이는 대신 같은 차트를 전환한다 — 콘솔 디자인 2항("차트를 늘려서
+ * 정보량을 늘리지 않는다"). 두 지표는 같은 축(컨텍스트 × 시간)을 공유하므로 나란히 놓을 이유가 없다.
+ */
+const METRICS = {
+  score: { label: "평균 평판", heading: "컨텍스트별 평균 평판" },
+  successRate: { label: "성공률", heading: "컨텍스트별 성공률" },
+} as const;
+type Metric = keyof typeof METRICS;
+
+/** 실패 종류 표기 순서 — 세로로 비교되므로 응답 순서가 아니라 이 순서로 고정한다. */
+const FAILURE_TYPES: FailureType[] = ["BLOCKED", "TIMEOUT", "SLOW", "CONNECTION_RESET", "TLS_HANDSHAKE"];
 
 function fmtScore(n: number): string {
   return n.toFixed(2);
+}
+
+/** 성공률은 비율(0~1)로 오므로 화면에서만 백분율로 바꾼다. */
+function fmtRate(n: number): string {
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+/** 지표별 값 표기 — 툴팁과 Y축이 같은 함수를 쓴다(같은 수가 두 곳에서 다르게 보이지 않게). */
+function fmtMetric(metric: Metric, n: number): string {
+  return metric === "successRate" ? fmtRate(n) : fmtScore(n);
 }
 
 function fmtNum(n: number): string {
@@ -117,8 +145,8 @@ function StateBar({ byState, total }: { byState: Record<ResourceState, number>; 
   );
 }
 
-/** 곡선 툴팁: 그 시각의 모든 컨텍스트를 점수 내림차순으로. 값은 텍스트 토큰, 색은 점이 진다. */
-function CurveTooltip({ active, payload, label }: TooltipProps<number, string>) {
+/** 곡선 툴팁: 그 시각의 모든 컨텍스트를 값 내림차순으로. 값은 텍스트 토큰, 색은 점이 진다. */
+function CurveTooltip({ active, payload, label, metric = "score" }: TooltipProps<number, string> & { metric?: Metric }) {
   if (!active || !payload?.length) return null;
   const rows = [...payload]
     .filter((p) => typeof p.value === "number")
@@ -131,7 +159,7 @@ function CurveTooltip({ active, payload, label }: TooltipProps<number, string>) 
           <div key={r.dataKey as string} className="flex items-center gap-2">
             <span className="size-2 shrink-0 rounded-full" style={{ background: r.color }} />
             <span className="text-ink">{r.dataKey as string}</span>
-            <span className="ml-auto pl-3 font-mono tnum text-ink">{fmtScore(Number(r.value))}</span>
+            <span className="ml-auto pl-3 font-mono tnum text-ink">{fmtMetric(metric, Number(r.value))}</span>
           </div>
         ))}
       </div>
@@ -139,9 +167,48 @@ function CurveTooltip({ active, payload, label }: TooltipProps<number, string>) 
   );
 }
 
+/** 실패 건수를 많은 순으로. 전부 0이면 빈 배열이라 호출부가 "실패 없음"을 그대로 표현할 수 있다. */
+function rankFailures(failures: FailureBreakdown): { type: FailureType; count: number }[] {
+  return FAILURE_TYPES.map((type) => ({ type, count: failures[type] ?? 0 }))
+    .filter((f) => f.count > 0)
+    .sort((a, b) => b.count - a.count);
+}
+
+/**
+ * 성공률 셀. 운영자에게 쓸모 있는 문장은 "성공률 62%" 가 아니라 **"성공률 62%, 실패의 80%가 BLOCKED"**
+ * 다 — 사이트가 막은 것과 전송이 나쁜 것은 대응이 전혀 다르기 때문이다. 그래서 비율 아래에 지배적인
+ * 실패 종류를 한 줄로 붙이고, 전체 분해는 title 로 넘긴다(행 높이를 늘리지 않는다).
+ *
+ * 색으로 좋고 나쁨을 판정하지 않는다. 컨텍스트마다 정상 성공률이 다르고(주 1회 도는 잡, 원래 막히는
+ * 사이트), 읽기 모델은 호출자의 기대치를 알 수 없다 — 조용함을 판정하지 않고 시각만 싣는 것과 같은 이유다.
+ */
+function SuccessRateCell({ totals }: { totals: OutcomeTotals | undefined }) {
+  if (!totals || totals.successRate === null) {
+    // null 은 0% 가 아니라 "이 창에 보고가 없었다" 다. 0.0% 로 그리면 정반대 상황으로 읽힌다.
+    return <span className="text-muted">—</span>;
+  }
+  const ranked = rankFailures(totals.failures);
+  const top = ranked[0];
+  const breakdown = ranked.length
+    ? ranked.map((f) => `${f.type} ${fmtNum(f.count)}`).join(" · ")
+    : "실패 없음";
+  return (
+    <span className="inline-flex flex-col items-end" title={`성공 ${fmtNum(totals.success)} · ${breakdown}`}>
+      <span className="tnum font-mono text-ink">{fmtRate(totals.successRate)}</span>
+      {top && (
+        <span className="tnum text-xs text-muted">
+          실패 {Math.round((top.count / totals.failure) * 100)}% {top.type}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function ContextsPage() {
   const [overview, setOverview] = useState<ContextOverview | null>(null);
   const [history, setHistory] = useState<ContextHistory | null>(null);
+  const [outcomes, setOutcomes] = useState<ContextOutcomeHistory | null>(null);
+  const [metric, setMetric] = useState<Metric>("score");
   const [detail, setDetail] = useState<ContextDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -176,6 +243,26 @@ export default function ContextsPage() {
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
+
+  // 성공률 응답을 그것을 요청한 창(hours)에 묶는다. 기간을 바꾸면 이전 창의 값을 먼저 버리는데, 화면의
+  // 라벨("성공률 · 최근 90일")은 즉시 새 기간으로 바뀌기 때문이다 — 옛 숫자를 새 라벨 옆에 남기면 그건
+  // 로딩이 아니라 오독이다. 그리고 앞선 요청이 뒤늦게 도착해 최신 결과를 덮어쓰지 못하게 무시한다(창이
+  // 넓을수록 응답이 느리므로 90일 → 7일 전환에서 실제로 역전된다). 선택 컨텍스트 상세와 같은 방식.
+  useEffect(() => {
+    let live = true;
+    setOutcomes(null);
+    api<ContextOutcomeHistory>(`/contexts/success-rate?hours=${range.hours}`)
+      .then((data) => {
+        if (live) setOutcomes(data);
+      })
+      .catch(() => {
+        // 성공률은 보조 정보다 — 없으면 표의 성공률 열이 "—" 가 되고 나머지는 그대로 읽힌다.
+        if (live) setOutcomes(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [range.hours]);
 
   usePoll(() => void loadOverview(), POLL_MS, true);
 
@@ -233,26 +320,54 @@ export default function ContextsPage() {
   );
   const foldedAway = contexts.length - charted.length;
 
+  /** 컨텍스트 → 그 창의 성공률 합계. 표의 성공률 열이 컨텍스트당 한 번만 찾도록 미리 맵으로 만든다. */
+  const totalsByContext = useMemo(() => {
+    const map = new Map<string, OutcomeTotals>();
+    for (const series of outcomes?.contexts ?? []) map.set(series.context, series.totals);
+    return map;
+  }, [outcomes]);
+
   // 컨텍스트별 시계열 → 하나의 wide 행 배열(시각 오름차순). 버킷 시각이 서로 어긋나도 합쳐진다.
+  // 두 지표는 서로 다른 롤업에서 오므로(점수는 샘플 롤업, 성공률은 카운트 롤업) 선택된 쪽만 접는다.
   const chartRows = useMemo(() => {
-    if (!history) return [] as ChartRow[];
     const byTime = new Map<number, ChartRow>();
-    for (const series of history.contexts) {
-      if (!charted.includes(series.context)) continue;
-      for (const p of series.points) {
-        const t = new Date(p.at).getTime();
-        if (Number.isNaN(t)) continue;
-        const row = byTime.get(t) ?? ({ t } as ChartRow);
-        row[series.context] = Number(p.averageScore.toFixed(4));
-        byTime.set(t, row);
+    const put = (context: string, at: string, value: number | null) => {
+      if (value === null || !charted.includes(context)) return;
+      const t = new Date(at).getTime();
+      if (Number.isNaN(t)) return;
+      const row = byTime.get(t) ?? ({ t } as ChartRow);
+      row[context] = Number(value.toFixed(4));
+      byTime.set(t, row);
+    };
+    if (metric === "successRate") {
+      for (const series of outcomes?.contexts ?? []) {
+        // successRate 가 null 인 시간(그 시간에 보고가 없었다)은 점을 찍지 않는다 — 0% 로 그리면
+        // "전부 실패" 로 읽히고, connectNulls 가 앞뒤를 이어 주므로 곡선은 끊기지 않는다.
+        for (const p of series.points) put(series.context, p.at, p.successRate);
+      }
+    } else {
+      for (const series of history?.contexts ?? []) {
+        for (const p of series.points) put(series.context, p.at, p.averageScore);
       }
     }
     return [...byTime.values()].sort((a, b) => a.t - b.t);
-  }, [history, charted]);
+  }, [history, outcomes, metric, charted]);
 
   const totalCells = contexts.reduce((sum, c) => sum + c.cells, 0);
   const quietCount = contexts.filter((c) => isQuiet(c.lastUpdatedAt, now)).length;
   const hasCurve = chartRows.length > 1 && charted.length > 0;
+
+  /** 테넌트 전체 성공률(선택 기간). 컨텍스트별 비율의 평균이 아니라 건수 합으로 낸다 — 보고량이 적은
+   * 컨텍스트가 100% 라고 전체를 끌어올리면 안 되기 때문이다. */
+  const overallRate = useMemo(() => {
+    let success = 0;
+    let failure = 0;
+    for (const series of outcomes?.contexts ?? []) {
+      success += series.totals.success;
+      failure += series.totals.failure;
+    }
+    return success + failure === 0 ? null : success / (success + failure);
+  }, [outcomes]);
 
   if (error && !overview) {
     return (
@@ -297,17 +412,35 @@ export default function ContextsPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader />
 
-      <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="컨텍스트 수" value={fmtNum(contexts.length)} accent />
         <StatTile label="전체 셀 수" value={fmtNum(totalCells)} />
+        <StatTile
+          label={`성공률 · ${range.label}`}
+          value={overallRate === null ? "—" : fmtRate(overallRate)}
+        />
         <StatTile label="24시간 넘게 조용한 컨텍스트" value={fmtNum(quietCount)} />
       </section>
 
-      {/* 컨텍스트별 평판 추이 — 시간 롤업에서 읽으므로 90일까지 열려 있다. */}
+      {/* 컨텍스트별 추이 — 시간 롤업에서 읽으므로 90일까지 열려 있다. 차트를 하나 더 두는 대신
+          지표를 전환한다(콘솔 디자인 2항). */}
       <section className="mb-6">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-bold text-ink">컨텍스트별 평균 평판 · {range.label}</h2>
-          <DateRangePicker value={range} onChange={setRange} label="추이 기간 선택" />
+          <h2 className="text-sm font-bold text-ink">
+            {METRICS[metric].heading} · {range.label}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <Tabs value={metric} onValueChange={(v) => setMetric(v as Metric)}>
+              <TabsList aria-label="추이 지표 선택">
+                {(Object.keys(METRICS) as Metric[]).map((m) => (
+                  <TabsTrigger key={m} value={m}>
+                    {METRICS[m].label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <DateRangePicker value={range} onChange={setRange} label="추이 기간 선택" />
+          </div>
         </div>
         <Card className="p-4">
           {hasCurve ? (
@@ -338,13 +471,18 @@ export default function ContextsPage() {
                       minTickGap={48}
                     />
                     <YAxis
-                      domain={["auto", "auto"]}
+                      // 성공률은 0~100% 로 고정한다 — auto 로 두면 62~64% 구간이 화면 전체로 늘어나
+                      // 소폭 변동이 붕괴처럼 보인다. 점수는 범위가 데이터마다 달라 auto 를 유지한다.
+                      domain={metric === "successRate" ? [0, 1] : ["auto", "auto"]}
                       tick={{ fill: "var(--muted)", fontSize: 11 }}
                       stroke="var(--line)"
                       width={44}
-                      tickFormatter={(v) => fmtScore(v as number)}
+                      tickFormatter={(v) => fmtMetric(metric, v as number)}
                     />
-                    <Tooltip content={<CurveTooltip />} cursor={{ stroke: "var(--muted)", strokeWidth: 1 }} />
+                    <Tooltip
+                      content={<CurveTooltip metric={metric} />}
+                      cursor={{ stroke: "var(--muted)", strokeWidth: 1 }}
+                    />
                     {charted.map((context) => (
                       <Line
                         key={context}
@@ -389,6 +527,7 @@ export default function ContextsPage() {
                   <th className="px-4 py-2.5 text-right font-bold">셀</th>
                   <th className="px-4 py-2.5 font-bold">상태</th>
                   <th className="px-4 py-2.5 font-bold">분포</th>
+                  <th className="px-4 py-2.5 text-right font-bold">성공률</th>
                   <th className="px-4 py-2.5 text-right font-bold">평균</th>
                   <th className="px-4 py-2.5 text-right font-bold">최저</th>
                   <th className="px-4 py-2.5 font-bold">마지막 활동</th>
@@ -399,6 +538,7 @@ export default function ContextsPage() {
                   <ContextRow
                     key={c.context}
                     summary={c}
+                    totals={totalsByContext.get(c.context)}
                     color={colorOf(c.context)}
                     now={now}
                     selected={selected === c.context}
@@ -488,12 +628,14 @@ export default function ContextsPage() {
 
 function ContextRow({
   summary,
+  totals,
   color,
   now,
   selected,
   onSelect,
 }: {
   summary: ContextSummary;
+  totals: OutcomeTotals | undefined;
   color: string;
   now: number;
   selected: boolean;
@@ -520,6 +662,9 @@ function ContextRow({
       </td>
       <td className="px-4 py-2.5">
         <StateBar byState={summary.cellsByState} total={summary.cells} />
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <SuccessRateCell totals={totals} />
       </td>
       <td className="tnum px-4 py-2.5 text-right font-mono text-ink">{fmtScore(summary.averageScore)}</td>
       <td className="tnum px-4 py-2.5 text-right font-mono text-muted">{fmtScore(summary.worstScore)}</td>

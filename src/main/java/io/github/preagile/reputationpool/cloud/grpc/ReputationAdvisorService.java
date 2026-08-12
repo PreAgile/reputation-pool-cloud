@@ -2,9 +2,12 @@ package io.github.preagile.reputationpool.cloud.grpc;
 
 import io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget;
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
+import io.github.preagile.reputationpool.cloud.metering.OutcomeRecorder;
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
 import io.github.preagile.reputationpool.core.domain.CellKey;
 import io.github.preagile.reputationpool.core.domain.Context;
+import io.github.preagile.reputationpool.core.domain.FailureType;
+import io.github.preagile.reputationpool.core.domain.Outcome;
 import io.github.preagile.reputationpool.core.domain.ResourceId;
 import io.github.preagile.reputationpool.core.domain.ResourceKind;
 import io.github.preagile.reputationpool.core.pool.ResourcePool;
@@ -16,6 +19,10 @@ import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ReportRequest;
 import io.github.preagile.reputationpool.grpc.v1.AdvisorProto.ReportResponse;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.Optional;
 import net.devh.boot.grpc.server.service.GrpcService;
@@ -55,18 +62,34 @@ import net.devh.boot.grpc.server.service.GrpcService;
  * <p>This is a deliberately global — not per-tenant — budget: see {@link GlobalResourceBudget}'s javadoc
  * for why a single running total lets one tenant use 100% of it alone while several tenants share it
  * dynamically, with no per-tenant quota ever computed.
+ *
+ * <p><b>Per-context success rate (#189).</b> {@code report()} is also where every outcome is counted into
+ * {@link OutcomeRecorder}. It has to be here and nowhere else: the engine's score cannot be inverted into
+ * a ratio (successes and each failure kind move it by different amounts, and it clamps), and the audit
+ * trail only records <em>transitions</em> — an ordinary success, and a failure that did not trip a
+ * cooldown, leave no event at all. This override is the one place in the system where every single report
+ * is visible together with its {@code Outcome}. Counting is an in-memory {@link java.util.concurrent.atomic.LongAdder}
+ * increment, so it adds no I/O to the hottest RPC cloud serves; {@code OutcomeRollup} does the writing.
  */
 @GrpcService
 public class ReputationAdvisorService extends io.github.preagile.reputationpool.grpc.ReputationAdvisorService {
 
     private final TenantPoolRegistry registry;
     private final GlobalResourceBudget budget;
+    private final OutcomeRecorder outcomes;
+    private final Clock clock;
 
     public ReputationAdvisorService(
-            TenantPoolRegistry registry, EventBroadcaster broadcaster, GlobalResourceBudget budget) {
+            TenantPoolRegistry registry,
+            EventBroadcaster broadcaster,
+            GlobalResourceBudget budget,
+            OutcomeRecorder outcomes,
+            Clock clock) {
         super(broadcaster);
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
         this.budget = Objects.requireNonNull(budget, "budget must not be null");
+        this.outcomes = Objects.requireNonNull(outcomes, "outcomes must not be null");
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
     /**
@@ -141,6 +164,14 @@ public class ReputationAdvisorService extends io.github.preagile.reputationpool.
      * RESOURCE_EXHAUSTED} and {@code super.report} (hence core) is never reached. Reporting on an
      * already-known cell is never budget-checked. Same decode fallback as {@link #register} for the same
      * reason.
+     *
+     * <p><b>Outcome counting (#189)</b> happens after the budget gate and before delegating, and only when
+     * the resource, the context <em>and</em> the outcome all decode — where "the outcome decodes" means
+     * the very domain object the base builds actually constructs ({@link #tryDecodeOutcome}), so a latency
+     * core would refuse is refused here too. That placement is the definition of what the success rate
+     * counts: a report refused by the budget returned above and never happened, and a malformed one is
+     * rejected by the base's decode path without ever reaching core — neither belongs in a ratio
+     * describing the tenant's traffic. Everything that gets past this line does reach the engine.
      */
     @Override
     public void report(ReportRequest request, StreamObserver<ReportResponse> observer) {
@@ -155,8 +186,87 @@ public class ReputationAdvisorService extends io.github.preagile.reputationpool.
                         .asRuntimeException());
                 return;
             }
+            countOutcome(resource.get(), context.get(), request.getOutcome());
         }
         super.report(request, observer);
+    }
+
+    /**
+     * Counts one report into the tenant's hourly bucket. The tenant comes from the gRPC context (the
+     * auth interceptor's, never the request), and the hour is stamped <em>now</em> rather than at flush
+     * time so a report at 10:59 lands in the 10:00 bucket even if the flush runs at 11:00.
+     *
+     * <p>An outcome the base's decode would reject is skipped, because such a report never becomes a
+     * reputation observation and must not become a counted one either. Deciding that by <em>building the
+     * domain {@link Outcome}</em> rather than by restating the rules is what keeps the two in step: the
+     * kind not being set and an {@code UNSPECIFIED}/unrecognized failure type are visible on the wire, but
+     * a negative latency is not — only {@code Outcome.Success}/{@code Outcome.Failure}'s own constructor
+     * knows about it, and it answers {@code INVALID_ARGUMENT}.
+     */
+    private void countOutcome(ResourceId resource, Context context, AdvisorProto.Outcome outcome) {
+        String tenantId = TenantContext.TENANT_ID.get();
+        if (tenantId == null || tenantId.isBlank()) {
+            return; // pool() above would already have thrown; kept total so counting never fails a call
+        }
+        Outcome decoded = tryDecodeOutcome(outcome);
+        if (decoded == null) {
+            return; // core would refuse it — not a reputation observation, so not a counted one
+        }
+        Instant bucketHour = clock.instant().truncatedTo(ChronoUnit.HOURS);
+        // sealed Outcome 위의 switch 라 default 가 없어도 망라적이다 — 케이스가 늘면 컴파일이 먼저 깨진다.
+        switch (decoded) {
+            case Outcome.Success ignored ->
+                outcomes.recordSuccess(tenantId, context.value(), resource.kind(), bucketHour);
+            case Outcome.Failure failure ->
+                outcomes.recordFailure(tenantId, context.value(), resource.kind(), bucketHour, failure.type());
+        }
+    }
+
+    /**
+     * Best-effort decode of the wire outcome into the domain object the base module's {@code ProtoMapping}
+     * builds, so the count gate inherits core's validation instead of restating it; null whenever that
+     * construction would fail — no kind set, a failure type the wire does not classify, or a latency that
+     * is negative or not representable as a {@link Duration}. Each of those is turned into {@code
+     * INVALID_ARGUMENT} by the base before core sees the report.
+     *
+     * <p>The decoded value is deliberately thrown away afterwards: {@code super.report} decodes the
+     * request again for real. Counting is an in-memory increment on the hottest RPC cloud serves, and one
+     * extra record allocation is a far cheaper price than counting reports the engine never accepted.
+     */
+    private static Outcome tryDecodeOutcome(AdvisorProto.Outcome outcome) {
+        try {
+            return switch (outcome.getKindCase()) {
+                case SUCCESS ->
+                    new Outcome.Success(durationOf(outcome.getSuccess().getLatency()));
+                case FAILURE -> {
+                    FailureType type = tryDecodeFailureType(outcome.getFailure().getType());
+                    yield type == null
+                            ? null
+                            : new Outcome.Failure(
+                                    type, durationOf(outcome.getFailure().getLatency()));
+                }
+                case KIND_NOT_SET -> null;
+            };
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** The base module's package-private wire-duration conversion, mirrored for the decode above. */
+    private static Duration durationOf(com.google.protobuf.Duration duration) {
+        return Duration.ofSeconds(duration.getSeconds(), duration.getNanos());
+    }
+
+    /** Wire decode of the failure classification; null when the caller sent no usable type. */
+    private static FailureType tryDecodeFailureType(AdvisorProto.FailureType type) {
+        return switch (type) {
+            case CONNECTION_RESET -> FailureType.CONNECTION_RESET;
+            case TLS_HANDSHAKE -> FailureType.TLS_HANDSHAKE;
+            case TIMEOUT -> FailureType.TIMEOUT;
+            case BLOCKED -> FailureType.BLOCKED;
+            case SLOW -> FailureType.SLOW;
+            case FAILURE_TYPE_UNSPECIFIED, UNRECOGNIZED -> null;
+        };
     }
 
     /** Best-effort wire decode of just the resource id, for the presence check above; empty on malformed input. */

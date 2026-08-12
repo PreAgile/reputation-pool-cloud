@@ -15,6 +15,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param audit audit-trail retention configuration
  * @param metering usage-metering rollup configuration
  * @param score reputation-score time-series sampling configuration
+ * @param outcome per-context report-outcome rollup configuration (issue #189)
  * @param limits the shared-JVM global resource budget (issue #84)
  * @param surgeThresholds the domain-surge alert thresholds published as gauges (issue #77)
  */
@@ -26,6 +27,7 @@ public record ReputationPoolProperties(
         @DefaultValue Audit audit,
         @DefaultValue Metering metering,
         @DefaultValue Score score,
+        @DefaultValue Outcome outcome,
         @DefaultValue Limits limits,
         @DefaultValue SurgeThresholds surgeThresholds) {
 
@@ -102,6 +104,37 @@ public record ReputationPoolProperties(
 
         private static boolean positive(Duration duration) {
             return duration != null && !duration.isZero() && !duration.isNegative();
+        }
+    }
+
+    /**
+     * Per-context report-outcome rollup (issue #189). Every {@code Report} that passes cloud's gRPC
+     * boundary is counted in memory by {@code OutcomeRecorder} and folded into
+     * {@code report_outcome_hourly} every {@code flushInterval} by {@code OutcomeRollup} — the only place
+     * a success rate can be computed at all, since score cannot be inverted into one and the audit trail
+     * records transitions rather than reports.
+     *
+     * <p><b>Retention is a year, deliberately longer than everything else cloud keeps</b> ({@link Score}'s
+     * rollup is a quarter, the raw samples a week, and the audit trail is opt-in). Two reasons. The table
+     * is the cheapest thing here — its grain is (tenant × context × resource kind × hour), so even a
+     * tenant running 20 contexts across all three kinds writes at most 60 rows an hour, roughly 0.5M rows
+     * a year — and it is <em>irreplaceable</em>: the individual reports behind it are never stored, so a
+     * purged bucket cannot be recomputed from anything. A year is what makes a year-over-year comparison
+     * possible; a zero or negative value disables purging for callers who want to keep everything.
+     *
+     * @param flushInterval how often accumulated in-memory outcome counts are flushed to
+     *     {@code report_outcome_hourly}; a shorter interval narrows the window of counts lost on a crash
+     * @param retention how much hourly outcome history to keep; {@code <= 0} disables purging
+     * @param purgeInterval how often the retention purge runs
+     */
+    public record Outcome(
+            @DefaultValue("PT1M") Duration flushInterval,
+            @DefaultValue("P365D") Duration retention,
+            @DefaultValue("PT1H") Duration purgeInterval) {
+
+        /** Whether age-based purging is turned on (a positive retention was configured). */
+        public boolean purgeEnabled() {
+            return retention != null && !retention.isZero() && !retention.isNegative();
         }
     }
 

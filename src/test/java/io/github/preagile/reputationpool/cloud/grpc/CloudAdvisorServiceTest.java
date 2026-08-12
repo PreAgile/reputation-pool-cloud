@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget;
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
+import io.github.preagile.reputationpool.cloud.metering.OutcomeRecorder;
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
 import io.github.preagile.reputationpool.core.engine.AdaptiveCooldownPolicy;
 import io.github.preagile.reputationpool.core.engine.ReputationEngine;
@@ -107,7 +108,9 @@ class CloudAdvisorServiceTest {
 
     @BeforeEach
     void startServer() throws Exception {
-        ReputationAdvisorService service = new ReputationAdvisorService(registry, new EventBroadcaster(), budget);
+        // 풀과 같은 고정 시계를 쓴다 — 한 테스트 안에 시간원이 둘이면 버킷 경계가 결정적이지 않다.
+        ReputationAdvisorService service =
+                new ReputationAdvisorService(registry, new EventBroadcaster(), budget, new OutcomeRecorder(), clock);
         String name = InProcessServerBuilder.generateName();
         server = InProcessServerBuilder.forName(name)
                 .directExecutor()
