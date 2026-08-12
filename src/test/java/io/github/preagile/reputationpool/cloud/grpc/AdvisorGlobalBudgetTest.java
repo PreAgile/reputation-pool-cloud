@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget;
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
+import io.github.preagile.reputationpool.cloud.metering.OutcomeRecorder;
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
 import io.github.preagile.reputationpool.core.domain.Blocklist;
 import io.github.preagile.reputationpool.core.domain.CellKey;
@@ -39,6 +40,7 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.MetadataUtils;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
@@ -80,7 +82,8 @@ class AdvisorGlobalBudgetTest {
     };
 
     private void startServerWith(TenantPoolRegistry registry, GlobalResourceBudget budget) throws Exception {
-        ReputationAdvisorService service = new ReputationAdvisorService(registry, new EventBroadcaster(), budget);
+        ReputationAdvisorService service = new ReputationAdvisorService(
+                registry, new EventBroadcaster(), budget, new OutcomeRecorder(), Clock.systemUTC());
         String name = InProcessServerBuilder.generateName();
         server = InProcessServerBuilder.forName(name)
                 .directExecutor()

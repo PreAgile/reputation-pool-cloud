@@ -13,6 +13,7 @@ import type {
   ContextOverview,
   ContextDetail,
   ContextHistory,
+  ContextOutcomeHistory,
 } from "../lib/types";
 
 export const overviewFixture: PoolOverview = {
@@ -223,6 +224,65 @@ export const contextHistoryFixture: ContextHistory = {
       points: [
         { at: "2026-08-11T02:00:00Z", averageScore: 0.75, minScore: 0.6, maxScore: 0.9, cells: 5 },
         { at: "2026-08-11T03:00:00Z", averageScore: 0.74, minScore: 0.6, maxScore: 0.9, cells: 5 },
+      ],
+    },
+  ],
+};
+
+/**
+ * 컨텍스트별 성공률(#189). BAEMIN 은 실패가 BLOCKED 에 몰린 62% — "느린 게 아니라 막힌 것"이 한눈에
+ * 읽혀야 하는 케이스다. CPEATS 는 같은 창에서 100% 지만 보고량 자체가 적다.
+ */
+export const contextOutcomeFixture: ContextOutcomeHistory = {
+  contexts: [
+    {
+      context: "BAEMIN",
+      totals: {
+        success: 620,
+        failure: 380,
+        successRate: 0.62,
+        failures: { BLOCKED: 304, TIMEOUT: 50, SLOW: 20, CONNECTION_RESET: 6, TLS_HANDSHAKE: 0 },
+      },
+      points: [
+        {
+          at: "2026-08-11T02:00:00Z",
+          success: 320,
+          failure: 180,
+          successRate: 0.64,
+          failures: { BLOCKED: 144, TIMEOUT: 24, SLOW: 10, CONNECTION_RESET: 2, TLS_HANDSHAKE: 0 },
+        },
+        {
+          at: "2026-08-11T03:00:00Z",
+          success: 300,
+          failure: 200,
+          successRate: 0.6,
+          failures: { BLOCKED: 160, TIMEOUT: 26, SLOW: 10, CONNECTION_RESET: 4, TLS_HANDSHAKE: 0 },
+        },
+      ],
+    },
+    {
+      context: "CPEATS",
+      totals: {
+        success: 40,
+        failure: 0,
+        successRate: 1,
+        failures: { BLOCKED: 0, TIMEOUT: 0, SLOW: 0, CONNECTION_RESET: 0, TLS_HANDSHAKE: 0 },
+      },
+      points: [
+        {
+          at: "2026-08-11T02:00:00Z",
+          success: 20,
+          failure: 0,
+          successRate: 1,
+          failures: { BLOCKED: 0, TIMEOUT: 0, SLOW: 0, CONNECTION_RESET: 0, TLS_HANDSHAKE: 0 },
+        },
+        {
+          at: "2026-08-11T03:00:00Z",
+          success: 20,
+          failure: 0,
+          successRate: 1,
+          failures: { BLOCKED: 0, TIMEOUT: 0, SLOW: 0, CONNECTION_RESET: 0, TLS_HANDSHAKE: 0 },
+        },
       ],
     },
   ],

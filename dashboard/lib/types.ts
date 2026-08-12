@@ -130,6 +130,38 @@ export interface ContextHistory {
   }[];
 }
 
+/** 엔진이 인정하는 실패 분류(core FailureType 과 1:1). 성공률을 "왜 나빠졌나"까지 읽게 하는 축. */
+export type FailureType = "CONNECTION_RESET" | "TLS_HANDSHAKE" | "TIMEOUT" | "BLOCKED" | "SLOW";
+
+/** 실패 종류별 건수. 일어나지 않은 종류도 0 으로 실려 오므로 키가 빠지는 일이 없다. */
+export type FailureBreakdown = Record<FailureType, number>;
+
+/**
+ * 컨텍스트별 성공률(백엔드 ContextOutcomeReader 와 1:1).
+ *
+ * 점수(score)로는 역산할 수 없는 값이라 별도 집계 테이블에서 온다 — 성공은 고정폭으로 오르고 실패는
+ * 종류마다 다른 폭으로 내려간 뒤 clamp 되므로, 점수 70 이 "70% 성공"을 뜻하지 않는다.
+ * `successRate` 가 null 인 것은 "0%" 가 아니라 **그 창에 보고가 한 건도 없었다**는 뜻이다.
+ */
+export interface OutcomeTotals {
+  success: number;
+  failure: number;
+  successRate: number | null;
+  failures: FailureBreakdown;
+}
+
+export interface OutcomePoint {
+  at: string;
+  success: number;
+  failure: number;
+  successRate: number | null;
+  failures: FailureBreakdown;
+}
+
+export interface ContextOutcomeHistory {
+  contexts: { context: string; totals: OutcomeTotals; points: OutcomePoint[] }[];
+}
+
 export interface AuditEventRecord {
   seq: number;
   eventType: string;

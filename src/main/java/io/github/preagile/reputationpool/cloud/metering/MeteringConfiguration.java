@@ -8,11 +8,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires usage metering (issue #10) and reputation-score sampling (issue #12). The {@link MeterRecorder}
- * is the shared in-memory counter — the per-tenant pools write to it (via {@code TenantMeteringSink})
- * and the {@link MeteringRollup} drains it — so it is a singleton bean both sides inject. The
- * {@link ScoreSampler} is a second {@code @Scheduled} sampler over the same live pools. Both run under
- * the {@code @EnableScheduling} already declared on the engine composition root.
+ * Wires usage metering (issue #10), reputation-score sampling (issue #12) and per-context outcome
+ * counting (issue #189). The {@link MeterRecorder} is the shared in-memory counter — the per-tenant pools
+ * write to it (via {@code TenantMeteringSink}) and the {@link MeteringRollup} drains it — so it is a
+ * singleton bean both sides inject. The {@link ScoreSampler} is a second {@code @Scheduled} sampler over
+ * the same live pools. {@link OutcomeRecorder}/{@link OutcomeRollup} repeat the recorder+rollup pair for
+ * report outcomes, this time written from the gRPC boundary ({@code ReputationAdvisorService.report})
+ * rather than from a pool event, because that is the only place an ordinary success is observable at all.
+ * All of them run under the {@code @EnableScheduling} already declared on the engine composition root.
  */
 @Configuration(proxyBeanMethods = false)
 public class MeteringConfiguration {
@@ -32,5 +35,16 @@ public class MeteringConfiguration {
     ScoreSampler scoreSampler(
             DataSource dataSource, Clock clock, PerTenantPoolRegistry registry, ReputationPoolProperties properties) {
         return new ScoreSampler(dataSource, clock, registry, properties);
+    }
+
+    @Bean
+    OutcomeRecorder outcomeRecorder() {
+        return new OutcomeRecorder();
+    }
+
+    @Bean
+    OutcomeRollup outcomeRollup(
+            DataSource dataSource, Clock clock, OutcomeRecorder outcomeRecorder, ReputationPoolProperties properties) {
+        return new OutcomeRollup(dataSource, clock, outcomeRecorder, properties);
     }
 }

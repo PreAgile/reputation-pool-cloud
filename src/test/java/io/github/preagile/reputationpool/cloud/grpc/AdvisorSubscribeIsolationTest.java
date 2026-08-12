@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.preagile.reputationpool.cloud.config.ReputationPoolProperties;
 import io.github.preagile.reputationpool.cloud.engine.GlobalResourceBudget;
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
+import io.github.preagile.reputationpool.cloud.metering.OutcomeRecorder;
 import io.github.preagile.reputationpool.cloud.tenant.TenantContext;
 import io.github.preagile.reputationpool.core.domain.PoolEvent;
 import io.github.preagile.reputationpool.core.domain.ResourceId;
@@ -26,6 +27,7 @@ import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.MetadataUtils;
 import io.grpc.stub.StreamObserver;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -95,7 +97,8 @@ class AdvisorSubscribeIsolationTest {
 
     @BeforeEach
     void startServer() throws Exception {
-        ReputationAdvisorService service = new ReputationAdvisorService(registry, broadcaster, budget);
+        ReputationAdvisorService service =
+                new ReputationAdvisorService(registry, broadcaster, budget, new OutcomeRecorder(), Clock.systemUTC());
         String name = InProcessServerBuilder.generateName();
         server = InProcessServerBuilder.forName(name)
                 .directExecutor()

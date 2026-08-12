@@ -3,7 +3,12 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
-import { contextDetailFixture, contextHistoryFixture, contextsFixture } from "@/test/fixtures";
+import {
+  contextDetailFixture,
+  contextHistoryFixture,
+  contextOutcomeFixture,
+  contextsFixture,
+} from "@/test/fixtures";
 import ContextsPage from "./page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -11,6 +16,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 const server = setupServer(
   // score-history 가 /contexts 보다 먼저 등록돼야 한다 — 뒤면 컬렉션 핸들러가 먼저 잡는다.
   http.get("*/api/contexts/score-history", () => HttpResponse.json(contextHistoryFixture)),
+  http.get("*/api/contexts/success-rate", () => HttpResponse.json(contextOutcomeFixture)),
   http.get("*/api/contexts/:context/resources", () => HttpResponse.json(contextDetailFixture)),
   http.get("*/api/contexts", () => HttpResponse.json(contextsFixture)),
 );
@@ -123,6 +129,94 @@ describe("컨텍스트 화면 (integration + MSW)", () => {
 
     expect(await screen.findByText("컨텍스트를 불러오지 못했습니다")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+  });
+});
+
+describe("컨텍스트 화면 — 성공률 (#189)", () => {
+  it("성공률이 들어오면 → 표에 비율과 지배적인 실패 종류가 함께 실린다", async () => {
+    // 점수로는 답할 수 없는 질문이 이것이다. 그리고 "62%" 만으로는 대응이 안 나온다 —
+    // 막힌 것(BLOCKED)인지 느린 것(SLOW)인지에 따라 할 일이 다르다.
+    render(<ContextsPage />);
+
+    const table = within(await contextTable());
+    expect(table.getByText("62.0%")).toBeInTheDocument();
+    expect(table.getByText(/실패 80% BLOCKED/)).toBeInTheDocument();
+  });
+
+  it("전체 성공률 타일은 → 컨텍스트별 비율의 평균이 아니라 건수 합으로 낸다", async () => {
+    // BAEMIN 620/1000, CPEATS 40/40 → 건수 합 660/1040 = 63.5%.
+    // 비율 평균이었다면 (62 + 100) / 2 = 81.0% 로, 보고량이 적은 컨텍스트가 전체를 끌어올린다.
+    render(<ContextsPage />);
+
+    expect(await screen.findByText(/^성공률 ·/)).toBeInTheDocument();
+    expect(screen.getByText("63.5%")).toBeInTheDocument();
+  });
+
+  it("지표를 성공률로 바꾸면 → 차트를 새로 늘리지 않고 같은 곡선이 성공률로 전환된다", async () => {
+    const user = userEvent.setup();
+    render(<ContextsPage />);
+
+    await screen.findByRole("heading", { name: /컨텍스트별 평균 평판/ });
+    await user.click(screen.getByRole("tab", { name: "성공률" }));
+
+    expect(await screen.findByRole("heading", { name: /컨텍스트별 성공률/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /컨텍스트별 평균 평판/ })).not.toBeInTheDocument();
+  });
+
+  it("성공률 조회가 실패하면 → 표의 성공률 열만 '—' 가 되고 나머지 열은 그대로 읽힌다", async () => {
+    // 성공률은 보조 정보다. 실패가 화면 전체를 무너뜨리면 안 된다.
+    server.use(http.get("*/api/contexts/success-rate", () => HttpResponse.error()));
+    render(<ContextsPage />);
+
+    const table = within(await contextTable());
+    expect(table.getByText("BAEMIN")).toBeInTheDocument();
+    expect(table.getByText("0.82")).toBeInTheDocument();
+    expect(table.queryByText("62.0%")).not.toBeInTheDocument();
+  });
+
+  it("보고가 한 건도 없던 컨텍스트는 → 0% 가 아니라 '—' 로 그린다", async () => {
+    // null 을 0 으로 접으면 "아직 안 돌았다" 가 "전부 실패했다" 로 읽힌다 — 정반대 상황이다.
+    server.use(
+      http.get("*/api/contexts/success-rate", () =>
+        HttpResponse.json({
+          contexts: [
+            {
+              context: "BAEMIN",
+              totals: {
+                success: 0,
+                failure: 0,
+                successRate: null,
+                failures: { BLOCKED: 0, TIMEOUT: 0, SLOW: 0, CONNECTION_RESET: 0, TLS_HANDSHAKE: 0 },
+              },
+              points: [],
+            },
+          ],
+        }),
+      ),
+    );
+    render(<ContextsPage />);
+
+    const table = within(await contextTable());
+    expect(table.getByText("BAEMIN")).toBeInTheDocument();
+    expect(table.queryByText("0.0%")).not.toBeInTheDocument();
+  });
+
+  it("기간을 바꾸면 → 성공률도 같은 창(hours)으로 다시 부른다", async () => {
+    const user = userEvent.setup();
+    const asked: string[] = [];
+    server.use(
+      http.get("*/api/contexts/success-rate", ({ request }) => {
+        asked.push(new URL(request.url).searchParams.get("hours") ?? "");
+        return HttpResponse.json(contextOutcomeFixture);
+      }),
+    );
+    render(<ContextsPage />);
+
+    await screen.findByRole("heading", { name: /컨텍스트별 평균 평판/ });
+    await user.click(screen.getByRole("button", { name: /추이 기간 선택/ }));
+    await user.click(await screen.findByRole("button", { name: /최근 90일/ }));
+
+    expect(asked).toContain("2160");
   });
 });
 

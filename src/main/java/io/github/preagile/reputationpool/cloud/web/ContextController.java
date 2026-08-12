@@ -1,6 +1,8 @@
 package io.github.preagile.reputationpool.cloud.web;
 
 import io.github.preagile.reputationpool.cloud.engine.TenantPoolRegistry;
+import io.github.preagile.reputationpool.cloud.readmodel.ContextOutcomeReader;
+import io.github.preagile.reputationpool.cloud.readmodel.ContextOutcomeReader.ContextOutcomeHistory;
 import io.github.preagile.reputationpool.cloud.readmodel.ContextRollupReader;
 import io.github.preagile.reputationpool.cloud.readmodel.ContextRollupReader.ContextHistory;
 import io.github.preagile.reputationpool.cloud.readmodel.ContextViewAssembler;
@@ -34,6 +36,10 @@ import org.springframework.web.server.ResponseStatusException;
  *       the live snapshot, so it is exact and needs no table scan.
  *   <li><b>History</b> ({@code /api/contexts/score-history}) comes from the hourly rollup rather than the
  *       raw samples, which is what lets the window reach 90 days — see {@link ContextRollupReader}.
+ *   <li><b>Success rate</b> ({@code /api/contexts/success-rate}) comes from a separate counted rollup
+ *       (issue #189). It is not derivable from either of the other two: score cannot be inverted into a
+ *       ratio, and the live snapshot only carries the engine's fixed 10-result window — see
+ *       {@link ContextOutcomeReader}.
  * </ul>
  *
  * <p>The tenant is the server-decided one bound to the JWT ({@link AdminTenant}), never a request
@@ -46,13 +52,23 @@ public class ContextController {
     /** Upper bound on the context-history window: 90 days, matching the rollup's default retention. */
     private static final int MAX_HISTORY_HOURS = 24 * 90;
 
+    /**
+     * Upper bound on the success-rate window: a year, matching that rollup's own (longer) retention. It is
+     * the only table that can answer a year-over-year question — the raw reports behind it are never
+     * stored — so capping it at the score rollup's 90 days would throw away history that exists.
+     */
+    private static final int MAX_OUTCOME_HOURS = 24 * 365;
+
     private final TenantPoolRegistry registry;
     private final ContextRollupReader rollup;
+    private final ContextOutcomeReader outcomes;
     private final Clock clock;
 
-    public ContextController(TenantPoolRegistry registry, ContextRollupReader rollup, Clock clock) {
+    public ContextController(
+            TenantPoolRegistry registry, ContextRollupReader rollup, ContextOutcomeReader outcomes, Clock clock) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
         this.rollup = Objects.requireNonNull(rollup, "rollup must not be null");
+        this.outcomes = Objects.requireNonNull(outcomes, "outcomes must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -72,6 +88,19 @@ public class ContextController {
         int safeHours = Math.max(1, Math.min(hours, MAX_HISTORY_HOURS));
         Instant since = clock.instant().minus(Duration.ofHours(safeHours));
         return rollup.read(AdminTenant.of(jwt), since);
+    }
+
+    /**
+     * Every context's hourly success rate and failure breakdown over the last {@code hours} (default 24),
+     * plus each context's totals over that window. {@code hours} is clamped to {@code [1, 8760]} so a
+     * caller cannot request an unbounded scan.
+     */
+    @GetMapping("/success-rate")
+    public ContextOutcomeHistory successRate(
+            @AuthenticationPrincipal Jwt jwt, @RequestParam(defaultValue = "24") int hours) {
+        int safeHours = Math.max(1, Math.min(hours, MAX_OUTCOME_HOURS));
+        Instant since = clock.instant().minus(Duration.ofHours(safeHours));
+        return outcomes.read(AdminTenant.of(jwt), since);
     }
 
     /** The resources holding a cell in {@code context}, worst first. 404 when no cell carries it. */
