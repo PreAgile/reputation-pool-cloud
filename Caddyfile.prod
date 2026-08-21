@@ -90,6 +90,24 @@
 	handle /actuator/* {
 		import backend
 	}
+	# Grafana (#15 후속 — compose.yaml 의 grafana 주석이 예고한 외부 노출).
+	#
+	# 서브도메인이 아니라 **서브패스**로 붙인다: 새 DNS 레코드도, 새 인증서 발급도 필요 없고,
+	# 이미 Cloudflare proxied 인 이 호스트명의 보호(엣지 WAF·레이트리밋, 그리고 VCN 이 Cloudflare
+	# IP 대역만 443 을 허용하는 오리진 은닉 — scripts/oci-origin-lock.sh)를 그대로 물려받는다.
+	# 서브도메인으로 가면 Let's Encrypt 발급을 한 번 더 타고 origin lock 과 DNS 를 각각 손봐야 하는데,
+	# 관측용 콘솔 하나를 붙이는 대가로는 과하다.
+	#
+	# `uri strip_prefix` 를 쓰지 않는다 — Grafana 에 `GF_SERVER_SERVE_FROM_SUB_PATH=true` 를 주면
+	# **Grafana 자신이 /grafana 접두사를 포함한 경로를 기대한다**(compose.prod.tls.yaml). 여기서
+	# 접두사를 벗기면 Grafana 가 만드는 링크·정적 자산 경로가 전부 어긋나 로그인 화면이 빈 페이지가 된다.
+	#
+	# 이 블록이 TLS 오버레이에만 있는 것은 의도다. 평문 모드(base Caddyfile)는 도메인이 없는 동안
+	# 쓰는 임시 경로이고, 그 모드에서 관리 콘솔 로그인을 평문 HTTP 로 내보내면 비밀번호가 그대로
+	# 나간다(deployment.md 의 "평문 모드" 경고와 같은 이유).
+	handle /grafana* {
+		reverse_proxy grafana:3000
+	}
 	# 그 외 전부 대시보드.
 	handle {
 		import locale_vary
