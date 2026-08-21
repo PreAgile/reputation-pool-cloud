@@ -224,7 +224,7 @@ jobs:
             scripts/bootstrap.sh scripts/oci-launch-retry.sh scripts/backup.sh scripts/restore.sh \
             scripts/pull-deploy.sh scripts/install-pull-deploy.sh scripts/install-a1-hunter.sh \
             scripts/backup-offsite.sh scripts/cf-dns.sh scripts/migrate-host.sh \
-            scripts/deadline-notify.sh
+            scripts/deadline-notify.sh scripts/container-memory.sh
 
       # 이 두 스크립트는 **호스트를 실제로 옮길 때 딱 한 번** 도는데, 그때 인자 처리에서 죽으면 가장
       # 곤란하다(다른 스크립트와 달리 매일 돌면서 스스로 증명하지 않는다). 그래서 인자 검증을 토큰·SSH·

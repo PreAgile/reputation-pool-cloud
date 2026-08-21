@@ -12,7 +12,18 @@ RUN ./gradlew --no-daemon help > /dev/null 2>&1 || true
 COPY src src
 RUN ./gradlew --no-daemon clean bootJar
 
-FROM eclipse-temurin:25-jre AS run
+# JDK 가 아니라 JRE 를 쓰면 `jcmd`·`jmap`·`jstack` 이 없다 — 이미지에 `java jfr jrunscript
+# jwebserver keytool rmiregistry` 만 들어온다. 그러면 NMT 를 켜도 읽을 수 없고, 힙 덤프도 스레드 덤프도
+# 뜰 수 없다. 즉 힙 밖에서 죽는 사고(cgroup OOM-kill)를 **원리적으로 진단할 수 없는** 이미지가 된다.
+#
+# 사고가 난 뒤에 도구를 설치하는 것은 답이 아니다. 2 OCPU 호스트에서 라이브 인시던트 중에 패키지를
+# 설치하는 것은 최악의 타이밍이고, 그 사이 compose 의 `restart: unless-stopped` 가 컨테이너를 이미
+# 재생성해 증거가 사라진다. 도구는 사고 전에 들어 있어야 한다.
+#
+# 비용은 이미지 약 180MB 증가다. 서버는 GHCR 에서 pull 만 하고(레이어는 증분), 부트 볼륨은 48GB 중
+# 37GB 가 남아 있으므로 이 호스트에서 문제가 되지 않는다. 진단 도구 부재는 사고마다 반복해서 내는
+# 비용이고 이미지 크기는 한 번 내는 비용이다.
+FROM eclipse-temurin:25-jdk AS run
 WORKDIR /app
 # curl backs the compose healthcheck against the actuator endpoint.
 RUN apt-get update \

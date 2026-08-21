@@ -53,6 +53,16 @@
   `RP_DEADLINE_TODAY` 로 "오늘" 을 주입할 수 있어 CI 가 발화 시점을 매번 검증한다 —
   이 알림의 실패 모드는 "안 알리는 것" 이라 실제 날짜를 기다리면 영원히 검증되지 않는다.
   절차는 [`deployment.md` §10-1](../docs/engineering/deployment.md).
+- `container-memory.sh` — 컨테이너별 cgroup 메모리를 textfile 로 노출한다(#131 의 경로 재사용).
+  **서버에서** `--install` 로 60초 타이머를 설치한다. 대시보드의 'JVM 심층' 섹션은 JVM 이 자기 입으로
+  보고하는 값만 더하는데, 컨테이너를 죽이는 주체는 JVM 이 아니라 cgroup 이다 — 이 호스트에서 그 차이가
+  약 2배(160MB 대 348MB)이고 OOM-kill 은 그 계측 밖 영역에서 일어난다.
+  `memory.current` 가 아니라 **`memory.stat` 의 `anon`** 이 OOM 위험의 실체다: db 는 current 가 한도의
+  99.8% 인데 anon 은 0.8% 이고(나머지는 회수 가능한 page cache), current 로 알림을 걸면 매번 오탐이 된다.
+  `memory.events` 의 `max`(한도 도달)와 `oom_kill` 도 함께 내보낸다 — 전자는 후자의 선행 지표이고,
+  db 처럼 전자만 25,000 회 넘게 오르며 후자는 0 인 정상 상태가 존재하므로 둘을 섞지 않는다.
+  node-exporter 의 기본 collector 를 켜지 않는 이유는 `compose.yaml` 의 node-exporter 주석과 같다
+  (보안 표면 확대이고, 게다가 호스트 단위라 컨테이너별로 쪼개주지 않는다).
 - `dev-seed.sql` — 로컬 개발용 시드.
 
 ## DB 백업 / 복원

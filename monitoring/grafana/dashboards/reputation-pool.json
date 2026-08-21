@@ -831,7 +831,7 @@
     {
       "type": "timeseries",
       "title": "컨테이너 메모리 예산 — 힙만으로는 OOM-kill 을 설명할 수 없다",
-      "description": "컨테이너가 exit 137 로 죽었을 때 원인을 가릴 수 있는 유일한 패널이다. cgroup 은 힙이 아니라 RSS 를 보고 죽이며, RSS 는 힙 + 논힙 + 다이렉트 버퍼 + 스레드 스택 + GC 구조체 + native 의 합이다. 위 'JVM 힙 사용' 패널이 끝까지 평온한 채로 컨테이너만 재시작되는 것이 실제 실패 모드이고, 그때 이 패널만 답한다. 힙 상한은 컨테이너 한도의 70%(Dockerfile 의 -XX:MaxRAMPercentage)이므로, 두 점선 사이의 30% 가 다이렉트 버퍼·Metaspace·CodeCache·GC 구조체가 나눠 써야 하는 전부다. 'JVM 합계'가 컨테이너 한도 선에 붙기 시작하면 남은 것은 OOM-kill 이다. 주의 둘: 합계는 JVM 이 보고하는 것만 더하므로 native(JIT·glibc arena)가 빠져 있어 실제 RSS 는 항상 이보다 크다. 그리고 컨테이너 한도 선은 상수이므로 compose.prod.yaml 의 deploy.resources.limits.memory 를 바꾸면 여기도 같이 바꿔야 한다(compose.prod.6gb.yaml 은 2g 다).",
+      "description": "컨테이너가 exit 137 로 죽었을 때 원인을 가릴 수 있는 유일한 패널이다. cgroup 은 힙이 아니라 RSS 를 보고 죽이며, RSS 는 힙 + 논힙 + 다이렉트 버퍼 + 스레드 스택 + GC 구조체 + native 의 합이다. 위 'JVM 힙 사용' 패널이 끝까지 평온한 채로 컨테이너만 재시작되는 것이 실제 실패 모드이고, 그때 이 패널만 답한다. 힙 상한은 컨테이너 한도의 70%(Dockerfile 의 -XX:MaxRAMPercentage)이므로, 두 점선 사이의 30% 가 다이렉트 버퍼·Metaspace·CodeCache·GC 구조체가 나눠 써야 하는 전부다. 'JVM 합계'가 컨테이너 한도 선에 붙기 시작하면 남은 것은 OOM-kill 이다. 'JVM 합계'는 **RSS 가 아니다** — JVM 이 보고하는 것만 더하므로 스레드 스택·JIT·glibc arena 같은 native 가 빠져 있다. 그래서 native 로 한도에 닿는 경우 이 선만 보면 여유가 많은 것처럼 보인다. 'cgroup anon' 을 나란히 둔 이유가 그것이고, 두 선의 간격이 곧 아무도 보고하지 않는 소비자의 크기다(아래 '컨테이너 메모리' 섹션이 그 간격을 따로 그린다).\n\n한도 선은 상수가 아니라 cgroup 에서 읽은 실측값이다 — compose 의 limits.memory 를 바꾸거나 compose.prod.6gb.yaml 로 배포해도 선이 따라 움직이므로 화면과 실제가 어긋날 수 없다.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -900,8 +900,13 @@
         },
         {
           "refId": "F",
-          "expr": "4 * 1024 * 1024 * 1024",
-          "legendFormat": "컨테이너 한도 (4 GiB)"
+          "expr": "rp_container_memory_max_bytes{container=\"app\"}",
+          "legendFormat": "컨테이너 한도 (cgroup 실측)"
+        },
+        {
+          "refId": "G",
+          "expr": "rp_container_memory_anon_bytes{container=\"app\"}",
+          "legendFormat": "cgroup anon (커널이 센 실측)"
         }
       ]
     },
@@ -1217,6 +1222,215 @@
           "refId": "B",
           "expr": "rate(jvm_classes_unloaded_classes_total[5m]) * 60",
           "legendFormat": "분당 언로드"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "컨테이너 메모리 (cgroup) — JVM 이 말하는 것과 커널이 센 것의 차이",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 116
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "app — cgroup 실측 vs JVM 보고, 그리고 계측 밖",
+      "description": "위 'JVM 심층' 섹션 전체가 답하지 못하는 하나를 답한다: **JVM 이 자기 입으로 보고하는 값의 합과, 커널이 실제로 센 값의 차이.** 컨테이너를 죽이는 주체는 JVM 이 아니라 cgroup 이고, cgroup 은 힙을 보지 않는다.\n\n'계측 밖' 선이 이 패널의 핵심이다 — cgroup anon 에서 JVM 보고 합계를 뺀 값이고, native(JIT·JNI·glibc arena)·GC 구조체(마크 비트맵·카드테이블·RSet)·스레드 스택처럼 **아무도 보고하지 않는 소비자**의 크기다. 이 선이 우상향하면 JVM 지표는 전부 평온한 채로 컨테이너가 한도에 다가간다.\n\nanon 과 current 를 함께 두는 이유: current 는 page cache 를 포함하는데 그것은 회수 가능하므로 OOM 을 부르지 않는다. **anon 이 OOM 위험의 실체다.** app 은 JVM 이라 file 이 0.3MB 뿐이어서 둘이 거의 겹치지만, db 는 current 가 한도의 99.8% 인데 anon 은 0.8% 다 — 같은 패널을 db 에 적용하면 current 만 보고 오진한다.\n\npeak 는 고수위이고 리셋되지 않는다. 표본 간격이 60초라 곡선의 해상도는 낮지만 **최대치는 놓치지 않는다** — 스파이크가 표본 사이에 일어나도 peak 에 남는다. 한도 선과 peak 사이가 실제로 남은 여유다.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 117
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "cgroup 한도.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rp_container_memory_anon_bytes{container=\"app\"}",
+          "legendFormat": "cgroup anon (OOM 위험의 실체)"
+        },
+        {
+          "refId": "B",
+          "expr": "rp_container_memory_current_bytes{container=\"app\"}",
+          "legendFormat": "cgroup current (page cache 포함)"
+        },
+        {
+          "refId": "C",
+          "expr": "rp_container_memory_peak_bytes{container=\"app\"}",
+          "legendFormat": "cgroup peak (고수위)"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(jvm_memory_used_bytes) + sum(jvm_buffer_memory_used_bytes{id=\"direct\"})",
+          "legendFormat": "JVM 보고 합계"
+        },
+        {
+          "refId": "E",
+          "expr": "rp_container_memory_anon_bytes{container=\"app\"} - scalar(sum(jvm_memory_used_bytes) + sum(jvm_buffer_memory_used_bytes{id=\"direct\"}))",
+          "legendFormat": "계측 밖 (native·GC구조체·스택)"
+        },
+        {
+          "refId": "F",
+          "expr": "rp_container_memory_max_bytes{container=\"app\"}",
+          "legendFormat": "cgroup 한도"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "컨테이너별 한도 사용률 (anon 기준)",
+      "description": "어느 컨테이너가 한도에 붙었는지 한눈에 본다. **분자를 current 가 아니라 anon 으로 둔 것이 이 패널의 전부다.** current 로 그리면 db 가 99.8% 로 그려져 매번 화면이 빨갛고, 정작 위험한 컨테이너가 그 노이즈에 묻힌다 — Postgres 는 회수 가능한 page cache 로 cgroup 을 채우는 것이 정상 동작이다. anon 으로 보면 db 는 0.8% 이고, 실제로 죽을 수 있는 컨테이너만 올라온다.\n\n한도가 없는 컨테이너는 계열이 아예 나오지 않는다(수집 스크립트가 `memory.max=max` 를 내보내지 않는다). 선이 없는 것은 '여유가 많다' 가 아니라 '상한이 없다' 는 뜻이고, compose 에 서비스를 추가하면서 limits 를 빠뜨리면 그렇게 나타난다.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 126
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rp_container_memory_anon_bytes / rp_container_memory_max_bytes",
+          "legendFormat": "{{container}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "한도 도달 · OOM-kill (건/분)",
+      "description": "**두 계열은 전혀 다른 사건이고, 섞으면 진단이 뒤집힌다.** '한도 도달'(`memory.events` 의 `max`)은 한도에 부딪혀 직접 회수가 돈 횟수다 — 회수할 수 있는 메모리가 있으면 여기서 끝나고 아무도 죽지 않는다. db 가 이 값이 25,000 을 넘는데 OOM-kill 은 0 인 이유이고(page cache), `pgmajfault` 가 0 이므로 디스크 재읽기도 없다. 즉 db 의 이 선이 상시 올라 있는 것은 정상이다.\n\n반대로 anon 이 한도를 채우는 컨테이너는 **한도 도달이 먼저 오르고 그 뒤에 OOM-kill 이 따라온다.** 그래서 이 패널의 첫 계열은 OOM 의 **선행 지표**로 읽는다 — 평소 0 이던 컨테이너에서 올라오기 시작하면 위 '한도 사용률'과 같이 본다.\n\nOOM-kill 계열이 0 을 벗어나는 순간은 그 자체로 사고다. 컨테이너는 `restart: unless-stopped` 로 되살아나므로 화면상 아무 일도 없었던 것처럼 보이고, 앱 지표는 재기동 후 정상으로 돌아온다 — 이 계열만 그 일이 있었다는 사실을 남긴다.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 126
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "epm",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(rp_container_memory_limit_hits_total[5m]) * 60",
+          "legendFormat": "{{container}} 한도 도달"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(rp_container_oom_kill_total[5m]) * 60",
+          "legendFormat": "{{container}} OOM-kill"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "수집기 신선도 (초)",
+      "description": "이 섹션의 모든 계열은 호스트의 `rp-container-memory.timer` 가 60초마다 쓰는 textfile 에서 온다. 타이머가 죽으면 게이지는 **사라지지 않고 마지막 값에서 얼어붙는다** — 그러면 위 패널들이 조용히 거짓을 말한다. #131 이 백업에서 배운 것과 같은 함정이고, 그래서 수집기 자신의 신선도를 같이 노출한다.\n\n건강하면 0 과 60초 사이를 톱니처럼 오간다 — 평평한 0 이 아니라 톱니가 정상이다. 점선은 주기 × 3 으로, 체크포인트 신선도 패널과 같은 규칙이다. 선이 아예 사라지면 게이지 부재이고 그것은 얼어붙은 것과 다른 사고다(수집기가 죽은 것이 아니라 파일이 지워졌거나 볼륨이 안 붙은 것).",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 126
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "알림 임계.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - rp_container_memory_last_success_timestamp_seconds",
+          "legendFormat": "신선도"
+        },
+        {
+          "refId": "B",
+          "expr": "180",
+          "legendFormat": "알림 임계 (주기 × 3)"
         }
       ]
     }
