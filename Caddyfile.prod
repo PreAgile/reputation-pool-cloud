@@ -105,7 +105,13 @@
 	# 이 블록이 TLS 오버레이에만 있는 것은 의도다. 평문 모드(base Caddyfile)는 도메인이 없는 동안
 	# 쓰는 임시 경로이고, 그 모드에서 관리 콘솔 로그인을 평문 HTTP 로 내보내면 비밀번호가 그대로
 	# 나간다(deployment.md 의 "평문 모드" 경고와 같은 이유).
-	handle /grafana* {
+	# 경로 경계를 지키는 named matcher 를 쓴다. `handle /grafana*` 는 접두사 매치라 경계를 보지 않아
+	# `/grafanafoo` 와 `/grafanafoo/x` 까지 Grafana 로 보낸다 — 지금 대시보드에 그런 경로가 없어서 증상이
+	# 없을 뿐이고, 나중에 `/grafana-guide` 같은 페이지가 생기면 조용히 삼켜진다. `path` matcher 는
+	# 패턴을 여러 개 받으므로(OR) `/grafana` 정확 매치와 `/grafana/` 하위만 잡는다.
+	# (`handle` 은 matcher 토큰을 하나만 받으므로 두 패턴을 나열하려면 named matcher 가 유일한 방법이다.)
+	@grafana path /grafana /grafana/*
+	handle @grafana {
 		reverse_proxy grafana:3000
 	}
 	# 그 외 전부 대시보드.
