@@ -61,7 +61,7 @@ services:
     # 값의 합과 cgroup 이 보는 RSS 사이의 차이(현재 약 2배)는 NMT 만이 분해할 수 있다.
     #
     #   .env 에 한 줄 넣고 app 만 재기동한다.
-    #     JVM_DIAG_OPTS=-XX:NativeMemoryTracking=summary
+    #     JAVA_TOOL_OPTIONS=-XX:NativeMemoryTracking=summary
     #   docker compose -f compose.yaml -f compose.prod.yaml up -d --force-recreate app
     #
     #   기준선을 먼저 남기고, 부하를 걸고, 차이를 본다.
@@ -76,8 +76,20 @@ services:
     # 단, **이 environment 키의 값이 바뀌면 서비스 정의가 바뀐 것이므로 다음 배포에서 app 컨테이너가
     # 재생성된다** — 인메모리 풀은 체크포인트에서 복원되지만(Dockerfile 의 ExitOnOutOfMemoryError 주석)
     # 공짜는 아니다. 껐다 켜는 것을 습관으로 만들지 않는다.
+    #
+    # `${JVM_DIAG_OPTS:-}` 형태의 map 항목이 아니라 **값 없는 리스트 항목**인 이유: map 으로 두면 값이
+    # 빈 문자열이어도 변수가 **설정된다**. 그러면 HotSpot 이 JVM 을 띄울 때마다 `Picked up
+    # JAVA_TOOL_OPTIONS:` 를 stderr 로 찍는다 — 앱 기동 로그에 한 줄, 그리고 **`jcmd`·`jmap`·`jstack`
+    # 을 부를 때마다 한 줄**이다. 진단 도구를 쓰는 시점이 곧 그 잡음이 가장 방해되는 시점이고
+    # (출력을 파싱하면 첫 줄이 이것이다), `java -version | head -1` 이 버전 대신 이 줄을 잡는 것을
+    # 실제로 겪었다.
+    #
+    # 값 없는 리스트 항목은 호스트 환경(또는 .env)에 그 변수가 **없으면 컨테이너에 주입하지 않는다**
+    # (`docker compose config` 에서 `null` 로 렌더된다 — 빈 문자열과 다르다). 그래서 평시에는 변수가
+    # 아예 없고 알림도 없다. 노브 이름이 JVM_DIAG_OPTS 에서 JAVA_TOOL_OPTIONS 로 바뀌는데, `.env` 에
+    # 적는 이름과 JVM 이 읽는 이름이 같아지므로 오히려 헷갈릴 여지가 줄어든다.
     environment:
-      JAVA_TOOL_OPTIONS: ${JVM_DIAG_OPTS:-}
+      - JAVA_TOOL_OPTIONS
     deploy:
       resources:
         limits:
