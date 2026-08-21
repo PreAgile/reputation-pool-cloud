@@ -831,7 +831,7 @@
     {
       "type": "timeseries",
       "title": "컨테이너 메모리 예산 — 힙만으로는 OOM-kill 을 설명할 수 없다",
-      "description": "컨테이너가 exit 137 로 죽었을 때 원인을 가릴 수 있는 유일한 패널이다. cgroup 은 힙이 아니라 RSS 를 보고 죽이며, RSS 는 힙 + 논힙 + 다이렉트 버퍼 + 스레드 스택 + GC 구조체 + native 의 합이다. 위 'JVM 힙 사용' 패널이 끝까지 평온한 채로 컨테이너만 재시작되는 것이 실제 실패 모드이고, 그때 이 패널만 답한다. 힙 상한은 컨테이너 한도의 70%(Dockerfile 의 -XX:MaxRAMPercentage)이므로, 두 점선 사이의 30% 가 다이렉트 버퍼·Metaspace·CodeCache·GC 구조체가 나눠 써야 하는 전부다. 'JVM 합계'가 컨테이너 한도 선에 붙기 시작하면 남은 것은 OOM-kill 이다. 주의 둘: 합계는 JVM 이 보고하는 것만 더하므로 native(JIT·glibc arena)가 빠져 있어 실제 RSS 는 항상 이보다 크다. 그리고 컨테이너 한도 선은 상수이므로 compose.prod.yaml 의 deploy.resources.limits.memory 를 바꾸면 여기도 같이 바꿔야 한다(compose.prod.6gb.yaml 은 2g 다).",
+      "description": "컨테이너가 exit 137 로 죽었을 때 원인을 가릴 수 있는 유일한 패널이다. cgroup 은 힙이 아니라 RSS 를 보고 죽이며, RSS 는 힙 + 논힙 + 다이렉트 버퍼 + 스레드 스택 + GC 구조체 + native 의 합이다. 위 'JVM 힙 사용' 패널이 끝까지 평온한 채로 컨테이너만 재시작되는 것이 실제 실패 모드이고, 그때 이 패널만 답한다. 힙 상한은 컨테이너 한도의 70%(Dockerfile 의 -XX:MaxRAMPercentage)이므로, 두 점선 사이의 30% 가 다이렉트 버퍼·Metaspace·CodeCache·GC 구조체가 나눠 써야 하는 전부다. 'JVM 합계'가 컨테이너 한도 선에 붙기 시작하면 남은 것은 OOM-kill 이다. 'JVM 합계'는 **RSS 가 아니다** — JVM 이 보고하는 것만 더하므로 스레드 스택·JIT·glibc arena 같은 native 가 빠져 있다. 그래서 native 로 한도에 닿는 경우 이 선만 보면 여유가 많은 것처럼 보인다. 'cgroup anon' 을 나란히 둔 이유가 그것이고, 두 선의 간격이 곧 아무도 보고하지 않는 소비자의 크기다(아래 '컨테이너 메모리' 섹션이 그 간격을 따로 그린다).\n\n한도 선은 상수가 아니라 cgroup 에서 읽은 실측값이다 — compose 의 limits.memory 를 바꾸거나 compose.prod.6gb.yaml 로 배포해도 선이 따라 움직이므로 화면과 실제가 어긋날 수 없다.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -900,8 +900,13 @@
         },
         {
           "refId": "F",
-          "expr": "4 * 1024 * 1024 * 1024",
-          "legendFormat": "컨테이너 한도 (4 GiB)"
+          "expr": "rp_container_memory_max_bytes{container=\"app\"}",
+          "legendFormat": "컨테이너 한도 (cgroup 실측)"
+        },
+        {
+          "refId": "G",
+          "expr": "rp_container_memory_anon_bytes{container=\"app\"}",
+          "legendFormat": "cgroup anon (커널이 센 실측)"
         }
       ]
     },
