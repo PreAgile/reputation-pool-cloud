@@ -815,6 +815,410 @@
           "legendFormat": "알림 임계 critical (72h)"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "JVM 심층 — 힙 밖에서 죽는 경우를 드러낸다",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 75
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "컨테이너 메모리 예산 — 힙만으로는 OOM-kill 을 설명할 수 없다",
+      "description": "컨테이너가 exit 137 로 죽었을 때 원인을 가릴 수 있는 유일한 패널이다. cgroup 은 힙이 아니라 RSS 를 보고 죽이며, RSS 는 힙 + 논힙 + 다이렉트 버퍼 + 스레드 스택 + GC 구조체 + native 의 합이다. 위 'JVM 힙 사용' 패널이 끝까지 평온한 채로 컨테이너만 재시작되는 것이 실제 실패 모드이고, 그때 이 패널만 답한다. 힙 상한은 컨테이너 한도의 70%(Dockerfile 의 -XX:MaxRAMPercentage)이므로, 두 점선 사이의 30% 가 다이렉트 버퍼·Metaspace·CodeCache·GC 구조체가 나눠 써야 하는 전부다. 'JVM 합계'가 컨테이너 한도 선에 붙기 시작하면 남은 것은 OOM-kill 이다. 주의 둘: 합계는 JVM 이 보고하는 것만 더하므로 native(JIT·glibc arena)가 빠져 있어 실제 RSS 는 항상 이보다 크다. 그리고 컨테이너 한도 선은 상수이므로 compose.prod.yaml 의 deploy.resources.limits.memory 를 바꾸면 여기도 같이 바꿔야 한다(compose.prod.6gb.yaml 은 2g 다).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 76
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "힙 상한.*|컨테이너 한도.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})",
+          "legendFormat": "힙"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(jvm_memory_used_bytes{area=\"nonheap\"})",
+          "legendFormat": "논힙"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(jvm_buffer_memory_used_bytes{id=\"direct\"})",
+          "legendFormat": "다이렉트 버퍼"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(jvm_memory_used_bytes) + sum(jvm_buffer_memory_used_bytes{id=\"direct\"})",
+          "legendFormat": "JVM 합계 (native 제외)"
+        },
+        {
+          "refId": "E",
+          "expr": "sum(jvm_memory_max_bytes{area=\"heap\"} > 0)",
+          "legendFormat": "힙 상한 (MaxRAMPercentage=70)"
+        },
+        {
+          "refId": "F",
+          "expr": "4 * 1024 * 1024 * 1024",
+          "legendFormat": "컨테이너 한도 (4 GiB)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "논힙 영역별 분해 (Metaspace · CodeCache · ClassSpace)",
+      "description": "논힙이 커질 때 어디가 커지는지 가른다. Metaspace 는 상한이 없다(Dockerfile 에 -XX:MaxMetaspaceSize 가 없다) — 클래스 로딩이 새면 이 선만 단조 증가하고 힙은 끝까지 평온하며, 결국 컨테이너가 죽는다. 진단 가능한 `OutOfMemoryError: Metaspace` 가 아니라 조용한 exit 137 로 나타나는 이유가 이것이다. CodeHeap 세 개는 JIT 결과물이고 합쳐 240MB(ReservedCodeCacheSize 기본값)에서 멈춘다 — 상한에 닿으면 JIT 가 컴파일된 코드를 버리기 시작해 지연이 서서히 나빠지는데, 이때 GC 지표는 아무것도 말해주지 않는다. Compressed Class Space 는 1GB 를 예약하지만 커밋한 만큼만 RSS 에 든다 — 예약과 실사용을 혼동하면 메모리 예산을 잘못 계산한다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 76
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (id) (jvm_memory_used_bytes{area=\"nonheap\"})",
+          "legendFormat": "{{id}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "다이렉트 버퍼 (off-heap, Netty)",
+      "description": "gRPC(Netty)가 힙 밖에 잡는 메모리. 이 서비스는 server streaming 을 제공하므로(datapane_stream_* 참고) 장기 연결이 쌓이면 pooled ByteBuf 가 여기서 자라는데, 힙에는 흔적이 남지 않는다. `-XX:MaxDirectMemorySize` 가 설정돼 있지 않으면 기본값이 Xmx 와 같아서 이론상 힙과 같은 크기를 한 번 더 잡을 수 있다 — 컨테이너 한도가 힙의 1.4 배뿐인 이 구성에서는 그 전에 OOM-kill 이 온다. 두 선을 같이 보는 이유: used 만 오르면 실제 사용이고, capacity 가 used 보다 크게 벌어지면 풀이 잡아둔 채 쓰지 않는 것이며(반환되지 않는 버퍼), 둘이 나란히 우상향하면 누수다. 정상이라면 동시 스트림 수에 비례해 계단처럼 오르고 연결이 끊기면 내려온다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 84
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(jvm_buffer_memory_used_bytes{id=\"direct\"})",
+          "legendFormat": "used"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(jvm_buffer_total_capacity_bytes{id=\"direct\"})",
+          "legendFormat": "capacity"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "GC 정지시간 vs gRPC 지연 SLO 예산 (s)",
+      "description": "GC 정지가 지연 예산을 얼마나 먹는지 한 화면에서 본다. 데이터플레인 지연 SLO 는 99% 를 500ms 이내이고(slo-rules.yml), G1 의 기본 목표 정지는 200ms 다 — 정지 하나가 예산의 40% 를 쓴다는 뜻이다. availableProcessors 가 2 이므로 ConcGCThreads 는 1 이고, concurrent mark 가 도는 동안 앱이 실제로 쓸 수 있는 코어는 하나다. 그래서 이 패널이 나빠질 때 힙을 늘리는 것이 답이 아닐 수 있다: 힙 상한이 실사용의 수십 배로 잡혀 있으면 스캔할 region 과 마크 비트맵이 늘어 정지가 오히려 길어진다. 최대선이 500ms 점선에 접근하면 '데이터 플레인 지연 — 창별 소진율' 패널이 뒤따라 오른다 — 순서가 그 반대라면 원인은 GC 가 아니다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 84
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "지연 SLO 임계.*|G1 목표 정지.*"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(jvm_gc_pause_seconds_sum[5m])) / sum(rate(jvm_gc_pause_seconds_count[5m]))",
+          "legendFormat": "평균 정지"
+        },
+        {
+          "refId": "B",
+          "expr": "max(jvm_gc_pause_seconds_max)",
+          "legendFormat": "최대 정지"
+        },
+        {
+          "refId": "C",
+          "expr": "0.5",
+          "legendFormat": "지연 SLO 임계 (500ms)"
+        },
+        {
+          "refId": "D",
+          "expr": "0.2",
+          "legendFormat": "G1 목표 정지 (MaxGCPauseMillis 기본 200ms)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "GC 오버헤드 · GC 후 잔존 힙",
+      "description": "두 선이 서로 다른 사고를 가리킨다. GC 오버헤드는 CPU 를 GC 에 쓰는 비율이고, 2 코어에서는 이것이 곧 앱이 못 쓰는 코어다 — 몇 % 만 넘어도 처리량이 눈에 보이게 꺾이며, 이때 지연은 코드가 느려서가 아니라 CPU 를 빼앗겨서 나빠진다. 'GC 후 잔존 힙'은 GC 직후에도 남아 있는 old gen 비율로, 진짜 누수와 단순한 트래픽 증가를 가르는 유일한 지표다: 트래픽이 오르면 힙 사용량은 오르지만 잔존율은 제자리이고, 누수라면 트래픽과 무관하게 잔존율이 단조 증가한다. 힙 사용량 그래프만으로는 이 둘을 절대 구분할 수 없다 — 톱니의 바닥이 올라가는지를 봐야 하고, 그것이 바로 이 선이다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 92
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "jvm_gc_overhead",
+          "legendFormat": "GC 오버헤드"
+        },
+        {
+          "refId": "B",
+          "expr": "max(jvm_memory_usage_after_gc)",
+          "legendFormat": "GC 후 잔존 힙"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "힙 할당 · 승격률 (bytes/s)",
+      "description": "정지시간의 원인을 한 단계 앞에서 본다. 할당률이 높으면 young GC 가 잦아지고(그 빈도가 곧 정지시간 패널의 분모다), 승격률이 높으면 객체가 old gen 으로 넘어가 결국 더 무거운 GC 를 부른다. 승격률이 0 에 가까운 것이 건강한 상태다 — 요청 단위로 만든 객체가 young 에서 다 죽는다는 뜻이다. 승격률이 오르기 시작하면 요청 범위를 벗어나 살아남는 객체가 생긴 것이고, 캐시·리스너·스트림 구독처럼 참조를 붙잡는 코드를 의심한다. 할당률만 높고 승격률이 0 이면 GC 는 잦아도 건강하므로, 줄일 대상은 힙 크기가 아니라 요청당 할당량이다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 92
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(jvm_gc_memory_allocated_bytes_total[5m])",
+          "legendFormat": "할당률"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(jvm_gc_memory_promoted_bytes_total[5m])",
+          "legendFormat": "승격률 (old gen 유입)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "스레드 (상태별)",
+      "description": "스레드 누수와 락 경쟁을 가른다. live 가 단조 증가하면 누수이고, 스레드 하나당 스택으로 약 1MB 의 RSS 가 따라오므로 '컨테이너 메모리 예산' 패널에도 같이 나타난다 — 두 패널이 함께 오르면 원인이 스레드라는 뜻이다. blocked 가 쌓이면 락 경쟁이고, 이때 CPU 는 오히려 한가하다. 2 코어이므로 runnable 이 2 를 크게 넘으면 실행 대기가 생긴 것이고, 그 지연의 원인은 GC 도 DB 도 아닌 CPU 포화다 — 아래 'CPU 포화도' 패널과 같이 읽는다. peak 는 리셋되지 않으므로 live 와 벌어진 폭이 과거 최대 부하의 흔적으로 남는다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 100
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "jvm_threads_live_threads",
+          "legendFormat": "live"
+        },
+        {
+          "refId": "B",
+          "expr": "jvm_threads_daemon_threads",
+          "legendFormat": "daemon"
+        },
+        {
+          "refId": "C",
+          "expr": "jvm_threads_peak_threads",
+          "legendFormat": "peak"
+        },
+        {
+          "refId": "D",
+          "expr": "sum by (state) (jvm_threads_states_threads)",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU 포화도 (2 OCPU 정규화)",
+      "description": "이 호스트는 A1 무료 한도인 2 OCPU 로 고정돼 있고 수직 확장이 불가능하다 — 코어를 늘리면 월 1,500 OCPU-시간 한도를 넘겨 과금된다(2 × 24 × 31 = 1,488). 그래서 포화 여부가 다른 어떤 지표보다 먼저 천장을 알려준다. 세 선의 층이 다르다: 프로세스 CPU 는 JVM 만이고, 시스템 CPU 는 같은 2 코어에서 도는 나머지 컨테이너(Postgres·Caddy·Grafana·Prometheus)까지 포함하며, 정규화 로드는 실행 대기까지 센다 — 1.0(=100%) 을 넘으면 CPU 가 부족한 것이지 코드가 느린 것이 아니다. 여기에 GC 오버헤드가 더해진다는 점을 잊지 않는다: GC 가 쓰는 CPU 도 앱이 못 쓰는 CPU 다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 100
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "system_cpu_usage",
+          "legendFormat": "시스템 CPU (호스트 전체)"
+        },
+        {
+          "refId": "B",
+          "expr": "process_cpu_usage",
+          "legendFormat": "프로세스 CPU (JVM)"
+        },
+        {
+          "refId": "C",
+          "expr": "system_load_average_1m / system_cpu_count",
+          "legendFormat": "정규화 로드 (1m / 코어수)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "클래스 로딩 — Metaspace 누수 조기신호",
+      "description": "로드된 클래스 수가 평형에 도달하는지 본다. 기동 후 몇 분이면 평평해지는 것이 정상이고, 계속 우상향하면 클래스로더가 새는 것이다 — 리플렉션·동적 프록시·반복되는 컨텍스트 리프레시가 흔한 원인이다. Metaspace 에 상한이 없으므로(위 '논힙 영역별 분해' 참고) 이 누수는 힙 지표에 전혀 나타나지 않고 컨테이너 OOM-kill 로만 드러난다. 결정적 신호는 조합이다: 언로드가 0 인 채 로드만 늘어나면 GC 가 클래스로더를 회수하지 못한다는 뜻이고, 로드와 언로드가 함께 움직이면 정상적인 순환이다. 이 패널이 우상향하는 동안 '논힙 영역별 분해'의 Metaspace 선도 같이 올라야 앞뒤가 맞는다 — 한쪽만 오르면 계측을 먼저 의심한다.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 108
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "jvm_classes_loaded_classes",
+          "legendFormat": "로드된 클래스"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(jvm_classes_unloaded_classes_total[5m]) * 60",
+          "legendFormat": "분당 언로드"
+        }
+      ]
     }
   ]
 }
