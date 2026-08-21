@@ -112,9 +112,15 @@
         색을 낮춰 두는 이유: 대부분의 경우 정답은 여전히 "잠시 뒤 다시 시도"다. 이 링크가 주 CTA 와
         같은 무게로 보이면 몇 초만 기다리면 될 사람을 밖으로 내보낸다.
 
-        오리진을 리터럴로 적는다: 이 파일은 Caddy 가 정적으로 서빙하므로 빌드도 환경변수 치환도 없다.
-        `{{...}}` 는 Caddy 플레이스홀더로 해석되므로 템플릿 변수도 쓸 수 없다. apex 가 바뀌면 여기와
+        오리진을 리터럴로 적는다: 이 파일에는 빌드도 환경변수 치환도 없다. apex 가 바뀌면 여기와
         `dashboard/lib/site.ts` 의 기본값을 함께 고쳐야 한다.
+
+        ⚠️ 이 파일 안에서는 템플릿 액션 표기(여는 중괄호 두 개)를 **예시로도 적지 말 것.**
+        Caddyfile 의 origin_down 스니펫이 이 파일을 `templates` 로 서빙하므로 파일 전체가 Go 템플릿이고,
+        파서는 HTML 주석인지 CSS 코멘트인지 구분하지 않는다. 문법에 맞지 않는 예시 하나가 **페이지 전체를
+        HTTP 500 으로** 만들고, 그 500 은 오리진이 실제로 죽은 순간에만 드러난다 — 이 페이지가 존재해야
+        하는 바로 그 순간에만 없는 것이다. 실제로 그렇게 깨져 있었다(이 커밋 이전).
+        플레이스홀더가 필요하면 아래 오류 코드 출력처럼 문법에 맞게 쓴다.
       */
       .cta-secondary {
         margin-left: 8px;
@@ -152,8 +158,9 @@
         A deploy or restart may be in progress. Your data is untouched — please try again in a moment.
       </p>
 
-      <!-- 요청 경로를 되돌려 주지 않는다: `{{placeholder "http.request.uri"}}` 를 본문에 심으면 공격자가
-           만든 URL 이 그대로 반사돼 XSS 가 된다(Caddy 는 이스케이프하지 않는다). 항상 루트로 보낸다. -->
+      <!-- 요청 경로를 되돌려 주지 않는다: 요청 URI 플레이스홀더를 본문에 심으면 공격자가 만든 URL 이
+           그대로 반사돼 XSS 가 된다(Caddy 의 templates 는 이스케이프하지 않는다). 항상 루트로 보낸다.
+           표기를 예시로 적지 않는 이유는 위 ⚠️ 를 참고 — 적어 두면 이 주석 안에서 실제로 치환된다. -->
       <a class="cta" href="/">다시 시도 · Try again</a>
       <a class="cta cta-secondary" href="https://poolroost.com">poolroost.com · 서비스 소개</a>
 
