@@ -323,8 +323,36 @@ if [ -z "$ENV_CERT" ]; then
 elif [ ! -f "$REPO_DIR/.env" ]; then
 	log "warn: $REPO_DIR/.env 가 없어 .env 백업을 건너뛴다"
 else
-	[ -f "$ENV_CERT" ] || die "OFFSITE_ENV_CERT 가 가리키는 인증서가 없다: $ENV_CERT"
 	command -v openssl > /dev/null 2>&1 || die "openssl 이 없다 — .env 를 평문으로 올리는 대신 실패한다"
+
+	# **수신자를 여러 명 둘 수 있다.** OFFSITE_ENV_CERT 를 콜론으로 구분하면(PATH 관례) CMS
+	# EnvelopedData 에 recipientInfo 가 여러 개 들어가고, 각 개인키가 **독립적으로** 복호화한다.
+	# 운영자 머신이 둘 이상일 때(회사 PC·집 PC) 개인키를 복사해 다니지 않는 유일한 방법이다 —
+	# 개인키가 이동하면 사본이 늘어나고, 한 대가 침해되면 전부 재발급해야 한다.
+	#
+	# ⚠️ 인증서를 **한 파일에 이어붙이는 방식은 동작하지 않는다.** openssl 은 각 인증서 인자에서
+	# 첫 번째 것만 읽으므로 두 번째 수신자가 **조용히 빠진다** — 암호화는 성공하고 파일도 정상
+	# CMS 라서 사고를 알아챌 방법이 없다. 실측했다: `cat a.crt b.crt > both.pem` 으로 암호화하면
+	# a 의 키로는 복호화되고 b 의 키로는 실패한다. 그래서 파일을 나누고 인자를 여러 개 넘긴다.
+	ENV_CERTS=()
+	while IFS= read -r _c; do
+		[ -n "$_c" ] || continue
+		[ -f "$_c" ] || die "OFFSITE_ENV_CERT 가 가리키는 인증서가 없다: $_c"
+		# 인증서로 파싱되는지까지 본다. 개인키를 잘못 넣으면 openssl 이 그것도 받아들여
+		# **복호화 수단이 서버에 있는 상태**가 되는데, 그건 이 설계의 전제를 깨는 사고다.
+		openssl x509 -in "$_c" -noout > /dev/null 2>&1 \
+			|| die "인증서로 파싱되지 않는다(개인키를 준 것은 아닌지 확인한다): $_c"
+		openssl x509 -in "$_c" -noout -checkend 0 > /dev/null 2>&1 \
+			|| log "warn: 인증서가 만료됐다 — 암호화는 되지만 복원 시점에 곤란하다: $_c"
+		ENV_CERTS+=("$_c")
+	done < <(printf '%s\n' "$ENV_CERT" | tr ':' '\n')
+	[ "${#ENV_CERTS[@]}" -gt 0 ] || die "OFFSITE_ENV_CERT 에서 사용할 인증서를 찾지 못했다: $ENV_CERT"
+	log ".env 암호화 수신자 ${#ENV_CERTS[@]} 명: $(
+		for _c in "${ENV_CERTS[@]}"; do
+			printf '%s(%s) ' "$(basename "$_c")" \
+				"$(openssl x509 -in "$_c" -noout -fingerprint -sha256 2> /dev/null | cut -d= -f2 | cut -c1-11)"
+		done
+	)"
 
 	# 이름에 내용 해시를 넣는다. `.env` 는 거의 바뀌지 않으므로 **서로 다른 내용당 객체 하나**만 쌓이고,
 	# 같은 내용을 매일 다시 올리지 않는다(원격 크기 비교 한 번으로 끝난다). openssl dgst 를 쓰는 이유는
@@ -334,8 +362,17 @@ else
 
 	tmp_env="$(mktemp)"
 	openssl smime -encrypt -aes-256-cbc -binary -outform DER \
-		-in "$REPO_DIR/.env" -out "$tmp_env" "$ENV_CERT" \
+		-in "$REPO_DIR/.env" -out "$tmp_env" "${ENV_CERTS[@]}" \
 		|| { rm -f "$tmp_env"; die ".env 암호화 실패 (인증서를 확인한다: $ENV_CERT)"; }
+
+	# 수신자 수가 인증서 수와 맞는지 확인한다. 위 ⚠️ 의 사고(수신자가 조용히 빠짐)를 여기서 잡는다 —
+	# 개인키가 없는 이 호스트가 할 수 있는 유일한 검증이고, 복원 시점에 "이 키로는 안 열린다" 를
+	# 발견하는 것보다 낫다.
+	_rcpt="$(openssl cms -inform DER -cmsout -print -in "$tmp_env" 2> /dev/null | grep -c 'd.issuerAndSerialNumber')"
+	if [ "$_rcpt" -ne "${#ENV_CERTS[@]}" ]; then
+		rm -f "$tmp_env"
+		die ".env 암호문의 수신자가 ${_rcpt} 명인데 인증서는 ${#ENV_CERTS[@]} 개다 — 일부 키로 복호화되지 않는다"
+	fi
 
 	# 평문이 그대로 올라가는 사고를 막는 마지막 관문. 이 검사가 없으면 openssl 이 버전·옵션 차이로 다른
 	# 것을 내놨을 때 **시크릿을 평문으로 버킷에 올리게 된다.**
