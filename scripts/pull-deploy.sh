@@ -164,6 +164,17 @@ caddy_serving() {
 	return 1
 }
 
+# Caddy 가 죽은 채로 배포를 끝내지 않는다. **로그를 여기서 찍는다** — 이 스크립트는 systemd 가 무인으로
+# 돌리므로 운영자가 보는 것은 journal 뿐이고, "이 명령을 실행하라" 는 안내는 그 순간에 아무도 읽지
+# 않는다. 실패 지점 바로 옆에 기동 로그가 있어야 원인이 한 번에 보인다.
+caddy_down_die() {
+	local name=$1 why=$2
+	printf '%s ── %s 의 최근 로그 ──\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$name" >&2
+	# docker logs 는 stdout·stderr 로 나뉘어 나온다. stdout 만 stderr 로 돌리면 둘 다 stderr 에 모인다.
+	"${DOCKER[@]}" logs --tail 50 "$name" >&2 || printf '  (로그를 읽을 수 없다)\n' >&2
+	die "$why — **공개 진입점이 죽었다**"
+}
+
 # Caddy 설정 반영.
 #
 # Caddyfile 은 **단일 파일 바인드 마운트**다. 그리고 `git reset --hard` 는 파일을 in-place 로 고치지 않고
@@ -240,10 +251,10 @@ reload_caddy() {
 		# 시도하지 않는 이유 — `restart: unless-stopped` 는 스스로 죽은 컨테이너에만 적용되고 수동
 		# 중지 뒤에는 개입하지 않으므로, 여기서 되살릴 수 있는 것이 있다면 `docker start` 뿐인데 기동에
 		# 실패한 원인은 그대로다. 반복 시도보다 사람이 로그를 보는 편이 빠르다.
-		die "Caddy 가 재시작 후 올라오지 않았다 — **공개 진입점이 죽었다**. 즉시 확인: ${DOCKER[*]} logs --tail 50 $name"
+		caddy_down_die "$name" "Caddy 가 재시작 후 올라오지 않았다"
 	fi
 	if ! caddy_serving "$name"; then
-		die "Caddy 가 재시작 후 서빙하지 않는다 — **공개 진입점이 죽었다**. 즉시 확인: ${DOCKER[*]} logs --tail 50 $name"
+		caddy_down_die "$name" "Caddy 가 재시작 후 서빙하지 않는다"
 	fi
 	log "Caddy 재시작 완료 — 서빙 확인"
 }
