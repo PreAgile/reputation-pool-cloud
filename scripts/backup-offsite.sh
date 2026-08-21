@@ -323,8 +323,52 @@ if [ -z "$ENV_CERT" ]; then
 elif [ ! -f "$REPO_DIR/.env" ]; then
 	log "warn: $REPO_DIR/.env 가 없어 .env 백업을 건너뛴다"
 else
-	[ -f "$ENV_CERT" ] || die "OFFSITE_ENV_CERT 가 가리키는 인증서가 없다: $ENV_CERT"
 	command -v openssl > /dev/null 2>&1 || die "openssl 이 없다 — .env 를 평문으로 올리는 대신 실패한다"
+
+	# **수신자를 여러 명 둘 수 있다.** OFFSITE_ENV_CERT 를 콜론으로 구분하면(PATH 관례) CMS
+	# EnvelopedData 에 recipientInfo 가 여러 개 들어가고, 각 개인키가 **독립적으로** 복호화한다.
+	# 운영자 머신이 둘 이상일 때(회사 PC·집 PC) 개인키를 복사해 다니지 않는 유일한 방법이다 —
+	# 개인키가 이동하면 사본이 늘어나고, 한 대가 침해되면 전부 재발급해야 한다.
+	#
+	# ⚠️ 인증서를 **한 파일에 이어붙이는 방식은 동작하지 않는다.** openssl 은 각 인증서 인자에서
+	# 첫 번째 것만 읽으므로 두 번째 수신자가 **조용히 빠진다** — 암호화는 성공하고 파일도 정상
+	# CMS 라서 사고를 알아챌 방법이 없다. 실측했다: `cat a.crt b.crt > both.pem` 으로 암호화하면
+	# a 의 키로는 복호화되고 b 의 키로는 실패한다. 그래서 파일을 나누고 인자를 여러 개 넘긴다.
+	ENV_CERTS=()
+	while IFS= read -r _c; do
+		[ -n "$_c" ] || continue
+		[ -f "$_c" ] || die "OFFSITE_ENV_CERT 가 가리키는 인증서가 없다: $_c"
+		# **파일당 PEM 객체는 정확히 하나, 그리고 그것이 인증서여야 한다.**
+		#
+		# `openssl x509 -noout` 만으로는 부족하다 — 그것은 첫 PEM 객체만 읽으므로 뒤에 무엇이 붙어
+		# 있든 통과한다. 그래서 두 사고가 검사를 그대로 지나간다:
+		#
+		#   1. `cat a.crt b.crt > both.pem` — 첫 인증서만 수신자가 되고 두 번째가 조용히 빠진다.
+		#      아래 수신자 수 검사도 이것을 잡지 못한다: 그 검사는 **경로 개수**와 비교하므로
+		#      경로 1개 / 수신자 1명으로 일치해 버린다. 즉 이 검사가 유일한 방어선이다.
+		#   2. 인증서 뒤에 개인키가 붙은 파일 — 통과하고, 그러면 **복호화 수단이 서버에 남는다.**
+		#      이 설계의 전제("이 호스트는 자기가 올린 것을 스스로 읽을 수 없다")가 깨진다.
+		#
+		# 그래서 PEM 블록을 세고 종류를 확인한다. DER 인증서는 여기서 거부되는데 의도한 것이다 —
+		# `openssl smime -encrypt` 의 인증서 인자는 PEM 을 기대하고, §8-1 의 절차도 PEM 을 만든다.
+		# `:-0` 인 이유: 이진 파일(DER)에서는 grep 이 개수를 내지 않고 빈 문자열이 되는 구현이 있다.
+		# 그러면 아래 비교가 빈 값으로 돌아 에러 메시지가 "PEM 블록 개수" 를 비워 두게 된다.
+		_n_pem="$(grep -c '^-----BEGIN ' "$_c" 2> /dev/null || true)"; _n_pem="${_n_pem:-0}"
+		_n_crt="$(grep -c '^-----BEGIN CERTIFICATE-----' "$_c" 2> /dev/null || true)"; _n_crt="${_n_crt:-0}"
+		[ "$_n_pem" = 1 ] && [ "$_n_crt" = 1 ] || die "인증서 파일에는 PEM 인증서 블록이 **정확히 하나**만 있어야 한다 (발견: PEM 블록 ${_n_pem}개 중 인증서 ${_n_crt}개) — 여러 수신자는 파일을 나눠 콜론으로 나열한다, 개인키는 서버에 두지 않는다: $_c"
+		openssl x509 -in "$_c" -noout > /dev/null 2>&1 \
+			|| die "인증서로 파싱되지 않는다: $_c"
+		openssl x509 -in "$_c" -noout -checkend 0 > /dev/null 2>&1 \
+			|| log "warn: 인증서가 만료됐다 — 암호화는 되지만 복원 시점에 곤란하다: $_c"
+		ENV_CERTS+=("$_c")
+	done < <(printf '%s\n' "$ENV_CERT" | tr ':' '\n')
+	[ "${#ENV_CERTS[@]}" -gt 0 ] || die "OFFSITE_ENV_CERT 에서 사용할 인증서를 찾지 못했다: $ENV_CERT"
+	log ".env 암호화 수신자 ${#ENV_CERTS[@]} 명: $(
+		for _c in "${ENV_CERTS[@]}"; do
+			printf '%s(%s) ' "$(basename "$_c")" \
+				"$(openssl x509 -in "$_c" -noout -fingerprint -sha256 2> /dev/null | cut -d= -f2 | cut -c1-11)"
+		done
+	)"
 
 	# 이름에 내용 해시를 넣는다. `.env` 는 거의 바뀌지 않으므로 **서로 다른 내용당 객체 하나**만 쌓이고,
 	# 같은 내용을 매일 다시 올리지 않는다(원격 크기 비교 한 번으로 끝난다). openssl dgst 를 쓰는 이유는
@@ -334,8 +378,20 @@ else
 
 	tmp_env="$(mktemp)"
 	openssl smime -encrypt -aes-256-cbc -binary -outform DER \
-		-in "$REPO_DIR/.env" -out "$tmp_env" "$ENV_CERT" \
+		-in "$REPO_DIR/.env" -out "$tmp_env" "${ENV_CERTS[@]}" \
 		|| { rm -f "$tmp_env"; die ".env 암호화 실패 (인증서를 확인한다: $ENV_CERT)"; }
+
+	# 수신자 수가 인증서 **경로** 수와 맞는지 확인한다.
+	#
+	# 이것이 잡는 것과 잡지 못하는 것을 분명히 해 둔다. 이어붙인 파일은 **잡지 못한다** — 경로 1개 /
+	# 수신자 1명으로 일치하기 때문이고, 그건 위 PEM 블록 개수 검사가 담당한다. 여기서 잡는 것은
+	# openssl 이 어떤 이유로든(버전 차이·인자 처리 변경·잘린 출력) 준 인증서 수보다 적은 수신자를
+	# 넣은 경우다. 복원 시점에 "이 키로는 안 열린다" 를 발견하는 것보다 낫다.
+	_rcpt="$(openssl cms -inform DER -cmsout -print -in "$tmp_env" 2> /dev/null | grep -c 'd.issuerAndSerialNumber')"
+	if [ "$_rcpt" -ne "${#ENV_CERTS[@]}" ]; then
+		rm -f "$tmp_env"
+		die ".env 암호문의 수신자가 ${_rcpt} 명인데 인증서는 ${#ENV_CERTS[@]} 개다 — 일부 키로 복호화되지 않는다"
+	fi
 
 	# 평문이 그대로 올라가는 사고를 막는 마지막 관문. 이 검사가 없으면 openssl 이 버전·옵션 차이로 다른
 	# 것을 내놨을 때 **시크릿을 평문으로 버킷에 올리게 된다.**

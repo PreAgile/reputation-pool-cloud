@@ -710,6 +710,45 @@ ssh <서버> 'echo OFFSITE_ENV_CERT=$HOME/.rp-backup-cert.pem >> ~/.rp-backup.en
 
 > `OFFSITE_ENV_CERT` 를 설정하지 않으면 스크립트가 매 실행마다 경고를 남긴다(조용히 건너뛰지 않는다).
 
+##### 운영자 머신이 둘 이상일 때 — 수신자를 여러 명 둔다
+
+회사 PC 와 집 PC 에서 모두 복원할 수 있어야 한다면, **개인키를 복사해 다니지 않는다.** 사본이 늘어나고
+한 대가 침해되면 전부 재발급해야 한다. 대신 머신마다 자기 키페어를 만들고 **인증서를 여러 개 등록한다** —
+CMS EnvelopedData 는 수신자를 여러 명 담을 수 있고, 각 개인키가 독립적으로 복호화한다.
+
+```bash
+# 집 PC 에서 (자기 키페어를 만들고, 인증서만 서버로)
+openssl req -x509 -newkey rsa:4096 -sha256 -days 7300 -nodes \
+  -keyout ~/.config/poolroost/rp-backup.key -out ~/.config/poolroost/rp-backup-cert.pem \
+  -subj "/CN=reputation-pool offsite env backup (home)"
+chmod 600 ~/.config/poolroost/rp-backup.key
+ssh <서버> 'cat > ~/.rp-backup-cert-home.pem' < ~/.config/poolroost/rp-backup-cert.pem
+
+# 서버: 콜론으로 구분해 나열한다 (PATH 관례)
+ssh <서버> 'sed -i "s|^OFFSITE_ENV_CERT=.*|OFFSITE_ENV_CERT=$HOME/.rp-backup-cert.pem:$HOME/.rp-backup-cert-home.pem|" ~/.rp-backup.env'
+sudo systemctl start rp-backup-offsite.service   # 새 수신자 구성으로 다시 올린다
+```
+
+> ⚠️ **인증서를 한 파일에 이어붙이면 안 된다.** openssl 은 각 인증서 인자에서 첫 번째 것만 읽으므로
+> 두 번째 수신자가 **조용히 빠진다** — 암호화는 성공하고 결과도 정상 CMS 라서 알아챌 방법이 없고,
+> 복원 시점에 "이 키로는 안 열린다" 로 처음 드러난다. 실측: `cat a.crt b.crt > both.pem` 으로 암호화하면
+> a 의 키로는 열리고 b 의 키로는 실패한다.
+>
+> 그래서 스크립트는 **인증서 파일마다 PEM 블록이 정확히 하나이고 그것이 인증서인지** 확인한다. 이
+> 검사가 이어붙인 파일을 거부하는 유일한 방어선이다 — 암호화 후의 수신자 수 검사로는 잡히지 않는다
+> (경로 1개 / 수신자 1명으로 일치해 버린다). 같은 검사가 **인증서 뒤에 개인키가 붙은 파일**도 거부한다:
+> `openssl x509` 는 첫 블록만 읽으므로 그것만으로는 통과하고, 그러면 복호화 수단이 서버에 남아 이
+> 설계의 전제가 깨진다.
+>
+> 수신자 수 검사는 다른 것을 막는다 — openssl 이 어떤 이유로든(버전 차이·인자 처리 변경) 준 인증서보다
+> 적은 수신자를 넣은 경우다.
+
+**이미 올라간 객체는 소급되지 않는다.** 새 수신자를 추가해도 과거 `.cms` 는 옛 수신자만 담고 있다.
+`.env` 내용이 그대로면 객체 이름(내용 해시)도 그대로여서 재업로드가 일어나지 않으므로, 수신자를 바꾼
+뒤에는 위처럼 **한 번 손으로 돌려** 새 구성의 객체를 만든다(같은 이름을 덮어쓴다).
+
+새 수신자로 실제로 열리는지는 복원 절차를 한 번 돌려 확인한다 — 확인하지 않은 백업은 백업이 아니다.
+
 ##### 개인키 보관 — 이 백업의 단일 실패점
 
 개인키를 잃으면 올려 둔 시크릿을 **영구히 못 읽는다.** 백업의 백업이 필요하다는 뜻이고, **어디에 두면 안
