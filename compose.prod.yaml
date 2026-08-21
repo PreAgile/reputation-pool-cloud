@@ -53,6 +53,31 @@ services:
     build: !reset null
     image: ghcr.io/preagile/reputation-pool-cloud/app:${APP_IMAGE_TAG:-latest}
     logging: *logging
+    # JVM 진단 옵션 — **기본값은 빈 문자열이라 평시 오버헤드가 0 이다.**
+    #
+    # 힙 지표가 정상인데 컨테이너가 `exit 137` 로 죽는 경우(cgroup OOM-kill)를 조사할 때만 켠다. 힙 밖의
+    # 소비자 — Metaspace·CodeCache·다이렉트 버퍼·스레드 스택·GC 구조체·native — 중 어느 쪽이 범인인지는
+    # Micrometer 가 답하지 못한다. 영역별 합계는 대시보드의 'JVM 심층' 섹션이 보여주지만, JVM 이 보고하는
+    # 값의 합과 cgroup 이 보는 RSS 사이의 차이(현재 약 2배)는 NMT 만이 분해할 수 있다.
+    #
+    #   .env 에 한 줄 넣고 app 만 재기동한다.
+    #     JVM_DIAG_OPTS=-XX:NativeMemoryTracking=summary
+    #   docker compose -f compose.yaml -f compose.prod.yaml up -d --force-recreate app
+    #
+    #   기준선을 먼저 남기고, 부하를 걸고, 차이를 본다.
+    #     docker exec reputation-pool-app jcmd 1 VM.native_memory baseline
+    #     docker exec reputation-pool-app jcmd 1 VM.native_memory summary.diff
+    #
+    # 조사 창이 끝나면 그 줄을 지우고 다시 재기동한다 — NMT 는 5~10% 의 CPU·메모리 오버헤드를 쓰고,
+    # 2 OCPU 에서 그것은 무료가 아니다.
+    #
+    # 왜 ENTRYPOINT 가 아니라 JAVA_TOOL_OPTIONS 인가: Dockerfile 의 ENTRYPOINT 를 바꾸면 CI 재빌드와
+    # 이미지 재발행을 거쳐야 한다. 조사 플래그는 켜고 끄는 주기가 짧으므로 이미지에 굽지 않는다.
+    # 단, **이 environment 키의 값이 바뀌면 서비스 정의가 바뀐 것이므로 다음 배포에서 app 컨테이너가
+    # 재생성된다** — 인메모리 풀은 체크포인트에서 복원되지만(Dockerfile 의 ExitOnOutOfMemoryError 주석)
+    # 공짜는 아니다. 껐다 켜는 것을 습관으로 만들지 않는다.
+    environment:
+      JAVA_TOOL_OPTIONS: ${JVM_DIAG_OPTS:-}
     deploy:
       resources:
         limits:
