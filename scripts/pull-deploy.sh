@@ -133,6 +133,78 @@ else
 	die "docker 를 쓸 수 없다 (docker 그룹 또는 비밀번호 없는 sudo 가 필요하다)"
 fi
 
+# Caddy 설정 반영.
+#
+# Caddyfile 은 **단일 파일 바인드 마운트**다. 그리고 `git reset --hard` 는 파일을 in-place 로 고치지 않고
+# 임시 파일에 쓴 뒤 rename 한다 — 즉 **inode 가 바뀐다**(실측: 538278 → 538262). 바인드 마운트는 컨테이너
+# 기동 시점의 inode 에 붙어 있으므로, 그 뒤로 컨테이너는 **지워진 옛 파일**을 계속 본다. 그래서 위
+# reload_monitoring 의 SIGHUP 방식이 여기서는 통하지 않는다: `caddy reload` 도 결국 같은 옛 파일을 다시
+# 읽을 뿐이다. 컨테이너를 재시작하면 Docker 가 경로를 다시 해석해 새 inode 에 붙는다(실측 확인).
+#
+# 이것은 2026-08-06 의 #131 알림 룰이 배포되고도 반영되지 않은 것과 **같은 종류의 함정**이고, 다만
+# 증상이 더 조용하다 — 라우팅이 안 붙으면 새 경로가 404 가 되는데 그것을 "설정을 잘못 썼다" 로 읽게 된다.
+#
+# 매 배포마다 재시작하지는 않는다. reload_monitoring 이 "바뀌었는지 판정하지 않는다" 를 택한 것과 다른
+# 이유가 있다 — SIGHUP 은 재파싱뿐이라 무해하지만 **재시작은 공개 진입점의 순간적인 단절**이라 공짜가
+# 아니다. 대신 판정 근거를 git diff 가 아니라 **실제 서빙 상태**로 둔다: 컨테이너가 들고 있는 파일과
+# 호스트의 파일을 비교한다. 이 판정은 조용히 틀릴 수 없다 — 같으면 반영할 것이 없고, 다르면 반영이
+# 필요하다는 뜻이 정의상 참이다(git 이 무엇을 했는지 추측하지 않는다).
+reload_caddy() {
+	local name=reputation-pool-caddy dest=/etc/caddy/Caddyfile src host_sum ctr_sum
+
+	"${DOCKER[@]}" ps --format '{{.Names}}' | grep -qxF "$name" || {
+		log "warn: $name 이 돌지 않아 Caddy 설정 반영을 건너뛴다"
+		return 0
+	}
+
+	# 마운트 경로를 컨테이너에게 물어본다. 평문 모드는 Caddyfile, TLS 모드는 Caddyfile.prod 를 같은
+	# 목적지에 붙이므로(compose.prod.tls.yaml) 여기서 파일명을 가정하면 한쪽 모드에서 틀린다.
+	src=$("${DOCKER[@]}" inspect -f "{{range .Mounts}}{{if eq .Destination \"$dest\"}}{{.Source}}{{end}}{{end}}" "$name" 2> /dev/null)
+	[ -n "$src" ] && [ -f "$src" ] || {
+		log "warn: Caddyfile 마운트를 찾지 못해 설정 반영을 건너뛴다"
+		return 0
+	}
+
+	host_sum=$(md5sum < "$src" | cut -d' ' -f1)
+	ctr_sum=$("${DOCKER[@]}" exec "$name" md5sum "$dest" 2> /dev/null | cut -d' ' -f1)
+	[ -n "$ctr_sum" ] || {
+		log "warn: 컨테이너의 Caddyfile 을 읽지 못해 설정 반영을 건너뛴다"
+		return 0
+	}
+	if [ "$host_sum" = "$ctr_sum" ]; then
+		log "Caddy 설정 동일 — 재시작하지 않는다"
+		return 0
+	fi
+
+	# **재시작 전에 새 설정을 검증한다.** 잘못된 Caddyfile 로 재시작하면 Caddy 가 기동에 실패하고
+	# `restart: unless-stopped` 가 그것을 무한히 반복해 **공개 진입점이 통째로 죽는다** — 설정이 반영되지
+	# 않는 것보다 비교할 수 없이 나쁘다. CI 가 `caddy validate` 를 이미 돌지만 그것은 머지 시점의 검증이고,
+	# 여기서 막아야 하는 것은 "이 호스트의 이 파일과 이 환경변수" 조합이다(DOMAIN 이 비어 있으면 CI 는
+	# 통과하고 여기서 죽는다).
+	#
+	# 검증을 돌고 있는 컨테이너 안에서 하는 이유: 같은 이미지·같은 환경변수를 그대로 쓰기 때문이다.
+	# 별도 컨테이너로 하면 DOMAIN·ACME_EMAIL·GRPC_DOMAIN 을 다시 조립해야 하고, 그 조립이 틀리면
+	# 검증이 실제 기동과 다른 것을 본다.
+	if "${DOCKER[@]}" cp "$src" "$name":/tmp/Caddyfile.new > /dev/null 2>&1; then
+		if ! "${DOCKER[@]}" exec "$name" caddy validate --config /tmp/Caddyfile.new --adapter caddyfile > /dev/null 2>&1; then
+			"${DOCKER[@]}" exec "$name" rm -f /tmp/Caddyfile.new > /dev/null 2>&1 || true
+			log "warn: 새 Caddyfile 이 검증에 실패했다 — 재시작하지 않고 옛 설정으로 계속 돈다"
+			return 1
+		fi
+		"${DOCKER[@]}" exec "$name" rm -f /tmp/Caddyfile.new > /dev/null 2>&1 || true
+	else
+		log "warn: 새 Caddyfile 을 컨테이너로 복사하지 못해 검증을 건너뛴다 — 재시작하지 않는다"
+		return 1
+	fi
+
+	log "Caddy 설정이 바뀌었다 — 재시작한다 ($ctr_sum -> $host_sum)"
+	"${DOCKER[@]}" restart "$name" > /dev/null 2>&1 || {
+		log "warn: Caddy 재시작 실패 — 옛 설정으로 계속 돈다"
+		return 1
+	}
+	log "Caddy 재시작 완료"
+}
+
 # ---------------------------------------------------------------------------
 # 1. 대상 커밋 결정
 # ---------------------------------------------------------------------------
@@ -163,6 +235,20 @@ fi
 
 if [ "$TARGET" = "$DEPLOYED" ] && [ "$FORCE" != true ]; then
 	log "최신이다 (${DEPLOYED:0:7}) — 배포할 것이 없다"
+	# **배포할 것이 없어도 Caddy 수렴은 확인한다.** 아래 배포 경로의 reload_caddy 만으로는 닿지 않는
+	# 창이 있다: 이 스크립트는 자기 자신을 `git reset --hard` 로 갈아치우므로, reload_caddy 를 도입한
+	# 커밋을 배포하는 그 실행은 **아직 옛 스크립트**다(bash 는 열어둔 inode 를 계속 읽는다). 그 배포가
+	# 끝나면 표식이 새 커밋으로 갱신되어 다음 주기부터는 여기로 빠지고, 그러면 새 Caddyfile 이 영원히
+	# 반영되지 않는다 — 2026-08-21 에 실제로 그렇게 됐다(수동으로 reload_caddy 를 돌려 복구했다).
+	#
+	# 여기에 두면 배포 여부와 무관한 **수렴 루프**가 된다: "돌고 있는 Caddy 가 체크아웃된 Caddyfile 과
+	# 같은가" 를 매 주기 확인하므로, 어떤 경로로 어긋나도 다음 주기에 스스로 낫는다. 비용은 md5 비교
+	# 두 번이라 무시할 수 있고, 같으면 아무것도 하지 않으므로 단절도 없다.
+	#
+	# 여기서는 실패를 전파하지 않는다(`|| true`). 배포 경로와 달리 이 분기는 "아무것도 바꾸지 않았다" 는
+	# 뜻이므로, 반영 실패가 곧 배포 실패는 아니다. 그리고 여기서 die 하면 표식이 이미 최신이라 다음
+	# 주기도 같은 곳에서 죽어 **영구 실패 루프**가 된다 — 경고 로그로 남기는 편이 낫다.
+	reload_caddy || true
 	exit 0
 fi
 
@@ -367,77 +453,6 @@ reload_monitoring() {
 }
 reload_monitoring || true
 
-# Caddy 설정 반영.
-#
-# Caddyfile 은 **단일 파일 바인드 마운트**다. 그리고 `git reset --hard` 는 파일을 in-place 로 고치지 않고
-# 임시 파일에 쓴 뒤 rename 한다 — 즉 **inode 가 바뀐다**(실측: 538278 → 538262). 바인드 마운트는 컨테이너
-# 기동 시점의 inode 에 붙어 있으므로, 그 뒤로 컨테이너는 **지워진 옛 파일**을 계속 본다. 그래서 위
-# reload_monitoring 의 SIGHUP 방식이 여기서는 통하지 않는다: `caddy reload` 도 결국 같은 옛 파일을 다시
-# 읽을 뿐이다. 컨테이너를 재시작하면 Docker 가 경로를 다시 해석해 새 inode 에 붙는다(실측 확인).
-#
-# 이것은 2026-08-06 의 #131 알림 룰이 배포되고도 반영되지 않은 것과 **같은 종류의 함정**이고, 다만
-# 증상이 더 조용하다 — 라우팅이 안 붙으면 새 경로가 404 가 되는데 그것을 "설정을 잘못 썼다" 로 읽게 된다.
-#
-# 매 배포마다 재시작하지는 않는다. reload_monitoring 이 "바뀌었는지 판정하지 않는다" 를 택한 것과 다른
-# 이유가 있다 — SIGHUP 은 재파싱뿐이라 무해하지만 **재시작은 공개 진입점의 순간적인 단절**이라 공짜가
-# 아니다. 대신 판정 근거를 git diff 가 아니라 **실제 서빙 상태**로 둔다: 컨테이너가 들고 있는 파일과
-# 호스트의 파일을 비교한다. 이 판정은 조용히 틀릴 수 없다 — 같으면 반영할 것이 없고, 다르면 반영이
-# 필요하다는 뜻이 정의상 참이다(git 이 무엇을 했는지 추측하지 않는다).
-reload_caddy() {
-	local name=reputation-pool-caddy dest=/etc/caddy/Caddyfile src host_sum ctr_sum
-
-	"${DOCKER[@]}" ps --format '{{.Names}}' | grep -qxF "$name" || {
-		log "warn: $name 이 돌지 않아 Caddy 설정 반영을 건너뛴다"
-		return 0
-	}
-
-	# 마운트 경로를 컨테이너에게 물어본다. 평문 모드는 Caddyfile, TLS 모드는 Caddyfile.prod 를 같은
-	# 목적지에 붙이므로(compose.prod.tls.yaml) 여기서 파일명을 가정하면 한쪽 모드에서 틀린다.
-	src=$("${DOCKER[@]}" inspect -f "{{range .Mounts}}{{if eq .Destination \"$dest\"}}{{.Source}}{{end}}{{end}}" "$name" 2> /dev/null)
-	[ -n "$src" ] && [ -f "$src" ] || {
-		log "warn: Caddyfile 마운트를 찾지 못해 설정 반영을 건너뛴다"
-		return 0
-	}
-
-	host_sum=$(md5sum < "$src" | cut -d' ' -f1)
-	ctr_sum=$("${DOCKER[@]}" exec "$name" md5sum "$dest" 2> /dev/null | cut -d' ' -f1)
-	[ -n "$ctr_sum" ] || {
-		log "warn: 컨테이너의 Caddyfile 을 읽지 못해 설정 반영을 건너뛴다"
-		return 0
-	}
-	if [ "$host_sum" = "$ctr_sum" ]; then
-		log "Caddy 설정 동일 — 재시작하지 않는다"
-		return 0
-	fi
-
-	# **재시작 전에 새 설정을 검증한다.** 잘못된 Caddyfile 로 재시작하면 Caddy 가 기동에 실패하고
-	# `restart: unless-stopped` 가 그것을 무한히 반복해 **공개 진입점이 통째로 죽는다** — 설정이 반영되지
-	# 않는 것보다 비교할 수 없이 나쁘다. CI 가 `caddy validate` 를 이미 돌지만 그것은 머지 시점의 검증이고,
-	# 여기서 막아야 하는 것은 "이 호스트의 이 파일과 이 환경변수" 조합이다(DOMAIN 이 비어 있으면 CI 는
-	# 통과하고 여기서 죽는다).
-	#
-	# 검증을 돌고 있는 컨테이너 안에서 하는 이유: 같은 이미지·같은 환경변수를 그대로 쓰기 때문이다.
-	# 별도 컨테이너로 하면 DOMAIN·ACME_EMAIL·GRPC_DOMAIN 을 다시 조립해야 하고, 그 조립이 틀리면
-	# 검증이 실제 기동과 다른 것을 본다.
-	if "${DOCKER[@]}" cp "$src" "$name":/tmp/Caddyfile.new > /dev/null 2>&1; then
-		if ! "${DOCKER[@]}" exec "$name" caddy validate --config /tmp/Caddyfile.new --adapter caddyfile > /dev/null 2>&1; then
-			"${DOCKER[@]}" exec "$name" rm -f /tmp/Caddyfile.new > /dev/null 2>&1 || true
-			log "warn: 새 Caddyfile 이 검증에 실패했다 — 재시작하지 않고 옛 설정으로 계속 돈다"
-			return 1
-		fi
-		"${DOCKER[@]}" exec "$name" rm -f /tmp/Caddyfile.new > /dev/null 2>&1 || true
-	else
-		log "warn: 새 Caddyfile 을 컨테이너로 복사하지 못해 검증을 건너뛴다 — 재시작하지 않는다"
-		return 1
-	fi
-
-	log "Caddy 설정이 바뀌었다 — 재시작한다 ($ctr_sum -> $host_sum)"
-	"${DOCKER[@]}" restart "$name" > /dev/null 2>&1 || {
-		log "warn: Caddy 재시작 실패 — 옛 설정으로 계속 돈다"
-		return 1
-	}
-	log "Caddy 재시작 완료"
-}
 # **reload_monitoring 과 달리 실패를 배포 실패로 전파한다.** 그쪽은 리로드가 실패해도 Prometheus 가 옛
 # 룰로 계속 돌 뿐이라 관측만 낡고 **서빙은 멀쩡하다**. 여기는 다르다 — 이 배포는 app·grafana 컨테이너를
 # 이미 새 정의로 올렸으므로, Caddy 만 옛 설정으로 남으면 **라우팅이 컨테이너의 기대와 어긋난다.** 실제
