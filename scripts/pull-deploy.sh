@@ -133,6 +133,37 @@ else
 	die "docker 를 쓸 수 없다 (docker 그룹 또는 비밀번호 없는 sudo 가 필요하다)"
 fi
 
+# Caddy 가 재시작 뒤 **실제로 서빙하는지** 확인한다.
+#
+# `docker restart` 는 먼저 중지한다. 기동에 실패하면 Caddy 는 "옛 설정으로 계속 도는" 것이 아니라 **아예
+# 없다** — 공개 진입점이 죽은 것이고, 그 둘을 같은 무게로 로그에 남기면 진단이 정반대로 흐른다. 게다가
+# `docker restart` 가 0 을 돌려주고도 기동 직후 죽는 경우가 있다(validate 가 잡지 못하는 런타임 실패 —
+# 포트 충돌, 인증서 저장소 손상). 그래서 종료코드가 아니라 상태와 응답을 본다.
+#
+# 신호는 **컨테이너 안에서 `:80` 에 대한 HTTP 응답**이다. Caddyfile 전역 블록이 `admin off` 이므로 admin
+# API(:2019)는 쓸 수 없고(그래서 `caddy reload` 도 애초에 선택지가 아니다 — 재시작이 유일한 방법인 이유가
+# 하나 더 있다), HTTPS 는 SNI 를 맞춰야 하는데다 업스트림까지 타므로 app 이 아직 안 떴으면 502 가 되어
+# **Caddy 를 오진한다.** `:80` 의 자동 HTTPS 리다이렉트는 Caddy 가 설정을 싣고 우리 사이트를 알고 있다는
+# 뜻이면서 업스트림에 의존하지 않는다 — 확인하려는 대상이 정확히 Caddy 이므로 이 층이 맞다.
+caddy_serving() {
+	local name=$1 dom code
+	local -a hostarg=()
+	dom=$("${DOCKER[@]}" exec "$name" printenv DOMAIN 2> /dev/null || true)
+	# 평문 모드는 DOMAIN 이 없고 base Caddyfile 의 `:80` 사이트가 아무 호스트에나 응답한다.
+	[ -n "$dom" ] && hostarg=(-H "Host: $dom")
+	for _ in $(seq 1 20); do
+		if [ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$name" 2> /dev/null)" = true ]; then
+			code=$("${DOCKER[@]}" exec "$name" curl -sS -o /dev/null -w '%{http_code}' \
+				--max-time 3 "${hostarg[@]}" http://127.0.0.1/ 2> /dev/null || true)
+			# 코드가 무엇이든(308·200·502) HTTP 응답이 왔다면 Caddy 는 살아서 라우팅하고 있다.
+			# 000 은 연결 자체가 안 된 것이다.
+			[ -n "$code" ] && [ "$code" != 000 ] && return 0
+		fi
+		sleep 1
+	done
+	return 1
+}
+
 # Caddy 설정 반영.
 #
 # Caddyfile 은 **단일 파일 바인드 마운트**다. 그리고 `git reset --hard` 는 파일을 in-place 로 고치지 않고
@@ -198,11 +229,23 @@ reload_caddy() {
 	fi
 
 	log "Caddy 설정이 바뀌었다 — 재시작한다 ($ctr_sum -> $host_sum)"
-	"${DOCKER[@]}" restart "$name" > /dev/null 2>&1 || {
-		log "warn: Caddy 재시작 실패 — 옛 설정으로 계속 돈다"
-		return 1
-	}
-	log "Caddy 재시작 완료"
+	if ! "${DOCKER[@]}" restart "$name" > /dev/null 2>&1; then
+		# 명령이 실패했어도 컨테이너가 서빙 중이면 중지 전에 걸린 것이다 — 반영만 실패했다.
+		if caddy_serving "$name"; then
+			log "warn: Caddy 재시작 명령이 실패했지만 서빙은 계속된다 — 설정이 옛것으로 남았다"
+			return 1
+		fi
+		# **여기는 반영 실패가 아니라 장애다.** `die` 를 쓰는 것은 의도적이다: `exit` 는 `|| true` 로
+		# 잡히지 않으므로, 배포가 없는 주기에서 호출되었더라도 조용히 넘어가지 않는다. 자동 복구를
+		# 시도하지 않는 이유 — `restart: unless-stopped` 는 스스로 죽은 컨테이너에만 적용되고 수동
+		# 중지 뒤에는 개입하지 않으므로, 여기서 되살릴 수 있는 것이 있다면 `docker start` 뿐인데 기동에
+		# 실패한 원인은 그대로다. 반복 시도보다 사람이 로그를 보는 편이 빠르다.
+		die "Caddy 가 재시작 후 올라오지 않았다 — **공개 진입점이 죽었다**. 즉시 확인: ${DOCKER[*]} logs --tail 50 $name"
+	fi
+	if ! caddy_serving "$name"; then
+		die "Caddy 가 재시작 후 서빙하지 않는다 — **공개 진입점이 죽었다**. 즉시 확인: ${DOCKER[*]} logs --tail 50 $name"
+	fi
+	log "Caddy 재시작 완료 — 서빙 확인"
 }
 
 # ---------------------------------------------------------------------------
